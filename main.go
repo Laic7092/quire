@@ -36,6 +36,11 @@ type app struct {
 	file      string
 	startPath string
 
+	// cover is the book's cover image; showCover keeps it in front of page 0
+	// until the reader turns a page.
+	cover     render.ImageID
+	showCover bool
+
 	// Layout job bookkeeping. Only touched on the UI thread.
 	layW, layH float32
 	loading    bool
@@ -49,7 +54,7 @@ type app struct {
 }
 
 func (a *app) view(c *ui.Context) {
-	if a.layout != nil {
+	if a.layout != nil || a.showCover {
 		if c.Shortcut(0, ui.KeyLeft) || c.Shortcut(0, ui.KeyPageUp) {
 			a.turn(-1)
 		}
@@ -70,10 +75,10 @@ func (a *app) view(c *ui.Context) {
 			if ui.Button(c, "打开").Clicked() {
 				go a.chooseFile()
 			}
-			if ui.Button(c, "上一页").Disabled(a.layout == nil || a.page <= 0).Clicked() {
+			if ui.Button(c, "上一页").Disabled(!a.canTurn(-1)).Clicked() {
 				a.turn(-1)
 			}
-			if ui.Button(c, "下一页").Disabled(a.layout == nil || a.page+1 >= a.layout.PageCount()).Clicked() {
+			if ui.Button(c, "下一页").Disabled(!a.canTurn(1)).Clicked() {
 				a.turn(1)
 			}
 			if ui.Button(c, "A-").Label("Smaller").Clicked() {
@@ -89,7 +94,10 @@ func (a *app) view(c *ui.Context) {
 
 		ui.Box(c).Fill().Grow(1).Bind(&a.body).Draw(func(p *ui.Painter, r ui.Rect) {
 			// Draw callbacks may run many times per frame and must not lay
-			// anything out: only replay the current page.
+			// anything out: only replay the current page, or the cover.
+			if a.showCover && a.paint != nil && a.paint.DrawCover(p, a.cover, r, 16) {
+				return
+			}
 			if a.layout == nil || a.paint == nil {
 				return
 			}
@@ -111,6 +119,9 @@ func (a *app) view(c *ui.Context) {
 }
 
 func (a *app) pageLabel() string {
+	if a.showCover {
+		return "封面"
+	}
 	if a.layout == nil {
 		return "— / —"
 	}
@@ -121,7 +132,7 @@ func (a *app) chapterLabel() string {
 	if a.book == nil {
 		return ""
 	}
-	if a.layout == nil {
+	if a.layout == nil || a.showCover {
 		return a.book.Title
 	}
 	i := reader.ChapterOfPage(a.layout, len(a.book.Chapters), a.page)
@@ -131,7 +142,24 @@ func (a *app) chapterLabel() string {
 	return a.book.Chapters[i].Title
 }
 
+// canTurn reports whether turn(delta) would do something.
+func (a *app) canTurn(delta int) bool {
+	if a.showCover {
+		return true
+	}
+	if a.layout == nil {
+		return false
+	}
+	page := a.page + delta
+	return page >= 0 && page < a.layout.PageCount()
+}
+
 func (a *app) turn(delta int) {
+	if a.showCover {
+		// The first turn puts the cover away and keeps the reading position.
+		a.showCover = false
+		return
+	}
 	if a.layout == nil {
 		return
 	}
@@ -190,8 +218,10 @@ func (a *app) ensureLayout(w, h float32) {
 	ctx := context.Background()
 
 	go func() {
+		var images map[render.ImageID]book.Image
+		rebuilt := false
 		if doc == nil || docAt != size {
-			d, err := bookPtr.DocumentSized(size)
+			d, imgs, err := bookPtr.Build(size)
 			if err != nil {
 				win.Update(func() {
 					if job != a.job {
@@ -204,6 +234,8 @@ func (a *app) ensureLayout(w, h float32) {
 				return
 			}
 			doc, docAt = d, size
+			images = imgs
+			rebuilt = true
 		}
 		layout, err := reader.BuildLayout(ctx, doc, fonts, w, h, size)
 		win.Update(func() {
@@ -215,6 +247,12 @@ func (a *app) ensureLayout(w, h float32) {
 				a.failed, a.failW, a.failH, a.failSize = true, w, h, size
 				a.status = "排版失败：" + err.Error()
 				return
+			}
+			// Decoding belongs on the UI thread and happens once per build.
+			if rebuilt && a.paint != nil {
+				for id, img := range images {
+					a.paint.SetImage(id, img.Data)
+				}
 			}
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
@@ -267,6 +305,11 @@ func (a *app) openAsync(path string) {
 		a.loading = false
 		a.failed = false
 		a.book = b
+		a.cover = b.Cover
+		a.showCover = b.HasCover
+		if a.paint != nil {
+			a.paint.ClearImages()
+		}
 		a.doc = nil
 		a.docAt = 0
 		a.layout = nil

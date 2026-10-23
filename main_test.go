@@ -99,3 +99,26 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 		t.Errorf("font size %g after -", a.fontSize)
 	}
 }
+
+// The cover sits in front of page 0: the first turn puts it away and keeps
+// the reading position.
+func TestCoverTurnsAwayWithoutMovingThePage(t *testing.T) {
+	a := &app{showCover: true, page: 3, fontSize: reader.DefaultFontSize}
+	if got := a.pageLabel(); got != "封面" {
+		t.Errorf("page label %q while the cover shows", got)
+	}
+	if !a.canTurn(1) || !a.canTurn(-1) {
+		t.Error("the cover cannot be turned away")
+	}
+	a.turn(1)
+	if a.showCover {
+		t.Error("cover still showing")
+	}
+	if a.page != 3 {
+		t.Errorf("page moved to %d while closing the cover", a.page)
+	}
+	a.turn(1) // no layout yet: must not panic or move the page
+	if a.page != 3 {
+		t.Errorf("page moved to %d without a layout", a.page)
+	}
+}

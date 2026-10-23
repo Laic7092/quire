@@ -1,12 +1,17 @@
 package reader
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/book"
+	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
 
@@ -121,6 +126,82 @@ func TestUIPainterInTester(t *testing.T) {
 	if tt.FramePending() {
 		t.Log("the still page keeps asking for frames")
 	}
+}
+
+// An image the engine placed must reach the native painter, and a page with
+// one image only is enough to see it.
+func TestUIPainterDrawsImages(t *testing.T) {
+	_, fonts := testBookAndFont(t)
+
+	var pic bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for x := 0; x < 4; x++ {
+		for y := 0; y < 4; y++ {
+			img.Set(x, y, color.RGBA{R: 0xff, A: 0xff})
+		}
+	}
+	if err := png.Encode(&pic, img); err != nil {
+		t.Fatal(err)
+	}
+
+	const imageID = render.ImageID(7)
+	builder := render.NewDocumentBuilder().
+		SetStyles([]render.Style{{}, {FontFamily: "book", FontSize: 18}}).
+		SetMetadata(render.Metadata{Reflowable: true})
+	err := builder.AddChapter(render.Chapter{
+		ID:   "c",
+		Root: 0,
+		Nodes: []render.Node{
+			{Kind: render.NodeBlock, Style: 1, Children: []render.NodeID{1}},
+			{Kind: render.NodeImage, Image: imageID, Width: 40, Height: 40},
+		},
+		Anchors: map[render.AnchorID]render.NodeID{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 400, 400, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := layout.Page(0)
+	if page == nil {
+		t.Fatal("no page 0")
+	}
+
+	up := NewUIPainter(nil, fonts)
+	if !up.SetImage(imageID, pic.Bytes()) {
+		t.Fatal("PNG did not decode")
+	}
+	if up.SetImage(imageID+1, []byte("not an image")) {
+		t.Error("garbage decoded as an image")
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+			up.DrawPage(p, page, r)
+		})
+	}, 400, 400)
+	tt.Frame()
+	if !hasRed(tt.Image()) {
+		t.Fatal("the image never reached the painter")
+	}
+}
+
+func hasRed(m *image.RGBA) bool {
+	b := m.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := m.At(x, y).RGBA()
+			if r > 0x8000 && g < 0x3000 && bl < 0x3000 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // recorder implements paint.Painter and counts what a page emits.

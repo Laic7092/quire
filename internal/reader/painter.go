@@ -20,17 +20,77 @@ type UIPainter struct {
 	Face *font.Face
 
 	outlines map[uint32][]font.Segment
+	bitmaps  map[paint.ImageID]*ui.Bitmap
 	dx, dy   float32
 }
 
-// NewUIPainter prepares a painter for one element. The outline cache lives as
-// long as the painter, so keep it for the whole window and reuse it.
+// NewUIPainter prepares a painter for one element. The outline and image
+// caches live as long as the painter, so keep it for the whole window and
+// reuse it. Run the SetImage calls on the UI thread.
 func NewUIPainter(p *ui.Painter, fonts *Fonts) *UIPainter {
-	up := &UIPainter{P: p, outlines: make(map[uint32][]font.Segment)}
+	up := &UIPainter{
+		P:        p,
+		outlines: make(map[uint32][]font.Segment),
+		bitmaps:  make(map[paint.ImageID]*ui.Bitmap),
+	}
 	if fonts != nil {
 		up.Face = fonts.Face
 	}
 	return up
+}
+
+// SetImage decodes data once and keeps the bitmap for id. It reports whether
+// the image decoded; formats beyond PNG, JPEG, GIF, WebP and BMP (SVG, say)
+// are skipped. Call it on the UI thread, after a build produced the bytes.
+func (u *UIPainter) SetImage(id paint.ImageID, data []byte) bool {
+	if u == nil || len(data) == 0 {
+		return false
+	}
+	if _, ok := u.bitmaps[id]; ok {
+		return true
+	}
+	bitmap, err := ui.DecodeBitmap(data)
+	if err != nil {
+		return false
+	}
+	if u.bitmaps == nil {
+		u.bitmaps = make(map[paint.ImageID]*ui.Bitmap)
+	}
+	u.bitmaps[id] = bitmap
+	return true
+}
+
+// ClearImages drops the decoded images, as when another book replaces the
+// current one and the image IDs start over.
+func (u *UIPainter) ClearImages() {
+	if u != nil {
+		u.bitmaps = make(map[paint.ImageID]*ui.Bitmap)
+	}
+}
+
+// Bitmap returns the decoded image for id, or nil. A host that shows a cover
+// outside the page flow draws this bitmap itself.
+func (u *UIPainter) Bitmap(id paint.ImageID) *ui.Bitmap {
+	if u == nil {
+		return nil
+	}
+	return u.bitmaps[id]
+}
+
+// DrawCover fills box with the page colour and shows the cover inside it, at
+// its aspect ratio. It reports whether a cover was available.
+func (u *UIPainter) DrawCover(p *ui.Painter, id paint.ImageID, box ui.Rect, pad float32) bool {
+	bitmap := u.Bitmap(id)
+	if p == nil || bitmap == nil || box.W <= 0 || box.H <= 0 {
+		return false
+	}
+	p.Fill(box, uiColor(Paper), 0)
+	r := ui.Rect{X: box.X + pad, Y: box.Y + pad, W: box.W - 2*pad, H: box.H - 2*pad}
+	if r.W <= 0 || r.H <= 0 {
+		r = box
+	}
+	p.Image(bitmap, r, ui.Contain)
+	return true
 }
 
 // DrawPage replays a page of the render layout into the element at box,
@@ -78,8 +138,18 @@ func (u *UIPainter) FillRoundRect(r paint.Rect, radius float32, c paint.Color) {
 	u.P.Fill(u.rect(r), uiColor(c), radius)
 }
 
-// DrawImage is out of scope: the EPUB importer never emits images.
-func (u *UIPainter) DrawImage(id paint.ImageID, dst paint.Rect, opts paint.ImageOptions) {}
+// DrawImage paints an image the paginator placed. The destination rect is
+// already in page coordinates, scaled and aligned by the engine.
+func (u *UIPainter) DrawImage(id paint.ImageID, dst paint.Rect, _ paint.ImageOptions) {
+	if u.P == nil || dst.Empty() {
+		return
+	}
+	bitmap := u.bitmaps[id]
+	if bitmap == nil {
+		return
+	}
+	u.P.ImageRegion(bitmap, ui.Rect{}, u.rect(dst), ui.ImageOptions{})
+}
 
 func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	if u.P == nil || u.Face == nil || run.Font == nil || len(run.Glyphs) == 0 ||

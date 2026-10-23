@@ -2,16 +2,18 @@
 
 用 MyGo 原生 UI（`package ui`，没有任何 webview / TypeScript 前端）实现的 EPUB
 分页阅读器。断行、分页、行位置和字形位置全部由本地 `github.com/laix/layx`
-的 `render` 引擎产出；本仓库只做三件事：
+的 `render` 引擎产出；本仓库做四件事：
 
 1. `internal/book`：`archive/zip` + `encoding/xml` 解析 EPUB（container.xml →
    OPF → spine），用 `golang.org/x/net/html` 的 tokenizer 把 XHTML 映射成
-   `render.Document` 的最小标签子集。
+   `render.Document` 的最小标签子集，并把图片映射成 `render.NodeImage`。
 2. `internal/reader`：加载字体（`LAYX_FONT` / `-font` / 系统 CJK 字体），调用
    `render.Engine.Layout`，并实现 `paint.Painter`，把 layx 的 `DisplayList`
-   通过 `ui.Painter` / `ui.Path` / `FillPath` 画出来（字形来自 go-text 轮廓）。
+   通过 `ui.Painter` / `ui.Path` / `FillPath` 画出来（字形来自 go-text 轮廓，
+   位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。
 3. `main.go`：一个 `ui.View` 窗口，工具栏（打开 / 上一页 / 下一页 / A- / A+ /
    页码 / 章节名），←/→ 翻页，+/- 改字号，`Window.Update` 发布后台排版结果。
+4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见。
 
 ## 运行
 
@@ -39,10 +41,25 @@ go tool mygo vet .
 `main_test.go` 用 `ui.NewTester` 无头构建视图并验证一页真的进入了原生
 `ui.Painter`。
 
+## 封面与图片
+
+- 封面按 OPF 的顺序发现：`properties="cover-image"` → `<meta name="cover">` →
+  `guide type="cover"` → 首个纯图片章节。纯图片的封面页不进入阅读流，由窗口
+  整页展示；翻页或按 ←/→ 收起封面，阅读位置不变。
+- 正文里的 `<img>` 和封面常见的 `<svg><image xlink:href=…>` 映射成
+  `render.NodeImage`，由 layx 按栏宽缩放、分页；绘制用
+  `ui.DecodeBitmap` + `ui.ImageRegion`，位图按 `ImageID` 缓存到 `UIPainter`。
+- 图片 ID 在 `book.Open` 时按 manifest 顺序分配，读盘延迟到 `book.Build`；
+  字节只对当前文档中真正引用到的图片保留。换书时 UI 侧必须清空位图缓存。
+
 ## 已知限制（本阶段明确不做）
 
-- 不显示 EPUB 内的图片、封面、字体。
-- 没有 CSS 子集：只按标签映射标题、段落、引用、列表、斜体/粗体、换行。
+- 不显示 EPUB 内置字体；图片只支持栅格格式（PNG/JPEG/GIF/WebP/BMP）。
+  SVG 只提取其中嵌入的栅格图；纯矢量封面会留空白占位。
+- 没有 CSS 子集：只按标签映射标题、段落、引用、列表、斜体/粗体、换行，
+  不解析 `<style>`、class 或 `em/%` 单位。
+- 图片没有独立的版面策略：比内容区高的插图会按栏宽缩放后被页底裁切；
+  中间纯图片页不会自动整页居中。
 - 没有脚注、竖排、ruby、搜索、书签、TOC 侧边栏、阅读进度持久化。
 - 只有分页模式，没有滚动模式；没有 wasm / 网页版本。
 - 字体集只有一个字面（face），所以粗体和斜体在当前字体没有对应 face 时
