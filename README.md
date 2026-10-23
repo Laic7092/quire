@@ -41,6 +41,27 @@ go tool mygo vet .
 `main_test.go` 用 `ui.NewTester` 无头构建视图并验证一页真的进入了原生
 `ui.Painter`。
 
+## 真书回归（corpus）
+
+```sh
+go run ./cmd/corpus -dir ~/epub-corpus -v -paint
+```
+
+把目录里每本 EPUB 都走一遍 `book.Open` → `Build` → `Engine.Layout`（默认还有
+`-paint`：每页的 DisplayList 都真的画进一个空 painter），逐本打印页数、耗时和
+**它用了什么、读者表示了没有**。这是给"覆盖面"做的账本，不是基准测试：
+
+- `lost:` 是真正会让人看出差别的东西——表格结构被摊平、`<pre>` 空白被折叠、
+  脚注上标变成普通字符、列表标记没画、链接不可跳转；
+- `unstyled:` 文字还在、样式丢了（`<cite>`、`<small>`、`<ins>`）；
+- `walked:` 是纯容器（`<nav>`、`<header>`、`<footer>`），丢掉的只是标签；
+- 末尾的 corpus-wide 汇总就是"该不该做某个特性"的分母：语料里用时为 0 的构造，
+  不能只因为浏览器支持就排进核心。
+
+`-paint` 会走完绘制路径，所以坏矩形、缺失的字形 run 这类问题在这里就暴露，
+而不是在用户屏幕上。`internal/reader` 的常量在这里有一份副本：这个工具必须
+不依赖 GTK/cgo 就能在无显示环境里跑。
+
 ## 封面与图片
 
 - 封面按 OPF 的顺序发现：`properties="cover-image"` → `<meta name="cover">` →
