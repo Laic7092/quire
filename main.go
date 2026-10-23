@@ -275,8 +275,8 @@ func (a *app) chooseFile() {
 	}
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Parent:  win,
-		Title:   "打开 EPUB",
-		Filters: []mygo.FileFilter{{Name: "EPUB", Extensions: []string{"epub"}}},
+		Title:   "打开 EPUB 或 TXT",
+		Filters: []mygo.FileFilter{{Name: "书籍", Extensions: []string{"epub", "txt"}}},
 	})
 	if err != nil {
 		win.Update(func() { a.status = "打开失败：" + err.Error() })

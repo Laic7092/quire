@@ -209,8 +209,18 @@ func main() {
 	}
 
 	files, err := filepath.Glob(filepath.Join(*dir, "*.epub"))
-	if err != nil || len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "corpus: no .epub files in %s\n", *dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "corpus: %v\n", err)
+		os.Exit(1)
+	}
+	texts, err := filepath.Glob(filepath.Join(*dir, "*.txt"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "corpus: %v\n", err)
+		os.Exit(1)
+	}
+	files = append(files, texts...)
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "corpus: no .epub or .txt files in %s\n", *dir)
 		os.Exit(1)
 	}
 	sort.Strings(files)
@@ -245,19 +255,24 @@ func main() {
 }
 
 func runBook(path string, set *render.FontSet, w, h float32, timeout time.Duration, paintPages bool) (r result) {
-	r.name = strings.TrimSuffix(filepath.Base(path), ".epub")
+	ext := filepath.Ext(path)
+	r.name = filepath.Base(path)
 	if st, err := os.Stat(path); err == nil {
 		r.sizeKB = int(st.Size() / 1024)
 	}
-	if s, err := scanBook(path); err != nil {
-		if st, statErr := os.Stat(path); statErr == nil && time.Since(st.ModTime()) < 10*time.Minute {
-			r.err = fmt.Errorf("scan: %w (file modified %s ago: still downloading?)", err, time.Since(st.ModTime()).Round(time.Second))
+	// Only markup has constructs to lose; a text book is entirely made of
+	// paragraphs, so there is nothing for the ledger to compare.
+	if strings.EqualFold(ext, ".epub") {
+		if s, err := scanBook(path); err != nil {
+			if st, statErr := os.Stat(path); statErr == nil && time.Since(st.ModTime()) < 10*time.Minute {
+				r.err = fmt.Errorf("scan: %w (file modified %s ago: still downloading?)", err, time.Since(st.ModTime()).Round(time.Second))
+			} else {
+				r.err = fmt.Errorf("scan: %w", err)
+			}
+			return r
 		} else {
-			r.err = fmt.Errorf("scan: %w", err)
+			r.tag = s
 		}
-		return r
-	} else {
-		r.tag = s
 	}
 
 	defer func() {

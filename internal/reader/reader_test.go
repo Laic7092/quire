@@ -223,3 +223,33 @@ func (r *recorder) DrawGlyphs(run paint.GlyphRun) {
 	r.runs++
 	r.glyphs += len(run.Glyphs)
 }
+
+// A plain text book goes through exactly the same Chapter → Document → Layout
+// path as an EPUB, which is the point of the host-side Book abstraction.
+func TestTextBookPaginates(t *testing.T) {
+	_, fonts := testBookAndFont(t)
+	b, err := book.Open("../book/testdata/samples/aq-zhuan.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, images, err := b.Build(18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 0 {
+		t.Errorf("text book reported %d images", len(images))
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 420, 560, 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.PageCount() < 5 {
+		t.Errorf("page count %d, want a real book", layout.PageCount())
+	}
+	if got := ChapterOfPage(layout, len(b.Chapters), 0); got != 0 {
+		t.Errorf("chapter of page 0 = %d", got)
+	}
+	if got := ChapterOfPage(layout, len(b.Chapters), layout.PageCount()-1); got < 1 {
+		t.Errorf("chapter of the last page = %d, want a later chapter", got)
+	}
+}

@@ -65,10 +65,10 @@ type Book struct {
 	coverHref string
 }
 
-// Open reads an EPUB file and returns its reading order. The archive stays
-// closed: Book.Build reopens it only when it needs image bytes, so keep the
-// file where it was opened from.
-func Open(file string) (*Book, error) {
+// openEPUB reads an EPUB file and returns its reading order. The archive
+// stays closed: Book.Build reopens it only when it needs image bytes, so keep
+// the file where it was opened from.
+func openEPUB(file string) (*Book, error) {
 	zr, err := zip.OpenReader(file)
 	if err != nil {
 		return nil, fmt.Errorf("book: open %s: %w", file, err)
