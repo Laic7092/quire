@@ -18,11 +18,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -56,6 +58,10 @@ type scan struct {
 	css      counters
 	chapters int
 	bytes    int
+	// sheet is the real CSS ledger: the linked stylesheets, @imports, <style>
+	// blocks and style="" attributes, parsed rather than substring-matched.
+	// css above stays as the crude per-book hint the -v line has always shown.
+	sheet *census
 }
 
 var (
@@ -76,13 +82,18 @@ var (
 	}
 )
 
-func scanBook(path string) (scan, error) {
+func scanBook(bookPath string) (scan, error) {
 	s := scan{tags: counters{}, attrs: counters{}, css: counters{}}
-	zr, err := zip.OpenReader(path)
+	zr, err := zip.OpenReader(bookPath)
 	if err != nil {
 		return s, err
 	}
 	defer zr.Close()
+	// The OPF path is only a fallback base for hrefs that do not resolve
+	// against the document that names them; a book without a readable
+	// package document still gets its markup and CSS counted.
+	css := newCSSBook(zr, readOPFPath(zr))
+	s.sheet = css.c
 	for _, f := range zr.File {
 		name := strings.ToLower(f.Name)
 		if !strings.HasSuffix(name, ".xhtml") && !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".htm") {
@@ -99,12 +110,43 @@ func scanBook(path string) (scan, error) {
 		}
 		s.chapters++
 		s.bytes += len(data)
-		scanMarkup(data, &s)
+		scanMarkup(data, path.Clean(f.Name), &s, css)
 	}
+	css.load()
 	return s, nil
 }
 
-func scanMarkup(data []byte, s *scan) {
+// readOPFPath finds the package document the container names. Any problem is
+// answered with an empty string: it only changes which base a stray href is
+// tried against, never whether a book is counted.
+func readOPFPath(zr *zip.ReadCloser) string {
+	for _, f := range zr.File {
+		if !strings.EqualFold(path.Clean(f.Name), "META-INF/container.xml") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return ""
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return ""
+		}
+		var container struct {
+			Rootfiles []struct {
+				FullPath string `xml:"full-path,attr"`
+			} `xml:"rootfiles>rootfile"`
+		}
+		if err := xml.Unmarshal(data, &container); err != nil || len(container.Rootfiles) == 0 {
+			return ""
+		}
+		return path.Clean(container.Rootfiles[0].FullPath)
+	}
+	return ""
+}
+
+func scanMarkup(data []byte, file string, s *scan, css *cssBook) {
 	z := html.NewTokenizer(bytes.NewReader(data))
 	inStyle := 0
 	var style strings.Builder
@@ -121,20 +163,34 @@ func scanMarkup(data []byte, s *scan) {
 			if tag == "style" {
 				inStyle++
 			}
+			var rel, href string
 			for hasAttr {
 				k, v, more := z.TagAttr()
 				key := string(bytes.ToLower(k))
 				s.attrs.add(key)
-				if key == "style" {
+				switch key {
+				case "style":
 					countCSS(string(v), s)
+					css.attr(string(v))
+				case "rel":
+					rel = string(v)
+				case "href":
+					href = string(v)
 				}
 				hasAttr = more
+			}
+			// A stylesheet link is the part of a book the old census could not
+			// see at all. rel is a space-separated list, so "alternate
+			// stylesheet" counts and "icon" does not.
+			if tag == "link" && href != "" && hasRel(rel, "stylesheet") {
+				css.link(file, href)
 			}
 		case html.EndTagToken:
 			name, _ := z.TagName()
 			if string(bytes.ToLower(name)) == "style" && inStyle > 0 {
 				inStyle--
 				countCSS(style.String(), s)
+				css.inline(file, style.String())
 				style.Reset()
 			}
 		case html.TextToken:
@@ -143,6 +199,16 @@ func scanMarkup(data []byte, s *scan) {
 			}
 		}
 	}
+}
+
+// hasRel reports whether a rel attribute lists name as one of its tokens.
+func hasRel(rel, name string) bool {
+	for _, tok := range strings.Fields(strings.ToLower(rel)) {
+		if tok == name {
+			return true
+		}
+	}
+	return false
 }
 
 // countCSS counts the properties from a fixed vocabulary. A real CSS parser is
@@ -175,6 +241,11 @@ type result struct {
 	ops      int
 	err      error
 	panicky  string
+	// skipped is a book whose archive could not be read at all, usually a
+	// truncated download. It is not a layout failure and must not fail the run;
+	// it is still printed, because a book silently missing from a corpus ledger
+	// would be the one thing worse than a book that fails.
+	skipped string
 	// imageRes is what the adapter handed to the painter; imageNodes is how
 	// often the document actually places one. They differ when a chapter uses
 	// the same asset twice, and a gap between them is worth seeing.
@@ -190,7 +261,25 @@ func main() {
 	verbose := flag.Bool("v", false, "print per-book construct detail")
 	paintPages := flag.Bool("paint", false, "build and draw every page's display list through a null painter (slower, exercises the paint path)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "layout timeout per book")
+	cssOn := flag.Bool("css", true, "print the CSS ledger (linked stylesheets, selectors, at-rules, units)")
+	cssTop := flag.Int("css-top", 12, "rows per CSS table (0 prints every row)")
+	cssOnly := flag.Bool("css-only", false, "only scan markup and CSS: no layout, no font needed (fast)")
+	cssMD := flag.Bool("css-md", false, "print the CSS tables as markdown, for docs/css-census.md")
 	flag.Parse()
+
+	files, err := corpusFiles(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "corpus:", err)
+		os.Exit(1)
+	}
+
+	if *cssOnly {
+		ledger := scanOnly(files, *cssTop, *verbose)
+		if *cssMD {
+			printCSSMarkdown(ledger)
+		}
+		return
+	}
 
 	fontPath, err := findFont(*font)
 	if err != nil {
@@ -208,26 +297,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	files, err := filepath.Glob(filepath.Join(*dir, "*.epub"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "corpus: %v\n", err)
-		os.Exit(1)
-	}
-	texts, err := filepath.Glob(filepath.Join(*dir, "*.txt"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "corpus: %v\n", err)
-		os.Exit(1)
-	}
-	files = append(files, texts...)
-	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "corpus: no .epub or .txt files in %s\n", *dir)
-		os.Exit(1)
-	}
-	sort.Strings(files)
 	fmt.Printf("layx corpus ledger: %d books, font %s, viewport %.0fx%.0f\n\n", len(files), filepath.Base(fontPath), *width, *height)
 	fmt.Printf("%-24s %6s %4s %6s %7s %6s %6s %5s %8s  %s\n",
 		"book", "KB", "ch", "nodes", "chars", "imgs", "pages", "ms", "ms/page", "status")
 
+	cssTotal := newCensus()
 	lossTotals := map[string]int{}
 	var results []result
 	for _, f := range files {
@@ -237,21 +311,86 @@ func main() {
 		if *verbose {
 			printDetail(r)
 		}
-		if r.err == nil && r.panicky == "" {
+		if r.err == nil && r.panicky == "" && r.skipped == "" {
 			if lossy, _, _ := findings(r.tag); len(lossy) > 0 {
 				for _, f := range lossy {
 					lossTotals[f.tag] += f.count
 				}
 			}
+			if r.tag.sheet != nil {
+				cssTotal.merge(r.tag.sheet)
+				cssTotal.books++
+			}
 		}
 	}
 	printTotals(results)
 	printLossTotals(lossTotals)
+	if *cssOn {
+		printCSSLedger(cssTotal, *cssTop)
+	}
+	if *cssMD {
+		printCSSMarkdown(cssTotal)
+	}
 
 	if n := countFailures(results); n > 0 {
 		fmt.Printf("\n%d book(s) did not lay out; see status above\n", n)
 		os.Exit(1)
 	}
+}
+
+// corpusFiles lists what the ledger reads: every EPUB and every plain text
+// book, in a stable order so two runs can be compared.
+func corpusFiles(dir string) ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.epub"))
+	if err != nil {
+		return nil, err
+	}
+	texts, err := filepath.Glob(filepath.Join(dir, "*.txt"))
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, texts...)
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no .epub or .txt files in %s", dir)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// scanOnly is the CSS half of the ledger without the layout half: it opens each
+// archive and reads the markup and the stylesheets, which takes a second for a
+// corpus that takes minutes to lay out. No font is loaded.
+func scanOnly(files []string, top int, verbose bool) *census {
+	total := newCensus()
+	fmt.Printf("layx corpus css ledger (scan only): %d books\n\n", len(files))
+	fmt.Printf("%-26s %4s %7s %6s %6s %7s  %s\n", "book", "ch", "sheets", "inline", "miss", "decls", "props")
+	for _, f := range files {
+		name := filepath.Base(f)
+		if !strings.EqualFold(filepath.Ext(f), ".epub") {
+			continue // a .txt book has no markup and no CSS
+		}
+		s, err := scanBook(f)
+		if err != nil {
+			reason := fmt.Sprintf("scan: %v", err)
+			fmt.Printf("%-26s %s\n", truncate(name, 26), truncate("SKIP: "+reason, 70))
+			continue
+		}
+		c := s.sheet
+		total.merge(c)
+		total.books++
+		fmt.Printf("%-26s %4d %7d %6d %6d %7d  %d\n",
+			truncate(name, 26), s.chapters, c.sheets, c.inline, c.missingN, c.decls, len(c.props))
+		if verbose {
+			if len(c.missing) > 0 {
+				fmt.Printf("    missing: %s\n", strings.Join(uniqSorted(c.missing), " "))
+			}
+			fmt.Printf("    css: %s\n", joinRows(rankRows(c.props), 10, func(r cssRow) string {
+				return fmt.Sprintf("%s=%d", r.name, r.n)
+			}))
+		}
+	}
+	printCSSLedger(total, top)
+	return total
 }
 
 func runBook(path string, set *render.FontSet, w, h float32, timeout time.Duration, paintPages bool) (r result) {
@@ -264,10 +403,12 @@ func runBook(path string, set *render.FontSet, w, h float32, timeout time.Durati
 	// paragraphs, so there is nothing for the ledger to compare.
 	if strings.EqualFold(ext, ".epub") {
 		if s, err := scanBook(path); err != nil {
+			// A corrupt or truncated archive is not a layout failure: there is
+			// nothing to lay out. Record it and move to the next book, so one
+			// half-downloaded file cannot stop the corpus.
+			r.skipped = fmt.Sprintf("scan: %v", err)
 			if st, statErr := os.Stat(path); statErr == nil && time.Since(st.ModTime()) < 10*time.Minute {
-				r.err = fmt.Errorf("scan: %w (file modified %s ago: still downloading?)", err, time.Since(st.ModTime()).Round(time.Second))
-			} else {
-				r.err = fmt.Errorf("scan: %w", err)
+				r.skipped += fmt.Sprintf(" (file modified %s ago: still downloading?)", time.Since(st.ModTime()).Round(time.Second))
 			}
 			return r
 		} else {
@@ -466,6 +607,8 @@ func printRow(r result) {
 	line := fmt.Sprintf("%-24s %6d %4d %6d %7d %6d %6d %5d %8s  ",
 		truncate(r.name, 24), r.sizeKB, r.chapters, r.nodes, r.chars, r.images, r.pages, r.layoutMS, msPerPage(r))
 	switch {
+	case r.skipped != "":
+		line += "SKIP: " + truncate(r.skipped, 60)
 	case r.panicky != "":
 		line += "PANIC: " + truncate(r.panicky, 60)
 	case status != nil:
@@ -484,7 +627,7 @@ func msPerPage(r result) string {
 }
 
 func printDetail(r result) {
-	if r.err != nil || r.panicky != "" {
+	if r.err != nil || r.panicky != "" || r.skipped != "" {
 		return
 	}
 	c := r.tag
@@ -544,6 +687,10 @@ func printDetail(r result) {
 	if len(containers) > 0 {
 		fmt.Println("    walked:", strings.Join(containers, " "), "(containers, no content lost)")
 	}
+	if c.sheet != nil && (c.sheet.links > 0 || c.sheet.sheets > 0) {
+		fmt.Printf("    sheets: %d linked, %d read, %d missing, %d rules, %d decls (%d in style=\"\"), %d inline blocks\n",
+			c.sheet.links, c.sheet.sheets, c.sheet.missingN, c.sheet.rules, c.sheet.decls, c.sheet.attrDecls, c.sheet.inline)
+	}
 	if r.imageNodes != 0 || r.imageRes != 0 {
 		fmt.Printf("    images: %d placed, %d resources\n", r.imageNodes, r.imageRes)
 	}
@@ -559,7 +706,7 @@ func printTotals(rs []result) {
 	var pages, chars, nodes, books int
 	var ms int64
 	for _, r := range rs {
-		if r.err != nil || r.panicky != "" {
+		if r.err != nil || r.panicky != "" || r.skipped != "" {
 			continue
 		}
 		books++
@@ -598,6 +745,9 @@ func printLossTotals(totals map[string]int) {
 func countFailures(rs []result) int {
 	n := 0
 	for _, r := range rs {
+		if r.skipped != "" {
+			continue
+		}
 		if r.err != nil || r.panicky != "" {
 			n++
 		}
