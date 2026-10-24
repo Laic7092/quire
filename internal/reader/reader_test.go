@@ -299,8 +299,10 @@ func TestFontsAndThemes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fonts.Family(FontSerif); got != "book" {
-		t.Errorf("serif family without a serif face = %q, want the sans one", got)
+	// The bundled book face is always there, so the serif choice never falls
+	// back to the sans one.
+	if got := fonts.Family(FontSerif); got != "book-serif" {
+		t.Errorf("serif family = %q, want the bundled book face", got)
 	}
 	if got := fonts.Family(FontSans); got != "book" {
 		t.Errorf("sans family = %q", got)

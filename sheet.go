@@ -18,8 +18,6 @@ const (
 	// edgeShadow is the band of shade the arriving page casts on the one it
 	// covers, in DIPs, and pageShadow how far the page's own shadow reaches.
 	edgeShadow = 16
-	// spine is the width of the line where the two pages of a spread meet.
-	spine = 1.5
 )
 
 // turnState is a page turn on its way across the sheet: from and to are the
@@ -192,19 +190,9 @@ func (a *app) drawPages(p *ui.Painter, r ui.Rect, start int, dx float32) {
 // drawSpine draws the line where the two pages of an open book meet, with the
 // shade each catches from the fold.
 func (a *app) drawSpine(p *ui.Painter, r ui.Rect) {
-	if a.pagesOnSheet() != 2 {
-		return
-	}
-	pal := reader.Current()
-	x := r.X + r.W/2
-	for i := 0; i < 3; i++ {
-		w := float32(2 * (3 - i))
-		a := uint8(4 + i*4)
-		p.Fill(ui.Rect{X: x - w, Y: r.Y, W: w, H: r.H}, reader.UIColor(paintAlpha(pal.Ink, a)), 0)
-		p.Fill(ui.Rect{X: x, Y: r.Y, W: w, H: r.H}, reader.UIColor(paintAlpha(pal.Ink, a)), 0)
-	}
-	p.Fill(ui.Rect{X: x - spine/2, Y: r.Y, W: spine, H: r.H},
-		reader.UIColor(paintAlpha(pal.Ink, 0x24)), 0)
+	// Books' open book has no printed fold: the two pages are one sheet, and
+	// the only shade in the gutter is the one a turning page casts.
+	return
 }
 
 // drawEdgeShadow is the shade the arriving page casts on the one it covers: at

@@ -4,6 +4,7 @@ package reader
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"os"
 	"strings"
@@ -19,7 +20,33 @@ import (
 const (
 	familySans  = "book"
 	familySerif = "book-serif"
+
+	// UIFont is the family the window's own chrome is set in: Inter, which
+	// stands in for the system's SF Pro with the same proportions, so the
+	// toolbar and the panels measure the same on every platform.
+	UIFont = "layx-ui"
 )
+
+// The reading faces travel with the app: XCharter for the Latin of a book,
+// and Inter for the chrome. Both are open fonts; the system font still
+// supplies the CJK the book face does not cover.
+//
+//go:embed fonts/XCharter-Roman.otf
+var serifBook []byte
+
+//go:embed fonts/Inter-Regular.ttf
+var uiSans []byte
+
+var uiFontReady bool
+
+// UIFontFamily is the family name the chrome should ask for, or "" before the
+// faces have loaded and the system's own is the only one there is.
+func UIFontFamily() string {
+	if uiFontReady {
+		return UIFont
+	}
+	return ""
+}
 
 // DefaultFonts are tried in order when neither -font nor LAYX_FONT is set:
 // a CJK face of the system, for the sans choice and as the fallback of both.
@@ -74,20 +101,28 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 		return nil, fmt.Errorf("reader: font: %w", err)
 	}
 	f := &Fonts{Path: sansPath}
-	faces := []render.FontFace{{Family: familySans, Weight: 400, Data: sans}}
-	// The window draws its own text — the library's headings, the toolbar —
-	// through MyGo, which keeps its own faces: register both under the names
-	// the view asks for, so the chrome and the page are set in the same fonts.
+	// The chrome is set in the bundled Inter, and the book's serif choice in
+	// the bundled XCharter; the system's CJK face follows both in the set, so
+	// Chinese and Japanese keep the system's own shapes.
+	_ = ui.RegisterFont(uiSans, UIFont)
+	uiFontReady = true
 	_ = ui.RegisterFont(sans, familySans)
+	faces := []render.FontFace{
+		{Family: familySans, Weight: 400, Data: uiSans},
+		{Family: familySans, Weight: 400, Data: sans},
+		{Family: familySerif, Weight: 400, Data: serifBook},
+	}
 	if serifPath != "" && serifPath != sansPath {
 		if serif, err := os.ReadFile(serifPath); err == nil {
-			faces = append(faces,
-				render.FontFace{Family: familySerif, Weight: 400, Data: serif},
-				render.FontFace{Family: familySerif, Weight: 400, Data: sans},
-			)
+			faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: serif})
 			f.SerifPath = serifPath
 			_ = ui.RegisterFont(serif, familySerif)
 		}
+	}
+	faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: sans})
+	f.SerifPath = "bundled:xcharter"
+	if serifPath != "" {
+		f.SerifPath = serifPath
 	}
 	fs, err := render.NewFontSet(faces...)
 	if err != nil {

@@ -649,7 +649,7 @@ func windowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	if runtime.GOOS == "darwin" {
 		// Centre the traffic lights in the reader's 46 DIP bar rather than in
 		// a standard 28 DIP title bar.
-		o.TrafficLightPosition = &mygo.Point{X: 16, Y: 16}
+		o.TrafficLightPosition = &mygo.Point{X: 13, Y: 13}
 	}
 	return o
 }
@@ -835,7 +835,7 @@ func main() {
 			Spread:     prefs.Spread,
 		}.Normalized()
 		if prefs.Theme != "" {
-			a.theme = reader.Theme(prefs.Theme)
+			a.theme = reader.ParseTheme(prefs.Theme)
 			a.themeSys = false
 		}
 	}

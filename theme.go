@@ -125,6 +125,9 @@ func readerTheme(base ui.Theme, pal reader.Palette) ui.Theme {
 	t.Focus = t.Accent
 	t.Radius = 7
 	t.Spacing = 4
+	if f := reader.UIFontFamily(); f != "" {
+		t.Font = f
+	}
 	return t
 }
 

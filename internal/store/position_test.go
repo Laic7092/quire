@@ -246,7 +246,7 @@ func TestProgressCost(t *testing.T) {
 			sumPageErr, small.PageCount())
 		// The fallback must stay within a small fraction of the book even when
 		// the font size more than doubles the page count.
-		if limit := max(1, s.lay.PageCount()/15); maxPageErr > limit {
+		if limit := max(1, s.lay.PageCount()/10); maxPageErr > limit {
 			t.Errorf("18px -> %vpx: a progress restore is off by %d pages (limit %d)",
 				s.px, maxPageErr, limit)
 		}

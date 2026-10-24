@@ -8,8 +8,8 @@
    OPF → spine），用 `golang.org/x/net/html` 的 tokenizer 把 XHTML 映射成
    `render.Document` 的最小标签子集，并把图片映射成 `render.NodeImage`；同时
    解析 TXT（编码探测、章节标题、段落切分）并复用同一条 `Chapter` 管线。
-2. `internal/reader`：加载字体（`LAYX_FONT` / `-font` / 系统 CJK 字体，另找一份
-   衬线字体做「宋体」），调用 `render.Engine.Layout`，并实现 `paint.Painter`，把
+2. `internal/reader`：加载字体（内置 XCharter 做正文衬线、Inter 做窗口文字，CJK
+   回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`，并实现 `paint.Painter`，把
    layx 的 `DisplayList` 通过 `ui.Painter` / `ui.Path` / `FillPath` 画出来（字形来自
    go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能同时
    出现；位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。同一层还管纸与墨
@@ -18,11 +18,14 @@
    `render.Location` 变成分页矩形（`Layout.Selection`）和选中的文字（走
    `render.Chapter.Nodes`，因为引擎不导出文本区间）。
 3. `main.go` + `view.go` + `sheet.go` + `theme.go` + `settings.go` + `stats.go`：原生
-   窗口，按 macOS Books 的实机截图与一张 Home 原型摆的。阅读页：顶栏左侧是目录/回书库/
-   侧栏三个无边框图标，中间是书名（12pt、灰），右侧是分享、**Aa** 与搜索；正文直接印在
-   纸上（**没有白纸、没有阴影、没有边框**），窗口够宽时是**大开本两页**，两页之间有书脊
-   和折痕；页脚是一行 10pt 小字——左边页码，中间「第 5–6 页 / 共 80 页」，右边「本章
-   还有 36 页」。不带书时是首页，按 Apple Books 的 Home 摆：左边是 macOS 源列表
+   窗口，按 macOS Books 26 的阅读页截图（787×590 DIP、Quiet 纸、双页、Aa 展开）逐项
+   摆的。阅读页：顶栏左侧一个胶囊里是目录/回书库/侧栏三个 16pt 图标，中间是书名（12pt、
+   semibold、居中），右侧一个胶囊里是分享、**Aa** 与搜索，再右边是独立的圆形书签钮；正文
+   直接印在纸上（**没有白纸、没有阴影、没有边框**），**默认就是大开本两页**：列宽 318、
+   外边距 49、中缝 54、行距约 20.1 DIP，版心 21 + 27 DIP；页脚是一行 10pt 小字——左边
+   章节徽章与章号，中间「161 of 418」，右边「2 pages left in chapter」，最底下是窗口宽度
+   上的页码滑块，位置按 `page/total` 算，不是画死的。书页在页脚与顶栏之间没有书脊线，
+   两页是同一张纸。不带书时是首页，按 Apple Books 的 Home 摆：左边是 macOS 源列表
    （搜索 / 首页 / 书架目录 / 打开…；书库下的全部、在读、已读完；我的收藏；底部是
    账户），右边是白底内容——衬线大标题、分区标题加箭头与说明、
    可横向滑动的封面行（继续阅读、所有图书，读到一半的封面底边有一条细进度），右上角是
@@ -37,10 +40,12 @@
    移出、新页跟着进来，边界上有一道落在纸上的影子。在纸上按住拖动可以选字，⌘C 复制
    选中的文字；右键（macOS 是 Ctrl+点击，或菜单键/Shift+F10）是页面的菜单：复制、
    搜索选中的词、选中本页、清除选区。搜索命中在页面上是琥珀色，面板指着的那个更深一档。
-   **Aa 面板**照 Books 的样子：标题「主题与设置」、一行「小 A / 大 A / Aa」的字号分段、
-   两列主题卡片（每张印着自己的纸色和墨色，名字在卡片上方，选中的那张圈一道墨线），底下
-   一条分隔线加「自定义」——点开才是字号、行距、页边距三个滑块，宋体/黑体、两端对齐/左对齐
-   两组分段，双页显示开关和「恢复默认」。每一项都写进状态文件。
+   **Aa 面板**照 Books 的样子：219 宽、18 圆角，标题「Themes & Settings」下发丝分隔线，
+   一行 38 高的分段（小 A / 大 A 一组，中间一条浅分隔线；右边是独立的 63 宽外观钮），
+   3×2 的 62×55 主题卡片（Original / Quiet / Paper / Bold / Calm / Focus，Aa 与名字都印在
+   卡里，选中的那张圈一道墨线），底下是 36 高的「⚙ Customize」胶囊。点开 Customize 才是
+   字号、行距、页边距三个滑块，Serif/Sans、Justified/Left 两组分段，Two Pages 开关和
+   Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
 4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见。
 
 常用功能各有一个包，都能独立测试：
@@ -71,10 +76,10 @@ LAYX_FONT=/usr/share/fonts/truetype/wqy/wqy-microhei.ttc go run . book.epub
 ```
 
 不带书启动是首页：源列表里是**打开…**、**选择目录**、全部/在读/已读完，中间是继续
-阅读和所有图书两行封面（横向滚动），下面是阅读目标。打开书之后：顶栏左侧是侧栏开关和
-「回书库」，中间是书名
-与章节，右侧是搜索、目录和 Aa；正文是一张最大 720 DIP 宽的纸（窗口 ≥1120 DIP 时
-自动变成两页大开本），两侧各有翻页热区；底栏是章节、进度和页码。侧栏用 `ui.Split`
+阅读和所有图书两行封面（横向滚动），下面是阅读目标。打开书之后：顶栏左侧是目录/回书库/侧栏，
+中间是书名，右侧是分享、Aa 与搜索，最右是书签；正文默认两页大开本（窗口窄于约 702
+DIP 时退回单页），两侧各有翻页热区；底栏是章节、「N of M」页码与本章剩余页数，最底下
+是页码滑块。侧栏用 `ui.Split`
 拖宽（宽度会记住），顶部三段是目录 / 搜索 / 书架。
 
 `LAYX_NO_ANIM=1` 关掉翻页动画（CI 和 `SNAP=1` 的快照都这样跑，帧才稳定）。
@@ -121,8 +126,9 @@ macOS 上额外做了这些：
 纸与墨来自 `reader.Palette`（几套纸见 `internal/reader/theme.go`）。纸和墨是排版时写进
 文档样式的，所以换纸要重排一次；其余颜色（桌面、顶栏、面板、强调色）由同一份 palette
 现算，换纸时立刻变。书库不跟纸走：没有打开书时用系统外观（白 / 石墨 + 系统蓝）。
-「宋体」用系统里找到的衬线字体，找不到就退回同一份 CJK 字体，并把它挂在同一个 family
-下当 fallback，所以一半西文衬线、一半中文黑体也能排出来。
+正文的衬线是随仓库分发的 XCharter（`internal/reader/fonts/`），窗口文字是 Inter；两者都
+只覆盖西文，CJK 由系统 CJK 字体在同一 family 里 fallback，所以一半西文衬线、一半中文
+黑体也能排出来。
 
 选区和高亮都在宿主侧，不依赖新 API：`Page.HitTest` 把纸上的一点变成 `render.Location`，
 `Layout.Selection(from, to)` 给出分页矩形（跨页/跨章由引擎排序），宿主在 `Draw` 回调里
@@ -135,13 +141,12 @@ macOS 上额外做了这些：
 偏移由 `turnProgress` 从时钟算出，滑动期间每帧只要一次 `AnimationFrame`，不排版、
 不重新取字形。`a.now` 是这台钟，测试把它钉死就能拿到确定的中间帧。
 
-默认窗口 1080×740（最小 640×420）；默认字体依次尝试
+默认窗口 787×590（最小 640×420）；`-font` 决定 CJK 回落的字体，依次尝试
 `/System/Library/Fonts/PingFang.ttc`、`/System/Library/Fonts/Hiragino Sans GB.ttc`、
 `C:\Windows\Fonts\msyh.ttc`、`/usr/share/fonts/truetype/wqy/wqy-microhei.ttc`、
 `/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf`、
-`/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`；衬线字体依次尝试
-`Songti.ttc`、`Times New Roman.ttf`、`simsun.ttc`、`NotoSerifCJK-Regular.ttc`、
-`uming.ttc`、`DejaVuSerif.ttf`。
+`/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`。正文的 XCharter 是内置的，
+`-serif` / `LAYX_SERIF` 找到的系统衬线只作为它缺字时的后备。
 
 ## 测试
 
@@ -157,7 +162,7 @@ go tool mygo vet .
 浮生六記 TXT），`TestSamplesOpen` 会逐个打开，截断的文件不会被误提交。
 `main_test.go` 用 `ui.NewTester` 无头构建视图并验证一页真的进入了原生
 `ui.Painter`；`view_test.go` 把整个窗口的每种状态（正文、三个侧栏、封面、首页在参考宽度/宽窗/窄窗
-三种尺寸、Aa 面板、大开本两页、夜间）都渲染一遍，`SNAP=1 go test . -run
+三种尺寸、Aa 面板、大开本两页、Quiet）都渲染一遍，`SNAP=1 go test . -run
 TestWindowRendersEveryScreen` 会写出 `/tmp/snap-*.png`，人工看布局用。
 
 ## 真书回归（corpus）
@@ -220,8 +225,9 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 - 打开/关闭侧栏、改字号/行距/字面/页边距、换纸都要整本书重排一次：纸和墨是 `Layout`
   时写进样式里的（`reader.Palette`，见摩擦点 11），字号也是文档构建时的常量。拖动
   Aa 里的滑块会等 160ms 再排，所以不是每个像素都排一次，但一次滑动仍会排一两次。
-- 大开本两页是宿主摆的：排一份半宽的 `Layout`，在一张纸上画两页，中间补一条书脊；
-  layx 没有「对开」这个概念，也不需要。窗口窄于 1120 DIP 时 `双页显示` 会被忽略。
+- 大开本两页是宿主摆的：排一份半宽的 `Layout`，在一张纸上画两页；安静时两页之间没有
+  书脊线（Books 26 的纸是一整张），只在翻页时由宿主画边缘影子。窗口窄于约 702 DIP 时
+  `双页显示` 会被忽略。
 - 翻页是横移，不是 Books 的翻卷（curl）：卷页要做像素级形变，layx 现在只给显示列表，
   宿主没有整页的位图可扭。
 - 只有分页模式，没有滚动模式；没有 wasm / 网页版本。

@@ -925,7 +925,8 @@ func (a *app) folio(c *ui.Context, t *ui.Theme) {
 			}
 			// The left of the folio is the chapter, marked with the little
 			// page badge Books prints beside it.
-			badge := ui.Box(c).Width(13).Height(13).Radius(6.5).Center().Background(ink)
+			badge := ui.Box(c).Width(13).Height(13).Radius(6.5).Center().
+				Background(reader.UIColor(a.chrome.OnToolbar))
 			badge.Children(func() {
 				ui.Icon(c, icons.Bookmark).Size(8, 8).TextColor(paper())
 			})
@@ -950,10 +951,10 @@ func (a *app) folio(c *ui.Context, t *ui.Theme) {
 		ui.Spacer(c)
 		// The scrubber: the whole window's width, the pill at the book's
 		// progress, as Books shows the place in the book at the foot.
-		ui.Box(c).FillWidth().Height(8).Children(func() {
+		ui.Box(c).FillWidth().Height(12).Children(func() {
 			knob := ui.Box(c).Width(19).Height(6).Radius(3).Background(ink)
 			p := float32(a.progress())
-			knob.MarginStart(8 + p*(w-16-19))
+			knob.Margin(3, 0, 0, 8+p*(w-16-19))
 		})
 	})
 }
@@ -1022,11 +1023,11 @@ func (a *app) edge(c *ui.Context, t *ui.Theme, delta int) {
 	icon := icons.ChevronRight
 	label := "下一页"
 	if delta < 0 {
-		box.Left(0)
+		box.Left(9)
 		icon = icons.ChevronLeft
 		label = "上一页"
 	} else {
-		box.Right(0)
+		box.Right(-9)
 	}
 	box.Label(label)
 	box.OnClick(func() { a.turn(delta) })

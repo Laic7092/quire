@@ -251,6 +251,26 @@ var (
 
 func init() { SetPalette(Quiet) }
 
+// ParseTheme turns a theme name into a paper, accepting the four names the
+// earlier palettes were saved under too; "" for a name it does not know.
+func ParseTheme(name string) Theme {
+	switch Theme(name) {
+	case ThemeOriginal, ThemeQuiet, ThemePaper, ThemeBold, ThemeCalm, ThemeFocus:
+		return Theme(name)
+	}
+	switch name {
+	case "white":
+		return ThemeOriginal
+	case "sepia":
+		return ThemeCalm
+	case "gray":
+		return ThemePaper
+	case "night":
+		return ThemeQuiet
+	}
+	return ""
+}
+
 // ForTheme returns the palette of t, or Quiet for a name it does not know.
 func ForTheme(t Theme) Palette {
 	switch t {

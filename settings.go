@@ -25,7 +25,7 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 	ui.PopoverBase(c, anchor, &a.aaOpen, func(panel ui.Element) {
 		// The panel hangs under the Aa, 9 DIPs below the bar, at its centre:
 		// the way Books anchors its own popover.
-		panel.Width(settingsWidth).Padding(10, 10, 19, 10).Radius(18).Gap(0).
+		panel.Width(settingsWidth).Padding(0, 10, 19, 10).Radius(18).Gap(0).
 			Background(reader.UIColor(pal.Popover)).
 			Border(1, reader.UIColor(pal.Line)).
 			Shadow(0, 12, 34, 0, ui.RGBA(0, 0, 0, 0.36)).
@@ -47,6 +47,16 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 					a.settingsDetail(c)
 				}
 			})
+		// The pointer under the Aa, drawn over the bar so the panel and its
+		// anchor read as one control, as Books' own popover does.
+		if b := anchor.Bounds(); b.W > 0 {
+			x := b.X + b.W/2 - 8
+			ui.Overlay(c, func() {
+				ui.Icon(c, icons.TriangleUp).Size(16, 8).
+					Absolute().Left(x).Top(b.Y + b.H + 2).
+					TextColor(reader.UIColor(pal.Popover)).PassThrough()
+			})
+		}
 	})
 }
 
@@ -69,10 +79,10 @@ func (a *app) sizeRow(c *ui.Context) {
 	pal := a.chrome
 	ui.Row(c).FillWidth().Height(38).Gap(6).Children(func() {
 		group := ui.Row(c).Width(130).Height(38).Radius(19).
-			Background(reader.UIColor(pal.Raised))
+			Background(reader.UIColor(pal.Raised)).AlignItems(ui.Center)
 		group.Children(func() {
 			a.sizeCell(c, 13, "Smaller text", func() { a.changeFont(-1) })
-			divider := ui.Box(c).Width(1).Height(20).Background(reader.UIColor(pal.Line))
+			divider := ui.Box(c).Width(1).Height(20).Background(reader.UIColor(pal.OnToolbar).Alpha(0.30))
 			divider.Margin(0, 0)
 			a.sizeCell(c, 21, "Larger text", func() { a.changeFont(1) })
 		})
@@ -118,7 +128,7 @@ func (a *app) themeCard(c *ui.Context, theme reader.Theme) {
 	case chosen:
 		// The ring is the paper's own ink, so it reads on white and on
 		// graphite alike, one step thicker than the card's edge.
-		card.Border(1.5, reader.UIColor(pal.Ink))
+		card.Border(1, reader.UIColor(pal.Ink))
 	case theme.Dark():
 		// A dark card needs an edge of its own to sit on the popover.
 		card.Border(1, reader.UIColor(pal.OnToolbar).Alpha(0.22))
@@ -126,8 +136,8 @@ func (a *app) themeCard(c *ui.Context, theme reader.Theme) {
 	card.OnClick(func() { a.setTheme(theme) })
 	card.Children(func() {
 		ui.Column(c).Gap(0).Center().Children(func() {
-			ui.Text(c, "Aa").FontSize(24).FontWeight(500).TextColor(reader.UIColor(pal.Ink))
-			ui.Text(c, theme.Label()).FontSize(9.5).TextColor(reader.UIColor(pal.Ink))
+			ui.Text(c, "Aa").FontSize(24).TextColor(reader.UIColor(pal.Ink))
+			ui.Text(c, theme.Label()).FontSize(10).TextColor(reader.UIColor(pal.Ink))
 		})
 	})
 }

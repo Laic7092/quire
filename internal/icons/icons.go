@@ -7,6 +7,9 @@ package icons
 
 import "github.com/egoist/mygo/ui"
 
+// TriangleUp is the pointer of a popover: a filled triangle in a 16×8 box.
+var TriangleUp = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 8"><path d="M0 8 8 0l8 8z" fill="currentColor"/></svg>`))
+
 // stroke wraps path markup in the 24×24 stroke outline every icon uses.
 func stroke(body string) *ui.SVG {
 	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">` + body + `</svg>`))
