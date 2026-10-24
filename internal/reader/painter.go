@@ -188,8 +188,10 @@ func (u *UIPainter) FillScrollQuads(p *ui.Painter, view ui.Rect, quads []render.
 	}
 }
 
-// ClipRect is already provided by DrawPage's outer clip; pages only clip to
-// their own viewport.
+// ClipRect is a no-op: DrawPage and DrawTile clip once to the element and the
+// region being shown. A page's own clip is the same rectangle, and a tile's
+// would cut the lines that overhang a tile boundary: a line belongs to the tile
+// holding its top edge, so its lower part must still be drawn by that tile.
 func (u *UIPainter) ClipRect(r paint.Rect) {}
 
 // Transform is unsupported in this phase: layx's display lists for paged

@@ -196,12 +196,17 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 		return
 	}
 	y := clampf(a.scrollY, 0, a.maxScroll())
-	first := max(int(y/a.tileH), 0)
+	first := max(int(y/a.tileH)-1, 0)
 	last := int((y + view.H) / a.tileH)
 	if n := a.layout.TileCount(); last >= n {
 		last = n - 1
 	}
-	for i := first; i <= last; i++ {
+	// Paint from the bottom up. Every tile starts with its own opaque sheet, and
+	// a line belongs to the tile that holds its top edge, so a line near a tile
+	// boundary overhangs into the next tile's area: drawing the lower tile
+	// first lets that overhang land on top of its paper instead of being
+	// covered by it.
+	for i := last; i >= first; i-- {
 		tile := a.layout.Tile(i)
 		if tile == nil {
 			continue

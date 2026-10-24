@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"image"
 	"testing"
 	"time"
 
@@ -306,4 +307,70 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 	if a.scrollY != 200 {
 		t.Errorf("landed at %.0f, want 200", a.scrollY)
 	}
+}
+
+// A line belongs to the tile that holds its top edge, so a line near a tile
+// boundary overhangs into the next tile's area. Drawing the lower tile first
+// keeps that overhang on top of the paper instead of letting the next tile's
+// opaque sheet cut it in half mid-screen.
+func TestScrollDoesNotCutLinesAtTileBoundaries(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	r := sheetRect(t, tt)
+
+	// Find a tile boundary that falls inside a line of text.
+	var boundary float32
+	for k := 1; k < a.layout.TileCount(); k++ {
+		y := float32(k) * a.tileH
+		before, ok1 := a.layout.LocationAt(y - 0.5)
+		after, ok2 := a.layout.LocationAt(y + 0.5)
+		if ok1 && ok2 && before == after {
+			boundary = y
+			break
+		}
+	}
+	if boundary == 0 {
+		t.Skip("no line straddles a tile boundary in this book")
+	}
+
+	// Put the boundary in the middle of the column and draw it.
+	y := boundary - a.scrollViewport()/2
+	a.scrollTo(y)
+	tt.Frame()
+	img := tt.Image()
+	at := r.Y + scrollInset + (boundary - y)
+
+	x0, x1 := int(r.X+40), int(r.W+r.X-40)
+	above := inkPixels(img, x0, int(at)-8, x1, int(at)-1)
+	below := inkPixels(img, x0, int(at)+1, x1, int(at)+8)
+	if above == 0 {
+		t.Skipf("the band above the boundary has no ink to compare")
+	}
+	if below*3 < above {
+		t.Errorf("the line is cut at the tile boundary: %d ink pixels above it, %d below", above, below)
+	}
+}
+
+// inkPixels counts the pixels in a rectangle that are not the paper: text is
+// drawn in the palette's ink, which differs from the sheet around it.
+func inkPixels(img *image.RGBA, x0, y0, x1, y1 int) int {
+	paper := img.RGBAAt(x0, y0-20)
+	n := 0
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			p := img.RGBAAt(x, y)
+			diff := absInt(int(p.R)-int(paper.R)) + absInt(int(p.G)-int(paper.G)) +
+				absInt(int(p.B)-int(paper.B))
+			if diff > 120 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
