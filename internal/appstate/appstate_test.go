@@ -11,6 +11,7 @@ import (
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/layx/render"
 )
 
 func newStore(t *testing.T) *store.Store {
@@ -174,8 +175,8 @@ func TestTocAndSearchJump(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := New(nil)
-	var jumped int
-	a.Jump = func(page int) { jumped = page }
+	var jumped bool
+	a.Jump = func(loc render.Location) { jumped = loc != (render.Location{}) }
 	a.Refresh(bk, nil, 0)
 	if len(a.Toc.Entries) != len(bk.Chapters) {
 		t.Fatalf("%d entries for %d chapters", len(a.Toc.Entries), len(bk.Chapters))
@@ -195,8 +196,8 @@ func TestTocAndSearchJump(t *testing.T) {
 	if !tt.HasText(fmt.Sprintf("%d 章", len(bk.Chapters))) || !tt.HasText(bk.Chapters[0].Title) {
 		t.Fatalf("toc did not build: %q", tt.Texts())
 	}
-	if jumped != 0 {
-		t.Errorf("jumped to %d without a click", jumped)
+	if jumped {
+		t.Error("jumped without a click")
 	}
 }
 
@@ -271,5 +272,82 @@ func TestBookmarksAndNotesPanels(t *testing.T) {
 		if !tt.HasText(tc.empty) {
 			t.Errorf("%s panel: %q", tc.side, tt.Texts())
 		}
+	}
+}
+
+// A scroll layout has no pages, so the reading place is a location: RefreshAt
+// marks the chapter it falls in, and the store brings the same place back
+// through RecordAt and ResumeAt.
+func TestResumeAtScroll(t *testing.T) {
+	fontPath, err := reader.FindFont("")
+	if err != nil {
+		t.Skipf("no system font: %v", err)
+	}
+	fonts, err := reader.OpenFont(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("..", "book", "testdata", "samples", "aq-zhuan.epub")
+	bk, err := book.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := bk.DocumentSized(reader.DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := reader.BuildLayout(context.Background(), doc, fonts, 480, 600,
+		reader.Options{FontSize: reader.DefaultFontSize, Scroll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.PageCount() != 0 || layout.ContentHeight() <= 600 {
+		t.Fatalf("not a scroll layout: %d pages, %.0f tall", layout.PageCount(), layout.ContentHeight())
+	}
+
+	st := newStore(t)
+	a := New(st)
+	key := a.Opened(bk, path)
+	loc, ok := layout.LocationAt(layout.ContentHeight() / 2)
+	if !ok {
+		t.Fatal("no location halfway down the book")
+	}
+	a.RefreshAt(bk, layout, loc)
+	if a.page != -1 {
+		t.Errorf("a scroll refresh set page %d", a.page)
+	}
+	current := -1
+	for i, e := range a.Toc.Entries {
+		if e.Current {
+			current = i
+		}
+		if !e.HasLoc {
+			t.Errorf("chapter %d has no location: %+v", i, e)
+		}
+		if e.Page != -1 {
+			t.Errorf("chapter %d has page %d in a scroll layout", i, e.Page)
+		}
+	}
+	if current != loc.Chapter {
+		t.Errorf("marked chapter %d as current, reading chapter %d", current, loc.Chapter)
+	}
+
+	a.RecordAt(layout, loc)
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	b := New(st)
+	b.BookKey = key
+	got, how := b.ResumeAt(layout)
+	if how == "" {
+		t.Fatal("nothing was resumed")
+	}
+	want, _ := layout.OffsetOf(loc)
+	back, ok := layout.OffsetOf(got)
+	if !ok || back != want {
+		t.Errorf("resumed at %.0f, want %.0f (via %s)", back, want, how)
+	}
+	if page, how := b.Resume(layout); page != 0 || how != "" {
+		t.Errorf("paged resume on a scroll layout = %d, %q", page, how)
 	}
 }

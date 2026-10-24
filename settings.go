@@ -210,6 +210,14 @@ func (a *app) settingsDetail(c *ui.Context) {
 		a.savePrefs()
 		a.layW, a.layH = 0, 0
 	})
+	// Scrolling reads the book as one column. It is a layout mode, so it goes
+	// through setOptions like the type settings: the sheet follows once the
+	// reader stops pressing.
+	a.switchRow(c, "Scrolling", a.opts.Scroll, func(on bool) {
+		o := a.opts
+		o.Scroll = on
+		a.setOptions(o)
+	})
 	if ui.Button(c, "Reset to Defaults").Clicked() {
 		a.setOptions(reader.DefaultOptions())
 		a.syncSettingsFields()

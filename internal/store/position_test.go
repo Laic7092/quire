@@ -391,3 +391,64 @@ func abs(n int) int {
 	}
 	return n
 }
+
+// testScrollLayout builds the same synthetic book as a continuous column.
+func testScrollLayout(t *testing.T, doc *render.Document, fonts *reader.Fonts, size float32) *render.Layout {
+	t.Helper()
+	l, err := reader.BuildLayout(context.Background(), doc, fonts, 480, 640, reader.Options{FontSize: size, Scroll: true})
+	if err != nil {
+		t.Fatalf("BuildLayout(scroll): %v", err)
+	}
+	if l.PageCount() != 0 || l.ContentHeight() <= 0 {
+		t.Fatalf("not a scroll layout: %d pages, %.0f tall", l.PageCount(), l.ContentHeight())
+	}
+	return l
+}
+
+// TestLocateScrollRoundTrip records the place at several offsets of a scroll
+// layout and finds them again from the persisted Position.
+func TestLocateScrollRoundTrip(t *testing.T) {
+	fonts := testFonts(t)
+	l := testScrollLayout(t, testBook(t, 3, 18), fonts, 18)
+	height := l.ContentHeight()
+
+	for _, y := range []float32{1, height / 4, height / 2, height - 2} {
+		loc, ok := l.LocationAt(y)
+		if !ok {
+			t.Fatalf("LocationAt(%.0f) failed", y)
+		}
+		want, ok := l.OffsetOf(loc)
+		if !ok {
+			t.Fatalf("OffsetOf(%+v) failed", loc)
+		}
+		p, ok := PositionAt(l, loc)
+		if !ok {
+			t.Fatalf("PositionAt(%+v) failed", loc)
+		}
+		if p.Node == 0 || p.Progress <= 0 {
+			t.Errorf("position at %.0f is incomplete: %+v", y, p)
+		}
+		got, how := Locate(l, p)
+		if how != "node" && how != "anchor" {
+			t.Errorf("Locate at %.0f went through %q, want the exact path", y, how)
+		}
+		if back, ok := l.OffsetOf(got); !ok || back != want {
+			t.Errorf("position at %.0f came back at %.0f, want %.0f", y, back, want)
+		}
+	}
+
+	// The progress fallback still lands in the flow without node or anchor.
+	loc, how := Locate(l, Position{Chapter: 1, Progress: 0.5})
+	if how != "progress" {
+		t.Errorf("progress-only position resolved via %q", how)
+	}
+	if off, ok := l.OffsetOf(loc); !ok || off < height*0.4 || off > height*0.6 {
+		t.Errorf("progress half landed at %.0f of %.0f", off, height)
+	}
+
+	// PageFor keeps saying there are no pages, so a scroll host cannot mistake
+	// it for a page number.
+	if page, how := PageFor(l, Position{Progress: 0.5}); page != -1 || how != "none" {
+		t.Errorf("PageFor on a scroll layout = %d, %q", page, how)
+	}
+}

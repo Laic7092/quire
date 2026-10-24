@@ -24,9 +24,9 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 1. **源派生的、跨 `Build` 稳定的锚点（最高）。** 现在 anchor 由宿主提供，换字号没问题，
    换书源/更新 EPUB 后旧位置会静默偏移。目录高亮、搜索跳转、位置恢复压的是同一个缺口：
    由引擎从源结构派生稳定标识。
-2. **`Layout` 的页 → 位置。** 现只有 `PageOf`、`ChapterContentTop` 和 `LocationAt(y)`；
-   宿主要记录"第 N 页的位置"得反推内容高度再取槽内 1px，单页文档干脆没有。建议
-   `LocationOfPage(n)`。
+2. **`Layout` 的页 → 位置。** `LocationOfPage(n)` 已经解决了"页 → 位置"，`PageOf` 是它的
+   反向；滚动模式没有页，`PageOf` 按设计返回 false，宿主改用 `OffsetOf`。还差的是
+   `TileHeight()`：宿主得自己记住传给 `TileHeight` 的值，才能算第一个可见 tile。
 3. **`Document.TextRange(from, to)`。** 复制选中的文字目前沿 `Chapter.Nodes` 走 DFS
    拼串（与搜索索引的遍历几乎重复）。图片节点、空 block、反向拖选都要宿主自己兜。
 4. **增量/流式排版与文档版本。** 打开面板、改页边距、换纸都会重排整本书；`Layout`
@@ -54,12 +54,31 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 - **`⌘C` 不能有菜单项**：macOS 的 key equivalent 先于视图，页面选区和搜索框会一起坏。
 - **隐藏标题栏要自己让位**：`c.TitleBar()` 的 `Height/Left/Right` 零值不是唯一情况，
   全屏时归零，布局不能因此跳动。
+- **模式切换别让排版和视口打架**：设置先变、布局后到，`scrolling()` 跟着已发布的
+  布局走，排版宽度按目标模式的页宽重算（`sheetSize`），否则从双页切到滚动会拿半宽
+  排一列、或者拿整窗宽排一页。
+- **滚动位置在重排后是行首，不是像素**：存 `Location`/`Anchor`，不要存 `scrollY`。
 - **主题缓存的 key 要含"书库还是阅读"**：书库用系统外观、阅读用纸，纸没变时若不重建，
   关书回书库仍是米色。
 - **截图像素不是布局常量。** 参考图只在它自己的窗口宽度下成立；首页的侧栏、边距、封面
   都由窗口宽度按比例推再夹上下限（`homeMetricsFor`），否则换窗口/换 DPI 就散架。
 - **统计不要新造状态**：阅读天数、连续天数、年度读完都从 `store` 已有的
   `Books.LastOpened` 与 `Positions.Updated` 现算；只有目标值进 `Prefs`。
+
+## 滚动模式（`ModeScroll`）用到的语义
+
+- `ModeScroll` 只换"取窗口"的方式：断行、块布局与分页模式共享，所以同一份
+  `Typography` 在两种模式下排出的行完全一样。
+- 内容坐标（`y=0` 是正文顶端、章与章连续堆叠）是滚动模式唯一的坐标系：
+  `LocationAt` / `OffsetOf` / `HitTest` / `Progress` / `SelectionQuad.Content` 都用它，
+  和 `Tile.Top()` 一起就能把位置映射到像素。
+- 分页模式的 `PageRange` / `ChapterPages` / `PageOf` 在滚动模式下按设计失效
+  （`ok=false` / `nil` / false）；`ChapterContentTop` 两种模式都成立，是目录与
+  "跳到某章"的中立入口。
+- `SelectionQuad.Page` 在滚动模式是 -1，宿主不能再用页号挑矩形，要用 `Content`
+  减去滚动偏移。
+- tile 是显示列表不是位图：宿主自己决定缓存策略。宿主在滚动前后调 `Tiles(lo, hi)`
+  预取，`Draw` 回调里只重放 `Tile(i)`。
 
 ## 宿主为此付出的适配成本（当前）
 
@@ -72,6 +91,8 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 | `theme.go` | 书库系统外观与阅读纸两套 palette、皮肤缓存 |
 | `stats.go` | 阅读统计与目标持久化 |
 | `sheet.go` | 双页几何、页码对齐、滑页动画、书脊与边缘阴影 |
+| `scroll.go` | 滚动视口：可见 tile、内容坐标 ↔ 屏幕坐标、滚动键与滚动位置归档 |
+| `internal/store/position.go` | `Locate` / `PositionAt`：位置在两种模式下都成立 |
 | `internal/reader/theme.go` | 若干套纸的完整 palette |
 
 这些是宿主自己的账，不再逐轮罗列；新增一个功能时先问"这段能不能由上游给"，

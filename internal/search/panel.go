@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/widgets"
+	"github.com/laix/layx/render"
 )
 
 // Panel is the reader's search panel. It owns only plain Go state and rebuilds its
@@ -21,9 +22,11 @@ type Panel struct {
 	// The host runs the search in a goroutine and publishes Hits back through
 	// the window.
 	OnSearch func(query string)
-	// OnJump is called with the global, zero-based page of a clicked hit.
-	OnJump func(page int)
-	// PageOf maps a hit to a page number. When nil, rows show no page.
+	// OnJump is called with the location of a clicked hit. The host turns it
+	// into a page or a scroll offset, depending on the layout's mode.
+	OnJump func(loc render.Location)
+	// PageOf maps a hit to a page number. When nil, or when the layout has no
+	// pages (a scroll layout), rows show no page.
 	PageOf func(h Hit) (int, bool)
 
 	list ui.ListState
@@ -109,8 +112,8 @@ func (p *Panel) row(c *ui.Context, i int) {
 	row.Background(widgets.RowBackground(c, row.Hovered(), chosen))
 	row.OnClick(func() {
 		p.Selected = i
-		if hasPage && p.OnJump != nil {
-			p.OnJump(page)
+		if p.OnJump != nil {
+			p.OnJump(h.Loc)
 		}
 	})
 	row.Children(func() {

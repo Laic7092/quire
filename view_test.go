@@ -75,7 +75,7 @@ func newWindow(t *testing.T) *app {
 		instant: true,
 	}
 	a.syncSettingsFields()
-	pan.Jump = a.gotoPage
+	pan.Jump = a.gotoLoc
 	pan.Open = func(string) {}
 	pan.Cover = a.coverBitmap
 	a.covers = map[coverKey]*ui.Bitmap{}
@@ -267,6 +267,26 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			a.book, a.layout, a.page = bk, night, 4
 			a.clearSelection()
 			pan.Refresh(bk, night, a.page)
+			pan.Show(appstate.SidebarNone)
+		}},
+		// The scrolling column: the same book as one flow, its first viewport
+		// of tiles on the sheet and the folio counting in percent.
+		{name: "scroll", want: "0%", render: func(t *testing.T) {
+			reader.SetPalette(reader.Quiet)
+			a.theme, a.themeSys = reader.ThemeQuiet, false
+			a.opts.Scroll, a.opts.Spread = true, false
+			col, err := reader.BuildLayout(context.Background(), doc, a.fonts, paperW, paperH,
+				reader.Options{FontSize: reader.DefaultFontSize, Scroll: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.book, a.layout, a.page = bk, col, 0
+			a.layScroll, a.tileH, a.scrollY = true, paperH, 0
+			a.aaOpen, a.showCover = false, false
+			a.clearSelection()
+			if loc, ok := col.LocationAt(0); ok {
+				pan.RefreshAt(bk, col, loc)
+			}
 			pan.Show(appstate.SidebarNone)
 		}},
 	}

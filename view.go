@@ -127,6 +127,14 @@ func (a *app) view(c *ui.Context) {
 			a.turning = nil
 		}
 	}
+	if a.gliding() {
+		// A wheel's notches glide: step the column and ask for the next frame
+		// until it lands.
+		a.stepScroll()
+		if a.gliding() {
+			c.AnimationFrame()
+		}
+	}
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		if a.book == nil {
@@ -194,11 +202,28 @@ func (a *app) keys(c *ui.Context) {
 	if c.Shortcut(0, ui.KeyRight) || c.Shortcut(0, ui.KeyPageDown) || c.Shortcut(0, ui.KeySpace) {
 		a.turn(1)
 	}
-	if c.Shortcut(0, ui.KeyHome) {
-		a.gotoPage(0)
-	}
-	if c.Shortcut(0, ui.KeyEnd) && a.layout != nil {
-		a.gotoPage(a.layout.PageCount() - 1)
+	if a.scrolling() {
+		// A column moves by lines with the arrows, by a screen with the page
+		// keys, and to its ends with Home and End; a turn is a screenful.
+		if c.Shortcut(0, ui.KeyDown) {
+			a.scrollLines(3)
+		}
+		if c.Shortcut(0, ui.KeyUp) {
+			a.scrollLines(-3)
+		}
+		if c.Shortcut(0, ui.KeyHome) {
+			a.scrollTo(0)
+		}
+		if c.Shortcut(0, ui.KeyEnd) {
+			a.scrollTo(a.maxScroll())
+		}
+	} else {
+		if c.Shortcut(0, ui.KeyHome) {
+			a.gotoPage(0)
+		}
+		if c.Shortcut(0, ui.KeyEnd) && a.layout != nil {
+			a.gotoPage(a.layout.PageCount() - 1)
+		}
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyMinus) || c.Shortcut(0, ui.KeyMinus) {
 		a.changeFont(-1)
@@ -217,6 +242,9 @@ func (a *app) syncMenu() {
 	if on := len(a.selQuads) > 0; on != a.menuCopyOn {
 		a.menuCopyOn = on
 		a.menuCopy.SetEnabled(on)
+	}
+	if a.menuScroll != nil && a.menuScroll.IsChecked() != a.opts.Scroll {
+		a.menuScroll.SetChecked(a.opts.Scroll)
 	}
 }
 
@@ -920,8 +948,14 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 		})
 		a.folio(c, t)
 		if b := a.body.Bounds(c); b.W > 0 && b.H > 0 {
-			a.boxW = b.W
+			a.boxW, a.boxH = b.W, b.H
 			a.ensureLayout(b.W, b.H)
+		}
+		// A window that grew meanwhile leaves less flow below the viewport: keep
+		// the column inside the book rather than past its end.
+		if a.scrolling() {
+			a.scrollY = clampf(a.scrollY, 0, a.maxScroll())
+			a.scrollGoal = clampf(a.scrollGoal, 0, a.maxScroll())
 		}
 		if ab := area.Bounds(); ab.W > 0 {
 			a.areaW = ab.W
@@ -983,6 +1017,9 @@ func (a *app) chapterNumber() int {
 	if a.book == nil || a.layout == nil {
 		return 0
 	}
+	if a.scrolling() {
+		return a.currentChapter() + 1
+	}
 	return reader.ChapterOfPage(a.layout, len(a.book.Chapters), a.page) + 1
 }
 
@@ -999,10 +1036,14 @@ func (a *app) selectionHint() string {
 }
 
 // chapterPagesLeft is how much of the chapter is still to read, as Books counts
-// it at the foot of the page: "本章还有 12 页".
+// it at the foot of the page: "本章还有 12 页". A scrolling column counts the
+// screens it still has to go.
 func (a *app) chapterPagesLeft() string {
 	if a.book == nil || a.layout == nil {
 		return ""
+	}
+	if a.scrolling() {
+		return a.chapterScreensLeft()
 	}
 	i := reader.ChapterOfPage(a.layout, len(a.book.Chapters), a.page)
 	first, ok := a.layout.Locate(render.AnchorID(i + 1))
@@ -1068,7 +1109,10 @@ func (a *app) closeBook() {
 	a.status = ""
 	a.resumeNote = ""
 	a.layW, a.layH = 0, 0
-	a.boxW, a.areaW = 0, 0
+	a.boxW, a.boxH, a.areaW = 0, 0, 0
+	a.layScroll = false
+	a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
+	a.scrollFrom, a.scrollGoal, a.scrollAt = 0, 0, time.Time{}
 	a.clearSelection()
 	a.hitQuads = nil
 	if a.paint != nil {

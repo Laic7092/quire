@@ -49,6 +49,9 @@ type app struct {
 	// selection changes.
 	menuCopy   *mygo.MenuItem
 	menuCopyOn bool
+	// menuScroll is the View menu's scrolling item, kept so the menu follows a
+	// change made in the display settings.
+	menuScroll *mygo.MenuItem
 
 	book  *book.Book
 	doc   *render.Document
@@ -128,9 +131,29 @@ type app struct {
 
 	// areaW is the width of the page area and boxW the width of the sheet as
 	// the last frame laid them out: how many pages fit on the sheet, and so how
-	// far a turn goes, follow them.
+	// far a turn goes, follow them. boxH is the page area's height, which a
+	// scroll viewport measures itself against.
 	areaW float32
 	boxW  float32
+	boxH  float32
+	// layScroll is the mode of the layout on screen; scrollY is where the
+	// scrolling column's viewport starts in the flow's content coordinates, and
+	// tileH the height of one of its tiles; scrollChapter is the chapter the
+	// panels were last rebuilt for.
+	layScroll     bool
+	scrollY       float32
+	tileH         float32
+	scrollChapter int
+	// scrollFrom, scrollGoal and scrollAt describe the glide the column is on:
+	// where it started, where the wheel sent it, and when. When scrollAt is
+	// zero the column stands at scrollGoal.
+	scrollFrom, scrollGoal float32
+	scrollAt               time.Time
+	// jumpLoc is a place to return to after a change of mode: switching between
+	// pages and scrolling keeps the reader where it was, and only the way the
+	// place is named changes. jumpAt marks it pending.
+	jumpLoc render.Location
+	jumpAt  bool
 	// turning is the page turn being shown, nil when the sheet is still.
 	turning *turnState
 	// instant turns the page without sliding, as tests and reduced-motion
@@ -173,11 +196,15 @@ type app struct {
 	covers map[coverKey]*ui.Bitmap
 }
 
-// pageLabel is the folio's name for where the reader is: the cover, or the
-// page and how many the book has, as Books prints "161 of 418".
+// pageLabel is the folio's name for where the reader is: the cover, the page
+// and how many the book has, as Books prints "161 of 418", or how far down the
+// scrolling column the reader is.
 func (a *app) pageLabel() string {
 	if a.showCover {
 		return "Cover"
+	}
+	if a.scrolling() {
+		return a.scrollLabel()
 	}
 	if a.layout == nil {
 		return "— of —"
@@ -185,8 +212,12 @@ func (a *app) pageLabel() string {
 	return fmt.Sprintf("%d of %d", a.page+1, a.layout.PageCount())
 }
 
-// progress is how much of the book has been read, from 0 to 1, for the footer.
+// progress is how much of the book has been read, from 0 to 1, for the footer:
+// the page shown, or the place the scrolling column has reached.
 func (a *app) progress() float64 {
+	if a.scrolling() {
+		return a.scrollProgress()
+	}
 	if a.layout == nil {
 		return 0
 	}
@@ -206,6 +237,9 @@ func (a *app) chapterLabel() string {
 		return a.book.Title
 	}
 	i := reader.ChapterOfPage(a.layout, len(a.book.Chapters), a.page)
+	if a.scrolling() {
+		i = a.currentChapter()
+	}
 	if i < 0 || i >= len(a.book.Chapters) {
 		return a.book.Title
 	}
@@ -242,6 +276,15 @@ func (a *app) turnTarget(page, delta int) int {
 }
 
 func (a *app) turn(delta int) {
+	// Turning is the reader moving on: whatever place a pending mode switch
+	// meant to restore is stale now.
+	a.jumpAt = false
+	if a.scrolling() {
+		// A scrolling book has no pages to turn: a turn is a screenful of
+		// the column.
+		a.scrollScreens(delta)
+		return
+	}
 	if a.showCover {
 		// The first turn puts the cover away and keeps the reading position.
 		a.showCover = false
@@ -271,10 +314,9 @@ func (a *app) afterPage() {
 	a.pan.RecordPage(a.layout)
 }
 
-// gotoPage is the panels' jump callback: a table of contents row or a search
-// hit asked for a page.
+// gotoPage is the reader's jump to a page of a paged layout.
 func (a *app) gotoPage(page int) {
-	if a.layout == nil {
+	if a.layout == nil || a.scrolling() {
 		return
 	}
 	if page < 0 {
@@ -287,6 +329,46 @@ func (a *app) gotoPage(page int) {
 	a.showCover = false
 	a.turning = nil
 	a.afterPage()
+}
+
+// gotoLoc is the panels' jump: a table of contents row or a search hit, named
+// by a document location. In a scrolling layout it moves the column; in a paged
+// one it turns to the page the location falls on.
+func (a *app) gotoLoc(loc render.Location) {
+	if a.layout == nil {
+		return
+	}
+	a.showCover = false
+	if a.scrolling() {
+		if y, ok := a.layout.OffsetOf(loc); ok {
+			a.scrollTo(y)
+			return
+		}
+		a.gotoChapter(loc.Chapter)
+		return
+	}
+	if page, ok := a.layout.PageOf(loc); ok {
+		a.gotoPage(page)
+		return
+	}
+	a.gotoChapter(loc.Chapter)
+}
+
+// gotoChapter jumps to the start of a chapter, which is where a table of
+// contents row points when the location it carries cannot be resolved.
+func (a *app) gotoChapter(chapter int) {
+	if a.layout == nil {
+		return
+	}
+	if a.scrolling() {
+		if top, ok := a.layout.ChapterContentTop(chapter); ok {
+			a.scrollTo(top)
+		}
+		return
+	}
+	if starts := a.layout.ChapterPages(); chapter >= 0 && chapter < len(starts) {
+		a.gotoPage(starts[chapter])
+	}
 }
 
 func (a *app) changeFont(delta float32) {
@@ -302,6 +384,13 @@ func (a *app) setOptions(o reader.Options) {
 	o = o.Normalized()
 	if o == a.opts {
 		return
+	}
+	if o.Scroll != a.opts.Scroll {
+		// The reading place survives the switch: remember where the reader is
+		// before the layout that names it gives way.
+		if loc, ok := a.currentLoc(); ok {
+			a.jumpLoc, a.jumpAt = loc, true
+		}
 	}
 	a.opts = o
 	a.optsAt = time.Now()
@@ -344,6 +433,7 @@ func (a *app) savePrefs() {
 		s.Prefs.Justify = o.Justify
 		s.Prefs.Margin = o.Margin
 		s.Prefs.Spread = o.Spread
+		s.Prefs.Scroll = o.Scroll
 		s.Prefs.Theme = string(theme)
 	})
 	a.st.SaveSoon(0)
@@ -373,7 +463,7 @@ func (a *app) ensureLayout(w, h float32) {
 		return
 	}
 	opts := a.opts
-	sw, sh := a.sheetSize(w, h)
+	sw, sh := a.sheetSize(w, h, opts)
 	// The page keeps its margins whatever the window does: below three of them
 	// there is no line to lay out, so say so instead of failing the job.
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
@@ -463,18 +553,44 @@ func (a *app) ensureLayout(w, h float32) {
 			}
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
+			a.layScroll = opts.Scroll
+			if a.jumpAt {
+				a.jumpAt = false
+				if a.layScroll {
+					if y, ok := layout.OffsetOf(a.jumpLoc); ok {
+						a.scrollY = y
+					}
+				} else if page, ok := layout.PageOf(a.jumpLoc); ok {
+					a.page = page
+				}
+			}
 			// Node ids belong to one layout: a selection from the old one would
 			// point at nothing, and a slide in flight at a page of it.
 			a.clearSelection()
 			a.turning = nil
-			a.page = a.snapPage(min(a.page, layout.PageCount()-1))
-			a.page = max(a.page, 0)
 			a.status = ""
-			if a.pan != nil {
-				if rebuilt {
-					a.pan.SetIndex(index)
+			a.tileH = 0
+			if a.scrolling() {
+				// The scroll flow is sliced into tiles one layout viewport tall.
+				a.tileH = sh
+				a.page = 0
+				a.scrollY = clampf(a.scrollY, 0, a.maxScroll())
+				if a.pendingResume && a.pan != nil {
+					a.pendingResume = false
+					if loc, how := a.pan.ResumeAt(layout); how != "" {
+						if y, ok := layout.OffsetOf(loc); ok {
+							a.scrollY = y
+							a.resumeNote = resumeScrollNote(layout, loc, how)
+							a.status = a.resumeNote
+						}
+					}
 				}
-				if a.pendingResume {
+				a.scrollY = clampf(a.scrollY, 0, a.maxScroll())
+				a.scrollChapter = -1
+			} else {
+				a.page = a.snapPage(min(a.page, layout.PageCount()-1))
+				a.page = max(a.page, 0)
+				if a.pendingResume && a.pan != nil {
 					a.pendingResume = false
 					if page, how := a.pan.Resume(layout); how != "" {
 						a.page = a.snapPage(page)
@@ -482,9 +598,28 @@ func (a *app) ensureLayout(w, h float32) {
 						a.status = a.resumeNote
 					}
 				}
-				a.pan.Refresh(a.book, layout, a.page)
-				a.pan.RecordPage(layout)
 			}
+			// A new layout starts the column still: wherever the reader was is
+			// the place it stands at now.
+			a.scrollFrom, a.scrollGoal, a.scrollAt = a.scrollY, a.scrollY, time.Time{}
+			if a.pan != nil {
+				if rebuilt {
+					a.pan.SetIndex(index)
+				}
+				if a.scrolling() {
+					if loc, ok := a.currentLoc(); ok {
+						a.scrollChapter = loc.Chapter
+						a.pan.RefreshAt(a.book, layout, loc)
+						a.pan.RecordAt(layout, loc)
+					} else {
+						a.pan.Refresh(a.book, layout, 0)
+					}
+				} else {
+					a.pan.Refresh(a.book, layout, a.page)
+					a.pan.RecordPage(layout)
+				}
+			}
+			a.scrollAhead()
 			// Last, so the marks follow the new geometry and the new index: a
 			// rebuild has just cleared the hits.
 			a.refreshMarks()
@@ -617,6 +752,9 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		a.status = "《" + b.Title + "》"
 		a.pendingResume = true
 		a.resumeNote = ""
+		a.layScroll = false
+		a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
+		a.scrollFrom, a.scrollGoal, a.scrollAt = 0, 0, time.Time{}
 		if a.pan != nil {
 			a.pan.Opened(b, path)
 			a.pan.Refresh(b, nil, 0)
@@ -726,6 +864,19 @@ func (a *app) menuBar() *mygo.Menu {
 		Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.copyPageText) },
 	}
 	a.menuCopy = copySelection
+	scroll := &mygo.MenuItem{
+		Label:   "滚动阅读",
+		Type:    mygo.MenuItemCheckbox,
+		Checked: a.opts.Scroll,
+		Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.menuAction(func() {
+				o := a.opts
+				o.Scroll = !o.Scroll
+				a.setOptions(o)
+			})
+		},
+	}
+	a.menuScroll = scroll
 	show := func(sidebar string) func(*mygo.MenuItem, *mygo.Window) {
 		return func(*mygo.MenuItem, *mygo.Window) {
 			a.menuAction(func() {
@@ -758,6 +909,7 @@ func (a *app) menuBar() *mygo.Menu {
 			{Label: "按书名排序", Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.menuAction(func() { a.sortByTitle = !a.sortByTitle })
 			}},
+			scroll,
 			{Label: "目录", Accelerator: "CmdOrCtrl+T", Click: show(appstate.SidebarToc)},
 			{Label: "搜索", Accelerator: "CmdOrCtrl+F", Click: show(appstate.SidebarSearch)},
 			{Label: "显示设置…", Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -840,6 +992,7 @@ func main() {
 			Justify:    prefs.Justify,
 			Margin:     prefs.Margin,
 			Spread:     prefs.Spread,
+			Scroll:     prefs.Scroll,
 		}.Normalized()
 		if prefs.Theme != "" {
 			a.theme = reader.ParseTheme(prefs.Theme)
@@ -849,7 +1002,7 @@ func main() {
 	a.pan.OnPickDir = a.chooseDir
 	a.pan.Cover = a.coverBitmap
 	a.pan.Open = a.openPath
-	a.pan.Jump = a.gotoPage
+	a.pan.Jump = a.gotoLoc
 	a.pan.OnHits = a.refreshMarks
 	a.pan.Post = func(fn func()) {
 		if win := a.winShared.Load(); win != nil {

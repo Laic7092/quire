@@ -22,11 +22,14 @@ const indent = 14
 type Panel struct {
 	Entries  []Entry
 	Selected int // the row under the pointer last clicked, -1 for none
-	OnJump   func(page int)
+	// OnJump is called with the chapter of a clicked row (an index into the
+	// book's chapters). The host resolves it to a page or a scroll offset:
+	// only it knows which mode the layout is in.
+	OnJump func(chapter int)
 
-	// Layout, when set, resolves a click through PageOf, so entries built before
-	// a relayout still jump to the chapter's current first page. It may be nil,
-	// in which case a click uses Entry.Page.
+	// Layout, when set, resolves a click through PageOf. It may be nil, in
+	// which case a click uses Entry.Page. It is not needed for jumping: a row
+	// reports its chapter, and the host knows the layout.
 	Layout *render.Layout
 	// List keeps the scroll position. Call ScrollToCurrent after rebuilding
 	// Entries to open the panel at the chapter being read.
@@ -96,7 +99,9 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 // darkens as the pointer rests on it, and a click jumps to the chapter.
 func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	e := p.Entries[i]
-	disabled := e.Page < 0
+	// A row jumps when the layout resolved its chapter. Without a layout only
+	// a remembered page is something to jump to.
+	disabled := !e.HasLoc && e.Page < 0
 
 	row := ui.Row(c).FillWidth().Height(30).AlignItems(ui.Center).Gap(6).Radius(6).
 		Padding(0, 8, 0, 8+float32(e.Level)*indent)
@@ -143,17 +148,10 @@ func (p *Panel) jump(i int) {
 		return
 	}
 	e := p.Entries[i]
-	var page int
-	var ok bool
-	if p.Layout == nil {
-		page, ok = e.Page, e.Page >= 0
-	} else {
-		page, ok = PageOf(p.Layout, e)
-	}
-	if !ok {
+	if !e.HasLoc && e.Page < 0 {
 		return
 	}
-	p.OnJump(page)
+	p.OnJump(e.Chapter)
 }
 
 // pageLabel is the page text of a row: the one page it starts on, or the range

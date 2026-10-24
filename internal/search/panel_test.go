@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 )
 
 func testPanel() *Panel {
@@ -11,8 +12,10 @@ func testPanel() *Panel {
 		Query:  "ray",
 		Status: "3 条结果",
 		Hits: []Hit{
-			{Chapter: 0, Title: "第一章", Snippet: "hello 「ray」 of light", Offset: 2},
-			{Chapter: 1, Title: "第二章", Snippet: "another 「ray」", Offset: 9},
+			{Chapter: 0, Title: "第一章", Snippet: "hello 「ray」 of light", Offset: 2,
+				Loc: render.Location{Chapter: 0, Node: 2, Offset: 2}},
+			{Chapter: 1, Title: "第二章", Snippet: "another 「ray」", Offset: 9,
+				Loc: render.Location{Chapter: 1, Node: 3, Offset: 9}},
 		},
 		PageOf: func(h Hit) (int, bool) { return h.Chapter + 1, true },
 	}
@@ -20,8 +23,8 @@ func testPanel() *Panel {
 
 func TestPanelShowsHitsAndJumps(t *testing.T) {
 	p := testPanel()
-	jumped := -1
-	p.OnJump = func(page int) { jumped = page }
+	var jumped render.Location
+	p.OnJump = func(loc render.Location) { jumped = loc }
 
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 420, 520)
 	tt.Frame()
@@ -39,8 +42,8 @@ func TestPanelShowsHitsAndJumps(t *testing.T) {
 	if err := tt.Click("hello 「ray」 of light"); err != nil {
 		t.Fatal(err)
 	}
-	if jumped != 1 {
-		t.Errorf("jumped to %d, want 1", jumped)
+	if jumped.Chapter != 0 || jumped.Node != 2 || jumped.Offset != 2 {
+		t.Errorf("jumped to %+v, want the first hit's location", jumped)
 	}
 	if p.Selected != 0 {
 		t.Errorf("selected = %d, want 0", p.Selected)

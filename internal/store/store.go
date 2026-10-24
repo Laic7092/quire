@@ -79,6 +79,8 @@ type Prefs struct {
 	Margin float32 `json:"margin"`
 	// Spread shows two pages side by side.
 	Spread bool `json:"spread"`
+	// Scroll reads the book as one continuous column instead of pages.
+	Scroll bool `json:"scroll"`
 	// Theme is the paper: "white", "sepia", "gray" or "night", empty while the
 	// reader follows the system's appearance.
 	Theme string `json:"theme"`

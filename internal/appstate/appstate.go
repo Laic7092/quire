@@ -58,8 +58,10 @@ type App struct {
 	Post func(fn func())
 	// Open opens a book path; the host parses it off the UI thread.
 	Open func(path string)
-	// Jump shows a page of the current book.
-	Jump func(page int)
+	// Jump shows a location of the current book: a table of contents row or a
+	// search hit. The host turns it into a page or a scroll offset, whichever
+	// the layout's mode uses.
+	Jump func(loc render.Location)
 	// OnHits runs on the UI thread whenever Search.Hits changes, so the host can
 	// rebuild what it derives from them, such as the highlight rectangles it
 	// paints on the page.
@@ -98,7 +100,7 @@ func New(st *store.Store) *App {
 	a.Shelf.OnOpen = a.open
 	a.Shelf.OnReload = a.ReloadShelf
 
-	a.Toc.OnJump = a.jump
+	a.Toc.OnJump = a.jumpChapter
 	a.Search.OnJump = a.jump
 	a.Search.OnSearch = a.search
 	a.Search.PageOf = func(h search.Hit) (int, bool) {
@@ -146,11 +148,36 @@ func (a *App) ReloadShelf() {
 }
 
 // Refresh republishes the panels for a new layout, book or page. Hosts call it
-// after a build, after a relayout and after every page turn.
+// after a build, after a relayout and after every page turn. It is the paged
+// form; in a scroll layout use RefreshAt, which names the place by location.
 func (a *App) Refresh(bk *book.Book, layout *render.Layout, page int) {
+	loc := render.Location{}
+	if layout != nil {
+		if l, ok := layout.LocationOfPage(page); ok {
+			loc = l
+		}
+	}
+	a.refreshAt(bk, layout, loc, page)
+}
+
+// RefreshAt is Refresh for a reading position: the page (when the layout has
+// pages) and the current chapter both follow the location, so a scroll layout,
+// which has no pages, still marks the chapter being read.
+func (a *App) RefreshAt(bk *book.Book, layout *render.Layout, loc render.Location) {
+	page := -1
+	if layout != nil && layout.PageCount() > 0 {
+		if n, ok := layout.PageOf(loc); ok {
+			page = n
+		}
+	}
+	a.refreshAt(bk, layout, loc, page)
+}
+
+// refreshAt rebuilds the panels from the layout and the place read to.
+func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Location, page int) {
 	a.layout, a.page = layout, page
 	a.Toc.Layout = layout
-	a.Toc.Entries = toc.Build(bk, layout, page)
+	a.Toc.Entries = toc.BuildAt(bk, layout, loc)
 	if len(a.Toc.Entries) > 0 {
 		a.Toc.SelectCurrent()
 	}
@@ -197,9 +224,10 @@ func (a *App) Opened(bk *book.Book, path string) string {
 
 // Resume returns the page to open the book at, from the position saved for the
 // current key. how is the store's degradation path ("node", "anchor",
-// "progress", "chapter"), and empty when nothing is saved.
+// "progress", "chapter"), and empty when nothing is saved. It needs a paged
+// layout: a scroll layout has no pages, so use ResumeAt.
 func (a *App) Resume(layout *render.Layout) (page int, how string) {
-	if a.Store == nil || a.BookKey == "" {
+	if a.Store == nil || a.BookKey == "" || layout == nil {
 		return 0, ""
 	}
 	p, ok := a.Store.Position(a.BookKey)
@@ -213,6 +241,18 @@ func (a *App) Resume(layout *render.Layout) (page int, how string) {
 	return page, how
 }
 
+// ResumeAt returns the location to open the book at, in either mode.
+func (a *App) ResumeAt(layout *render.Layout) (loc render.Location, how string) {
+	if a.Store == nil || a.BookKey == "" || layout == nil {
+		return render.Location{}, ""
+	}
+	p, ok := a.Store.Position(a.BookKey)
+	if !ok {
+		return render.Location{}, ""
+	}
+	return store.Locate(layout, p)
+}
+
 // RecordPage saves the reading position of the current book. A burst of page
 // turns costs one write, two seconds after the last.
 func (a *App) RecordPage(layout *render.Layout) {
@@ -223,6 +263,24 @@ func (a *App) RecordPage(layout *render.Layout) {
 	if !ok {
 		return
 	}
+	a.record(p)
+}
+
+// RecordAt saves the reading location in either mode: a paged host records the
+// position of the page, a scroll host the position at the top of the viewport.
+func (a *App) RecordAt(layout *render.Layout, loc render.Location) {
+	if a.Store == nil || a.BookKey == "" || layout == nil {
+		return
+	}
+	p, ok := store.PositionAt(layout, loc)
+	if !ok {
+		return
+	}
+	a.record(p)
+}
+
+// record stores a position and asks for a debounced write.
+func (a *App) record(p store.Position) {
 	a.Store.SetPosition(a.BookKey, p)
 	a.Store.SaveSoon(2 * time.Second)
 }
@@ -246,9 +304,27 @@ func (a *App) open(path string) {
 	}
 }
 
-func (a *App) jump(page int) {
-	if a.Jump != nil && page >= 0 {
-		a.Jump(page)
+func (a *App) jump(loc render.Location) {
+	if a.Jump != nil {
+		a.Jump(loc)
+	}
+}
+
+// jumpChapter jumps to the start of a chapter, which is what a table of
+// contents row asks for. The layout names the chapter's first line, so the
+// same call serves both a page and a scroll position.
+func (a *App) jumpChapter(chapter int) {
+	if a.layout == nil || a.Jump == nil {
+		return
+	}
+	if loc, ok := a.layout.Locate(render.AnchorID(chapter + 1)); ok {
+		a.Jump(loc)
+		return
+	}
+	if top, ok := a.layout.ChapterContentTop(chapter); ok {
+		if loc, ok := a.layout.LocationAt(top); ok {
+			a.Jump(loc)
+		}
 	}
 }
 

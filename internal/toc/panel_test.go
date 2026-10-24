@@ -35,7 +35,7 @@ func TestPanelDrawsRows(t *testing.T) {
 
 func TestPanelJumpOnClick(t *testing.T) {
 	var jumped []int
-	p := &Panel{Entries: panelEntries(), Selected: 0, OnJump: func(page int) { jumped = append(jumped, page) }}
+	p := &Panel{Entries: panelEntries(), Selected: 0, OnJump: func(chapter int) { jumped = append(jumped, chapter) }}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 400)
 	tt.Frame()
 
@@ -45,8 +45,8 @@ func TestPanelJumpOnClick(t *testing.T) {
 	if p.Selected != 2 {
 		t.Errorf("Selected = %d after a click on row 2, want 2", p.Selected)
 	}
-	if len(jumped) != 1 || jumped[0] != 5 {
-		t.Fatalf("jumped to %v, want [5]", jumped)
+	if len(jumped) != 1 || jumped[0] != 2 {
+		t.Fatalf("jumped to chapters %v, want [2]", jumped)
 	}
 
 	// A row without a page is disabled: it may be chosen, but does not jump.

@@ -1,7 +1,7 @@
 # layx-reader
 
 用 MyGo 原生 UI（`package ui`，没有任何 webview / TypeScript 前端）实现的 EPUB / TXT
-分页阅读器。断行、分页、行位置和字形位置全部由本地 `github.com/laix/layx`
+阅读器，分页与滚动两种模式。断行、分页、行位置和字形位置全部由本地 `github.com/laix/layx`
 的 `render` 引擎产出；本仓库做四件事：
 
 1. `internal/book`：`archive/zip` + `encoding/xml` 解析 EPUB（container.xml →
@@ -9,15 +9,17 @@
    `render.Document` 的最小标签子集，并把图片映射成 `render.NodeImage`；同时
    解析 TXT（编码探测、章节标题、段落切分）并复用同一条 `Chapter` 管线。
 2. `internal/reader`：加载字体（内置 XCharter 做正文衬线、Inter 做窗口文字，CJK
-   回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`，并实现 `paint.Painter`，把
+   回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`（分页用
+   `ModePaged`，滚动用 `ModeScroll` + tile），并实现 `paint.Painter`，把
    layx 的 `DisplayList` 通过 `ui.Painter` / `ui.Path` / `FillPath` 画出来（字形来自
    go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能同时
    出现；位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。同一层还管纸与墨
    （`Palette`，几套纸都在 `internal/reader/theme.go`）、阅读设置（`Options`：字号、
-   行距、字面、对齐、页边距、双页）和选区：`Selection` 把拖出来的两个
-   `render.Location` 变成分页矩形（`Layout.Selection`）和选中的文字（走
-   `render.Chapter.Nodes`，因为引擎不导出文本区间）。
-3. `main.go` + `view.go` + `sheet.go` + `theme.go` + `settings.go` + `stats.go`：原生
+   行距、字面、对齐、页边距、双页、滚动）和选区：`Selection` 把拖出来的两个
+   `render.Location` 变成矩形（`Layout.Selection`；分页模式带页号，滚动模式带内容
+   坐标）和选中的文字（走 `render.Chapter.Nodes`，因为引擎不导出文本区间）。
+3. `main.go` + `view.go` + `sheet.go` + `scroll.go` + `theme.go` + `settings.go` +
+   `stats.go`：原生
    窗口，按 macOS Books 26 的阅读页截图（787×590 DIP、Quiet 纸、双页、Aa 展开）逐项
    摆的。阅读页：顶栏左侧一个胶囊里是目录/书签/笔记三个 16pt 图标，中间是书名（12pt、
    semibold、居中），右侧一个胶囊里是分享、**Aa** 与搜索，再右边是独立的圆形书签钮；正文
@@ -38,6 +40,11 @@
    ←/→ 翻页（大开本一次翻两页），Home/End 首末页，+/- 改字号，⌘B/⌘F/⌘T
    书库侧栏/搜索/目录；鼠标点书页左半回翻、右半前进（按下后拖动仍是选字）。Esc 依次收起
    面板/封面/选区/回到书库。
+   **滚动模式**（Aa → Customize → Scrolling，或「显示 → 滚动阅读」）用
+   `render.ModeScroll` 排一份整本连续的流，按一屏高的 tile 懒构建并绘制：滚轮/触控板
+   滚动、↑↓ 滚三行、←/→、PageUp/PageDown、空格滚一屏（留 10% 重叠）、Home/End 到首尾；
+   点击不翻页也不滚动，只清选区。页脚中间换成百分比，右边是本章还剩几屏；读到的
+   位置按 `render.Location` 记，和分页模式共用一套存储与恢复。
    翻页是一条横向滑带：旧页整幅
    移出、新页跟着进来，边界上有一道落在纸上的影子。在纸上按住拖动可以选字，⌘C 复制
    选中的文字；右键（macOS 是 Ctrl+点击，或菜单键/Shift+F10）是页面的菜单：复制、
@@ -46,17 +53,18 @@
    一行 38 高的分段（小 A / 大 A 一组，中间一条浅分隔线；右边是独立的 63 宽外观钮），
    3×2 的 62×55 主题卡片（Original / Quiet / Paper / Bold / Calm / Focus，Aa 与名字都印在
    卡里，选中的那张圈一道墨线），底下是 36 高的「⚙ Customize」胶囊。点开 Customize 才是
-   字号、行距、页边距三个滑块，Serif/Sans、Justified/Left 两组分段，Two Pages 开关和
-   Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
+   字号、行距、页边距三个滑块，Serif/Sans、Justified/Left 两组分段，Two Pages 与
+   Scrolling 两个开关和 Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
 4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见。
 
 常用功能各有一个包，都能独立测试：
 
 - `internal/library`：书架。只读 `container.xml` → OPF 的 metadata 拿 title/creator/封面，
   不打开整本书；首页与源列表从它取数据。
-- `internal/toc`：目录。页码只来自 `layout.PageRange`，层级按标题里的「第N卷/部/篇/册」猜。
-- `internal/search`：全文搜索。索引走 `render.NodeText`，命中映射回 `render.Location`，
-  再由 `layout.PageOf` 变成页码。
+- `internal/toc`：目录。页码只来自 `layout.PageRange`（滚动模式没有页，行只带章节），
+  层级按标题里的「第N卷/部/篇/册」猜。
+- `internal/search`：全文搜索。索引走 `render.NodeText`，命中映射回 `render.Location`；
+  面板按 `layout.PageOf` 显示页码，滚动模式没有页，就只按位置跳转。
 - `internal/store`：持久化。`os.UserConfigDir()/layx-reader/state.json`（Linux 是
   `~/.config`，macOS 是 `~/Library/Application Support`），原子写 + 2s 合并写入，
   存书架、每本书的阅读位置和字号/面板偏好；`PageFor` 按 node → anchor → progress →
@@ -132,8 +140,9 @@ macOS 上额外做了这些：
 只覆盖西文，CJK 由系统 CJK 字体在同一 family 里 fallback，所以一半西文衬线、一半中文
 黑体也能排出来。
 
-选区和高亮都在宿主侧，不依赖新 API：`Page.HitTest` 把纸上的一点变成 `render.Location`，
-`Layout.Selection(from, to)` 给出分页矩形（跨页/跨章由引擎排序），宿主在 `Draw` 回调里
+选区和高亮都在宿主侧，不依赖新 API：`Page.HitTest` / `Layout.HitTest` 把纸上的一点变成
+`render.Location`，`Layout.Selection(from, to)` 给出矩形（跨页/跨章由引擎排序；滚动模式
+给内容坐标），宿主在 `Draw` 回调里
 把矩形填成半透明的「罩色」——搜索命中和拖选共用同一条路径。选中的文字由
 `Selection.Text` 沿 `render.Chapter.Nodes` 拼接（`search` 的索引走同一套遍历）。
 换了 `Layout`（字号、窗口尺寸、换书）就清掉选区：`Location` 里的 node id 只属于一份布局。
@@ -223,7 +232,8 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
   书架不递归子目录、不监听目录变化；目录层级靠标题猜，没用 nav 的嵌套。
   TXT 没有目录，也不区分诗歌/剧本的特殊排版；Gutenberg 的页眉页脚会成为“第 1 节”。
 - 位置记忆依赖 node 号在本仓库里跨 `Build` 稳定这一事实；换书源/更新 EPUB 后旧位置会
-  静默偏移。单页文档没有 `PageFor` 的反向映射，因此不记位置。
+  静默偏移。分页模式依赖 `PageFor` 的反向映射（单页文档拿不到，因此不记位置），滚动模式
+  走 `store.Locate` / `store.PositionAt`，不依赖页。
 - 改字号/行距/字面/页边距、换纸都要整本书重排一次（开关悬浮面板不会）：纸和墨是 `Layout`
   时写进样式里的（`reader.Palette`，见摩擦点 11），字号也是文档构建时的常量。拖动
   Aa 里的滑块会等 160ms 再排，所以不是每个像素都排一次，但一次滑动仍会排一两次。
@@ -232,6 +242,7 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
   `双页显示` 会被忽略。
 - 翻页是横移，不是 Books 的翻卷（curl）：卷页要做像素级形变，layx 现在只给显示列表，
   宿主没有整页的位图可扭。
-- 只有分页模式，没有滚动模式；没有 wasm / 网页版本。
+- 滚动模式没有 Books 那种惯性滑动与卷页：滚轮按平台给的位移立刻滚动，键盘一屏一屏跳；
+  滚动位置按 `Location` 记录，重排后落在同一行的行首，不是同一个像素。没有 wasm / 网页版本。
 - 字体集只有一个字面（face），所以粗体和斜体在当前字体没有对应 face 时
   只表现为同一字形。

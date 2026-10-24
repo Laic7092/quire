@@ -24,10 +24,19 @@ import (
 // rectangles here and the draw callback only fills what it is given.
 func (a *app) handlePageInput(ev ui.InputEvent) bool {
 	switch ev.Kind {
+	case ui.InputScroll:
+		// A scrolling column takes the wheel and the touchpad itself; a paged
+		// book leaves the event to whatever is around it.
+		if !a.scrolling() || a.layout == nil {
+			return false
+		}
+		a.scrollBy(ev.DY)
+		return true
 	case ui.InputPointerDown:
 		if ev.Button != 0 || a.showCover || a.layout == nil {
 			return false
 		}
+		a.stopScroll()
 		loc, ok := a.pageLocation(ev.X, ev.Y)
 		if !ok {
 			return false
@@ -63,8 +72,9 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.selDragging = false
 		// A release that did not leave its press is a click, and a click turns
 		// the page: inside the window a pointer may wobble a little without
-		// meaning to select anything.
-		if !a.selMoved {
+		// meaning to select anything. A scrolling column has no page to turn,
+		// so the click only clears the selection.
+		if !a.selMoved && !a.scrolling() {
 			a.turn(a.turnAt(a.pressX))
 		}
 		return true
@@ -97,6 +107,9 @@ func (a *app) turnAt(x float32) int {
 func (a *app) pageLocation(x, y float32) (render.Location, bool) {
 	if a.layout == nil {
 		return render.Location{}, false
+	}
+	if a.scrolling() {
+		return a.scrollLocation(x, y)
 	}
 	index := a.page
 	width := a.boxW / float32(a.pagesOnSheet())
@@ -156,9 +169,13 @@ func (a *app) selectedText() string {
 // selectPage selects everything on the page being read, so a reader can copy a
 // whole page by hand. The layout's viewport is the page: its content box starts
 // one margin in and ends one margin out, and HitTest clamps the corners to the
-// first and last line or image.
+// first and last line or image. A scrolling column selects what it shows.
 func (a *app) selectPage() {
 	if a.layout == nil || a.showCover {
+		return
+	}
+	if a.scrolling() {
+		a.scrollSelectAll()
 		return
 	}
 	pages := a.pagesFrom(a.page)

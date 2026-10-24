@@ -29,8 +29,12 @@ type turnState struct {
 }
 
 // pagesOnSheet is how many pages the sheet shows: two when the reader asked for
-// a spread and the page area is wide enough for two readable ones.
+// a spread and the page area is wide enough for two readable ones. A scrolling
+// book has one column whatever the width.
 func (a *app) pagesOnSheet() int {
+	if a.layScroll {
+		return 1
+	}
 	if a.opts.Spread && a.areaW >= 2*reader.SpreadMinWidth {
 		return 2
 	}
@@ -49,13 +53,23 @@ func (a *app) snapPage(page int) int {
 	return page
 }
 
-// sheetSize is the size one page is laid out at inside a box of w×h: half the
-// width when two share it.
-func (a *app) sheetSize(w, h float32) (float32, float32) {
-	if a.pagesOnSheet() == 2 {
-		return w / 2, h
+// sheetSize is the size one page is laid out at for the layout opts ask for: a
+// column, half a spread, or a whole single page, inside the page area the last
+// frame measured. w is the box the sheet fills today, which is the box the
+// settings are about to change: the width is recomputed from the area whenever
+// the mode switch resizes it, so a scrolling column is never laid out at a
+// spread's width, nor the other way round.
+func (a *app) sheetSize(w, h float32, opts reader.Options) (float32, float32) {
+	avail := w
+	if a.areaW > 2*pagePadding {
+		avail = a.areaW - 2*pagePadding
 	}
-	return w, h
+	pages := 1
+	if !opts.Scroll && opts.Spread && a.areaW >= 2*reader.SpreadMinWidth {
+		pages = 2
+	}
+	box := min(avail, pageMaxWidth*float32(pages))
+	return box / float32(pages), h
 }
 
 // pageAtX maps a point across the box to the page shown under it: the left half
@@ -133,6 +147,10 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 		return
 	}
 	if a.layout == nil || a.paint == nil {
+		return
+	}
+	if a.scrolling() {
+		a.drawScroll(p, r)
 		return
 	}
 	progress, moving := a.turnProgress()

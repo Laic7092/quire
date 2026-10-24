@@ -32,6 +32,10 @@ type Options struct {
 	Margin float32
 	// Spread shows two pages side by side when the window is wide enough.
 	Spread bool
+	// Scroll reads the book as one continuous column instead of pages: the
+	// layout is built in render.ModeScroll and the reader scrolls it. The
+	// spread does not apply; one column fills the sheet.
+	Scroll bool
 }
 
 // DefaultOptions is what a reader starts with: 17px on 1.18 leading, in the
@@ -88,11 +92,13 @@ func (o Options) Normalized() Options {
 
 // Same reports whether two sets of options would lay out the same text the same
 // way, and so need no new layout. The spread is not included: it changes the
-// sheet's width, which the layout job watches on its own.
+// sheet's width, which the layout job watches on its own. The scroll mode is
+// included: it changes the layout's output mode and so its very geometry.
 func (o Options) Same(other Options) bool {
 	o, other = o.Normalized(), other.Normalized()
 	return o.FontSize == other.FontSize && o.LineHeight == other.LineHeight &&
-		o.Font == other.Font && o.Justify == other.Justify && o.Margin == other.Margin
+		o.Font == other.Font && o.Justify == other.Justify && o.Margin == other.Margin &&
+		o.Scroll == other.Scroll
 }
 
 // Margins is the standard page inset, all four sides.
@@ -129,6 +135,13 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 	if opts.Justify {
 		align = render.AlignJustify
 	}
+	// Scroll mode stacks the chapters into one flow and slices it into tiles
+	// one viewport tall, which is what the reader draws while it scrolls.
+	mode := render.ModePaged
+	var tileHeight float32
+	if opts.Scroll {
+		mode, tileHeight = render.ModeScroll, height
+	}
 	return eng.Layout(ctx, doc, render.LayoutOptions{
 		Viewport: render.Viewport{Width: width, Height: height},
 		Typography: render.Typography{
@@ -139,8 +152,10 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 			Color:      palette.Ink,
 			Background: palette.Paper,
 		},
-		Fonts:   fonts.Set,
-		Margins: opts.Margins(),
+		Fonts:      fonts.Set,
+		Margins:    opts.Margins(),
+		Mode:       mode,
+		TileHeight: tileHeight,
 	})
 }
 

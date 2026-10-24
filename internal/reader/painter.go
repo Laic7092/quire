@@ -118,6 +118,20 @@ func (u *UIPainter) DrawPage(p *ui.Painter, page *render.Page, box ui.Rect) {
 	})
 }
 
+// DrawTile replays one tile of a scroll layout into the element at box, cut to
+// view, the visible part of the scrolling column. The tile is a display list in
+// its own coordinates, so box is wherever its top edge lands this frame.
+func (u *UIPainter) DrawTile(p *ui.Painter, tile *render.Tile, box ui.Rect, view ui.Rect) {
+	if u == nil || p == nil || tile == nil || box.W <= 0 || box.H <= 0 {
+		return
+	}
+	u.P = p
+	u.dx, u.dy = box.X, box.Y
+	p.Clip(view, 0, func() {
+		tile.Draw(u)
+	})
+}
+
 func (u *UIPainter) Save()    {}
 func (u *UIPainter) Restore() {}
 
@@ -143,6 +157,30 @@ func (u *UIPainter) FillQuads(p *ui.Painter, box ui.Rect, page int, quads []rend
 		y0 := max(box.Y+q.Rect.Y, box.Y)
 		x1 := min(box.X+q.Rect.X+q.Rect.Width, box.X+box.W)
 		y1 := min(box.Y+q.Rect.Y+q.Rect.Height, box.Y+box.H)
+		if x1 <= x0 || y1 <= y0 {
+			continue
+		}
+		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(colour), 0)
+	}
+}
+
+// FillScrollQuads fills highlight rectangles of a scroll layout: the quads
+// carry content coordinates, so view is the visible column whose top-left
+// shows content (0, scrollY), and margins are already included in Content.X.
+// Each rectangle is cut to view, so a highlight never paints over the bars.
+func (u *UIPainter) FillScrollQuads(p *ui.Painter, view ui.Rect, quads []render.SelectionQuad, colour paint.Color, scrollY float32) {
+	if u == nil || p == nil || colour.Transparent() {
+		return
+	}
+	for i := range quads {
+		q := &quads[i]
+		if q.Content.Empty() {
+			continue
+		}
+		x0 := max(view.X+q.Content.X, view.X)
+		y0 := max(view.Y+q.Content.Y-scrollY, view.Y)
+		x1 := min(view.X+q.Content.X+q.Content.Width, view.X+view.W)
+		y1 := min(view.Y+q.Content.Y+q.Content.Height-scrollY, view.Y+view.H)
 		if x1 <= x0 || y1 <= y0 {
 			continue
 		}

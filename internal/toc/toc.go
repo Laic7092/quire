@@ -29,10 +29,15 @@ import (
 type Entry struct {
 	Title   string // chapter title
 	Chapter int    // index into book.Chapters
-	Page    int    // global page the chapter starts at; -1 without a layout
-	Pages   int    // pages in the chapter; 0 without a layout
+	Page    int    // global page the chapter starts at; -1 in scroll mode or without a layout
+	Pages   int    // pages in the chapter; 0 in scroll mode or without a layout
 	Level   int    // 0 for a volume heading, 1 for everything else
 	Current bool   // reading position falls inside this chapter
+	// Loc is where the row jumps to: the chapter's root node, or the first
+	// line of its content in a scroll layout. HasLoc is false when the layout
+	// cannot resolve the chapter, which is also when the row is disabled.
+	Loc    render.Location
+	HasLoc bool
 }
 
 // Build derives the table of contents from a book and a layout.
@@ -43,11 +48,34 @@ type Entry struct {
 // chapter whose PageRange contains it as Current, and no chapter when it
 // falls outside every range (including a page past the end of the layout).
 //
+// A scroll layout has no pages: Page stays -1 and Current is nobody's. BuildAt
+// takes the reading location instead, so both modes mark the chapter the reader
+// is in.
+//
 // A layout whose chapter count does not match the book is treated as stale
 // rather than as an error: chapters it still covers keep their pages, the
 // rest fall back to Page -1. Build never panics on a nil or empty book; it
 // returns nil.
 func Build(b *book.Book, layout *render.Layout, currentPage int) []Entry {
+	return build(b, layout, currentPage, -1)
+}
+
+// BuildAt is Build for a reading position instead of a page. current is the
+// location at the top of what the reader sees, which is also how a scroll
+// layout names its place: the chapter current falls in is the one marked
+// Current, and the entries carry the location their row jumps to.
+func BuildAt(b *book.Book, layout *render.Layout, current render.Location) []Entry {
+	page := -1
+	if layout != nil && layout.PageCount() > 0 {
+		if n, ok := layout.PageOf(current); ok {
+			page = n
+		}
+	}
+	return build(b, layout, page, current.Chapter)
+}
+
+// build fills the entries: pages for a paged layout, a location for either.
+func build(b *book.Book, layout *render.Layout, currentPage, currentChapter int) []Entry {
 	if b == nil || len(b.Chapters) == 0 {
 		return nil
 	}
@@ -63,6 +91,17 @@ func Build(b *book.Book, layout *render.Layout, currentPage int) []Entry {
 			if first, count, ok := layout.PageRange(i); ok && count > 0 {
 				e.Page, e.Pages = first, count
 				e.Current = currentPage >= first && currentPage < first+count
+			} else {
+				// A scroll layout: no pages, so the chapter is current when the
+				// reader is anywhere in it.
+				e.Current = currentChapter == i
+			}
+			if loc, ok := layout.Locate(render.AnchorID(i + 1)); ok {
+				e.Loc, e.HasLoc = loc, true
+			} else if top, ok := layout.ChapterContentTop(i); ok {
+				if loc, ok := layout.LocationAt(top); ok {
+					e.Loc, e.HasLoc = loc, true
+				}
 			}
 		}
 		entries[i] = e
@@ -76,7 +115,7 @@ func Build(b *book.Book, layout *render.Layout, currentPage int) []Entry {
 // layout still land on the right page after a relayout, as long as the
 // chapter still exists. When the layout does not cover e.Chapter, the stored
 // page is used if it is still inside the layout. Without a layout, ok is
-// false.
+// false. A scroll layout has no pages: use e.Loc and Layout.OffsetOf instead.
 func PageOf(layout *render.Layout, e Entry) (page int, ok bool) {
 	if layout == nil {
 		return 0, false

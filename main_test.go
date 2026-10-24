@@ -172,7 +172,7 @@ func TestSidePanelsBuildAndJump(t *testing.T) {
 		layH:    400,
 		pan:     appstate.New(nil),
 	}
-	a.pan.Jump = a.gotoPage
+	a.pan.Jump = a.gotoLoc
 	a.pan.Refresh(bk, layout, 0)
 
 	tt := ui.NewTester(a.view, 1200, 800)
@@ -230,10 +230,21 @@ func TestMenuBarCommands(t *testing.T) {
 	if open == nil || open.Accelerator != "CmdOrCtrl+O" {
 		t.Fatalf("no Open command in the File menu: %+v", files.Submenu)
 	}
-	for _, label := range []string{"书库侧栏", "目录", "搜索", "显示设置…"} {
+	for _, label := range []string{"书库侧栏", "目录", "搜索", "显示设置…", "滚动阅读"} {
 		if findMenuItem(views.Submenu, label) == nil {
 			t.Errorf("the View menu has no %s", label)
 		}
+	}
+	// The scrolling item follows the setting, however it was changed: the menu
+	// toggles itself, and the display settings only set the option.
+	if a.menuScroll == nil {
+		t.Fatal("the scrolling menu item is not kept")
+	}
+	a.menuScroll.SetChecked(false)
+	a.opts.Scroll = true
+	a.syncMenu()
+	if !a.menuScroll.IsChecked() {
+		t.Error("the scrolling menu item did not follow the setting")
 	}
 	if a.menuCopy == nil || !a.menuCopy.Disabled {
 		t.Fatalf("page copy starts enabled without a selection: %+v", a.menuCopy)
