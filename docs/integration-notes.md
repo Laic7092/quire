@@ -37,15 +37,26 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 6. **tile 的跨界行给个明确的画法。** 现在"从下往上画 + 多画一块 + 不裁 tile"是宿主
    自己推出来的；建议 `Tile` 暴露它越界的行范围（或直接给按行而不是按固定高度切片的
    输出），宿主就不必靠画序补边界。图片在相邻 tile 里也会重复，透明度高的图会被叠两次。
-7. **图片链路给一份参考实现。** 位图按 `ImageID` 由宿主缓存、跨文档清空、按栏宽缩放，
+   另一半是**回放时按画家可见区跳过 op**：现在 `DrawGlyphs`/`FillRect` 一律交给画家，
+   视口外的字也走完整几何流程，每个宿主都得多画约 3 个视口再自己裁一次。建议
+   `paint` 加可选接口 `Clipped interface{ Visible() Rect }`（不破坏现有实现），构建
+   显示列表时给字形 op 补行盒矩形，`Page.Draw`/`Tile.Draw` 求交后跳过。
+   定位与实测见 [`scroll-performance.md`](scroll-performance.md)。
+7. **书架用的元数据。** 已解决：`epub.ReadMetadata` 只读 container.xml、OPF 和封面，
+   `layx-reader/internal/library` 不再自己解包文档。
+
+8. **图片链路给一份参考实现。** 位图按 `ImageID` 由宿主缓存、跨文档清空、按栏宽缩放，
    这套语义现在只在宿主里；引擎侧最好有"图片在页面里的矩形"的明确 API。
-8. **XHTML/CSS 的边界写清楚。** 哪些标签/属性会被映射、哪些被有意丢弃，应由 `render`
+9. **XHTML/CSS 的边界写清楚。** 哪些标签/属性会被映射、哪些被有意丢弃，应由 `render`
    或 `epub` 给出一张清单；现在宿主在自己的 README 里维护这份清单。
-9. **目录层级。** `book` 层把 nav/NCX 拍平成 `map[path]title`，嵌套、顺序、fragment
-   都丢，宿主只能按标题猜层级。这是 `layx/epub` 该给的结构。
-10. **字体注册给 UI 文本。** 书用 `render.NewFontSet`，MyGo 的文字用 `text.Shared()`，
+10. **目录层级。** 已解决，两边都改了：`layx/epub` 的 `Book.Toc` 保留 nav/NCX 的
+   顺序、嵌套、`#fragment` 和每个目标的 `render.AnchorID`；`layx-reader/internal/toc`
+   接上它之后一个章节可以有多行（章内小节），层级、跳转位置和“正在读”都来自真实
+   数据。宿主只剩两条保险：标签太长的行（有些书的 NCX 塞的是整段正文）和只写了一个
+   条目的桩目录，遇到就退回按章节建行，`levelOf` 只在这时和 TXT 上兜底。
+11. **字体注册给 UI 文本。** 书用 `render.NewFontSet`，MyGo 的文字用 `text.Shared()`，
    宿主得手动 `ui.RegisterFont` 才能让界面和正文用同一份字体。
-11. **MyGo 的几处控件契约。** `ui.Split` 没有最小宽度（页面被挤到小于三个页边距时
+12. **MyGo 的几处控件契约。** `ui.Split` 没有最小宽度（页面被挤到小于三个页边距时
     `Layout` 直接失败）；`ui.Segmented` 的外观无法接管；`ui.Switch` 的绑定值点击后不
     变化；菜单快捷键先于视图 `Shortcut`（所以 `⌘C` 不能进菜单）；`Tester.Click(文字)`
     点的是文字节点，整行可点必须把 `OnClick` 挂在带 `Label` 的祖先上。
@@ -81,7 +92,10 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 - `SelectionQuad.Page` 在滚动模式是 -1，宿主不能再用页号挑矩形，要用 `Content`
   减去滚动偏移。
 - tile 是显示列表不是位图：宿主自己决定缓存策略。宿主在滚动前后调 `Tiles(lo, hi)`
-  预取，`Draw` 回调里只重放 `Tile(i)`。
+  预取，`Draw` 回调里只重放 `Tile(i)`。缓存尺寸要跟视口配：`TileCache` 默认 8 块，
+  一块一屏时 ≈ 320 行，已超过 `LineCache` 默认的 256 行，回看会重新 shaping。
+  一帧的成本构成、144 Hz 预算与“哪些该由上游做”见
+  [`scroll-performance.md`](scroll-performance.md)。
 - **一行只属于它顶边所在的 tile，所以它会越过 tile 底边。** tile 的显示列表以整块纸
   打底，宿主必须**从下往上**画（下一块先铺纸，上一块连越界的行一起盖上去），并且
   视口顶端要**多画上面一块** tile，否则边界上的那行会正好被切掉半截、停在屏幕中间。

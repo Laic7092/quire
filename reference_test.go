@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 )
 
 // The reading window at the size the reference was measured from: 787×590
@@ -33,7 +34,7 @@ func TestReferenceReadingLayout(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	box, ok := tt.Find("书页")
+	box, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("the page is missing: %q", tt.Texts())
 	}
@@ -49,8 +50,9 @@ func TestReferenceReadingLayout(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Themes & Settings", "Original", "Quiet", "Paper", "Bold", "Calm", "Focus",
-		"Customize", "5 of ",
+		locales.ThemesSettings(), locales.ThemeOriginal(), locales.ThemeQuiet(),
+		locales.ThemePaper(), locales.ThemeBold(), locales.ThemeCalm(), locales.ThemeFocus(),
+		locales.SettingsCustomize(), a.pageLabel(),
 	} {
 		if !tt.HasText(want) {
 			t.Errorf("the reference state has no %q: %q", want, tt.Texts())

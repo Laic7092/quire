@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 )
 
 // newScrollWindow is newWindow with a scrolling column: the sample book laid out
@@ -49,7 +50,7 @@ func newScrollWindow(t *testing.T) (*app, *ui.Tester) {
 // sheetRect is the page box the reader draws into, as the frame laid it out.
 func sheetRect(t *testing.T, tt *ui.Tester) ui.Rect {
 	t.Helper()
-	r, ok := tt.Find("书页")
+	r, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("no sheet in the window: %q", tt.Texts())
 	}
@@ -144,7 +145,7 @@ func TestScrollModeSelectsText(t *testing.T) {
 	if text := a.selectedText(); text == "" {
 		t.Error("nothing was selected")
 	}
-	if !tt.HasText("Selected") {
+	if !tt.HasText(locales.SelectionSelected()) {
 		t.Errorf("the folio does not report the selection: %q", tt.Texts())
 	}
 
@@ -256,10 +257,10 @@ func TestScrollSwitchInTheDisplaySettings(t *testing.T) {
 	a.aaOpen, a.aaMore = true, true
 	a.syncSettingsFields()
 	tt.Frame()
-	if !tt.HasText("Scrolling") {
+	if !tt.HasText(locales.SettingsScrolling()) {
 		t.Fatalf("the display settings have no scrolling switch: %q", tt.Texts())
 	}
-	if err := tt.Click("Scrolling"); err != nil {
+	if err := tt.Click(locales.SettingsScrolling()); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

@@ -10,7 +10,6 @@
 package appstate
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
 	"github.com/laix/layx-reader/internal/toc"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -100,7 +100,7 @@ func New(st *store.Store) *App {
 	a.Shelf.OnOpen = a.open
 	a.Shelf.OnReload = a.ReloadShelf
 
-	a.Toc.OnJump = a.jumpChapter
+	a.Toc.OnJump = a.jumpEntry
 	a.Search.OnJump = a.jump
 	a.Search.OnSearch = a.search
 	a.Search.PageOf = func(h search.Hit) (int, bool) {
@@ -127,22 +127,22 @@ func (a *App) SetLibraryDir(dir string) {
 // ReloadShelf rescans the library off the UI thread.
 func (a *App) ReloadShelf() {
 	if a.Library == nil || a.Library.Dir == "" {
-		a.Shelf.Status = "先选择一个书库目录"
+		a.Shelf.Status = locales.ShelfChooseFolderFirst()
 		return
 	}
 	lib := a.Library
-	a.Shelf.Status = "正在扫描…"
+	a.Shelf.Status = locales.ShelfScanning()
 	// Scan off the UI thread, then install the result on it: the shelf reads
 	// Entries while it draws, so the slice must not be swapped underneath.
 	a.async(func() func() {
 		entries, err := library.Scan(lib.Dir)
 		return func() {
 			if err != nil {
-				a.Shelf.Status = "扫描失败：" + err.Error()
+				a.Shelf.Status = locales.ShelfScanFailed(err.Error())
 				return
 			}
 			lib.Entries = entries
-			a.Shelf.Status = fmt.Sprintf("%d 本", len(entries))
+			a.Shelf.Status = locales.ShelfCount(len(entries))
 		}
 	})
 }
@@ -176,7 +176,6 @@ func (a *App) RefreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 // refreshAt rebuilds the panels from the layout and the place read to.
 func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Location, page int) {
 	a.layout, a.page = layout, page
-	a.Toc.Layout = layout
 	a.Toc.Entries = toc.BuildAt(bk, layout, loc)
 	if len(a.Toc.Entries) > 0 {
 		a.Toc.SelectCurrent()
@@ -310,18 +309,26 @@ func (a *App) jump(loc render.Location) {
 	}
 }
 
-// jumpChapter jumps to the start of a chapter, which is what a table of
-// contents row asks for. The layout names the chapter's first line, so the
-// same call serves both a page and a scroll position.
-func (a *App) jumpChapter(chapter int) {
-	if a.layout == nil || a.Jump == nil {
+// jumpEntry jumps to what a table of contents row names. The row already
+// carries the location the layout resolved, so the same call serves a page and
+// a scroll position; a row whose anchor the layout no longer knows falls back
+// to the start of its chapter's content.
+func (a *App) jumpEntry(e toc.Entry) {
+	if a.Jump == nil {
 		return
 	}
-	if loc, ok := a.layout.Locate(render.AnchorID(chapter + 1)); ok {
+	if e.HasLoc {
+		a.Jump(e.Loc)
+		return
+	}
+	if a.layout == nil {
+		return
+	}
+	if loc, ok := a.layout.Locate(e.Anchor); ok {
 		a.Jump(loc)
 		return
 	}
-	if top, ok := a.layout.ChapterContentTop(chapter); ok {
+	if top, ok := a.layout.ChapterContentTop(e.Chapter); ok {
 		if loc, ok := a.layout.LocationAt(top); ok {
 			a.Jump(loc)
 		}
@@ -350,11 +357,11 @@ func (a *App) search(query string) {
 	ix := a.Index
 	if ix == nil {
 		a.Search.Hits = nil
-		a.Search.Status = "索引还没建好"
+		a.Search.Status = locales.SearchNoIndex()
 		a.hitsChanged()
 		return
 	}
-	a.Search.Status = "搜索中…"
+	a.Search.Status = locales.SearchSearching()
 	a.async(func() func() {
 		hits := ix.Search(query, 100)
 		if hits == nil {
@@ -367,9 +374,9 @@ func (a *App) search(query string) {
 			a.Search.Hits = hits
 			a.Search.Selected = -1
 			if len(hits) == 0 {
-				a.Search.Status = "未找到「" + query + "」"
+				a.Search.Status = locales.SearchNotFound(strings.TrimSpace(query))
 			} else {
-				a.Search.Status = fmt.Sprintf("%d 条结果", len(hits))
+				a.Search.Status = locales.SearchResults(len(hits))
 			}
 			a.hitsChanged()
 		}

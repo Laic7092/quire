@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/locales"
 )
 
 func panelEntries() []Entry {
@@ -34,8 +35,8 @@ func TestPanelDrawsRows(t *testing.T) {
 }
 
 func TestPanelJumpOnClick(t *testing.T) {
-	var jumped []int
-	p := &Panel{Entries: panelEntries(), Selected: 0, OnJump: func(chapter int) { jumped = append(jumped, chapter) }}
+	var jumped []Entry
+	p := &Panel{Entries: panelEntries(), Selected: 0, OnJump: func(e Entry) { jumped = append(jumped, e) }}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 400)
 	tt.Frame()
 
@@ -45,8 +46,8 @@ func TestPanelJumpOnClick(t *testing.T) {
 	if p.Selected != 2 {
 		t.Errorf("Selected = %d after a click on row 2, want 2", p.Selected)
 	}
-	if len(jumped) != 1 || jumped[0] != 2 {
-		t.Fatalf("jumped to chapters %v, want [2]", jumped)
+	if len(jumped) != 1 || jumped[0].Chapter != 2 {
+		t.Fatalf("jumped to rows %v, want [chapter 2]", jumped)
 	}
 
 	// A row without a page is disabled: it may be chosen, but does not jump.
@@ -62,7 +63,7 @@ func TestPanelEmpty(t *testing.T) {
 	p := &Panel{}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 200)
 	tt.Frame()
-	if !tt.HasText("这本书没有目录") {
+	if !tt.HasText(locales.TocEmpty()) {
 		t.Error("an empty panel drew no placeholder")
 	}
 	// Out-of-range selections are dropped, not kept.

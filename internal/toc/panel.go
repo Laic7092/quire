@@ -5,15 +5,15 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/widgets"
-	"github.com/laix/layx/render"
+	"github.com/laix/layx-reader/locales"
 )
 
 // indent is how far one level indents a row, in DIPs.
 const indent = 14
 
-// Panel draws the table of contents: one row per chapter, indented
-// by level, with the page the chapter starts on and the chapter being read
-// marked.
+// Panel draws the table of contents: one row per chapter or per navigation
+// target, indented by level, with the page the row points at and the row being
+// read marked.
 //
 // The panel owns no goroutine, reads no environment and never touches a Window:
 // the host builds Entries with Build, assigns OnJump, and rebuilds Entries after
@@ -22,15 +22,11 @@ const indent = 14
 type Panel struct {
 	Entries  []Entry
 	Selected int // the row under the pointer last clicked, -1 for none
-	// OnJump is called with the chapter of a clicked row (an index into the
-	// book's chapters). The host resolves it to a page or a scroll offset:
-	// only it knows which mode the layout is in.
-	OnJump func(chapter int)
+	// OnJump is called with a clicked row. The row carries the location to
+	// jump to (Loc/HasLoc), which is what the host hands to Layout.OffsetOf or
+	// PageOf: only it knows which mode the layout is in.
+	OnJump func(e Entry)
 
-	// Layout, when set, resolves a click through PageOf. It may be nil, in
-	// which case a click uses Entry.Page. It is not needed for jumping: a row
-	// reports its chapter, and the host knows the layout.
-	Layout *render.Layout
 	// List keeps the scroll position. Call ScrollToCurrent after rebuilding
 	// Entries to open the panel at the chapter being read.
 	List ui.ListState
@@ -67,7 +63,7 @@ func (p *Panel) ScrollToCurrent() bool {
 func (p *Panel) View(c *ui.Context) ui.Element {
 	t := c.Theme()
 	if len(p.Entries) == 0 {
-		return widgets.Empty(c, "这本书没有目录", "EPUB 的 nav/NCX 或 TXT 的章节标题会出现在这里")
+		return widgets.Empty(c, locales.TocEmpty(), locales.TocEmptyHint())
 	}
 	if p.Selected >= len(p.Entries) {
 		p.Selected = -1
@@ -79,13 +75,15 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 		if i < 0 || i >= len(p.Entries) {
 			return i
 		}
-		return p.Entries[i].Chapter
+		// One chapter can own several rows, so the chapter alone is not an
+		// identity: the anchor is what tells two rows of it apart.
+		return [2]int{p.Entries[i].Chapter, int(p.Entries[i].Anchor)}
 	}
 
 	col := ui.Column(c).Fill()
 	col.Children(func() {
 		ui.Row(c).Padding(8, 12, 6, 12).Children(func() {
-			ui.Textf(c, "%d 章", len(p.Entries)).FontSize(11).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, locales.TocCount(len(p.Entries))).FontSize(11).TextColor(t.TextMuted).SingleLine()
 		})
 		ui.Divider(c)
 		ui.List(c, &p.List, len(p.Entries), func(i int) {
@@ -95,11 +93,11 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 	return col
 }
 
-// row draws chapter i: a level indent, the title and the page range. The row
-// darkens as the pointer rests on it, and a click jumps to the chapter.
+// row draws row i: a level indent, the title and the page. The row darkens as
+// the pointer rests on it, and a click jumps to what it names.
 func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	e := p.Entries[i]
-	// A row jumps when the layout resolved its chapter. Without a layout only
+	// A row jumps when the layout resolved its target. Without a layout only
 	// a remembered page is something to jump to.
 	disabled := !e.HasLoc && e.Page < 0
 
@@ -128,11 +126,11 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 			text = t.TextMuted
 		case e.Current:
 			text = t.Accent
-		case e.Level == 0:
+		case e.Group:
 			text = t.TextMuted
 		}
 		weight := 400
-		if e.Level == 0 || e.Current {
+		if e.Group || e.Current {
 			weight = 500
 		}
 		ui.Text(c, e.Title).FontSize(12).FontWeight(weight).Grow(1).SingleLine().TextColor(text)
@@ -151,7 +149,7 @@ func (p *Panel) jump(i int) {
 	if !e.HasLoc && e.Page < 0 {
 		return
 	}
-	p.OnJump(e.Chapter)
+	p.OnJump(e)
 }
 
 // pageLabel is the page text of a row: the one page it starts on, or the range

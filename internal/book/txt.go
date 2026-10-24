@@ -30,13 +30,13 @@ const (
 type paragraphMode uint8
 
 const (
-	// modeBlank uses blank lines: the usual shape of Gutenberg texts and many
-	// exported novels. Lines inside a block are hard-wrapped and joined.
-	modeBlank paragraphMode = iota
-	// modeIndent starts a paragraph at an indented line.
-	modeIndent
-	// modeLine uses one paragraph per line, the shape most Chinese web novels
-	// are saved in.
+	// modeBlock uses blank lines to end a block, the usual shape of Gutenberg
+	// texts and many exported novels. Inside one block, indented lines and
+	// lines that read as finished paragraphs start a new paragraph; the rest
+	// are the hard-wrapped remains of the one before.
+	modeBlock paragraphMode = iota
+	// modeLine uses one paragraph per line with no blank lines anywhere, the
+	// shape most Chinese web novels are saved in.
 	modeLine
 )
 
@@ -52,8 +52,8 @@ var (
 )
 
 // openText reads a plain text book: it decodes the file, splits it into
-// chapters by headings and paragraphs, and reuses the same Chapter → render
-// pipeline as EPUB.
+// chapters by headings and paragraphs, and reuses the EPUB module's
+// Chapter → render.Document pipeline.
 func openText(file string) (*Book, error) {
 	info, err := os.Stat(file)
 	if err != nil {
@@ -69,16 +69,12 @@ func openText(file string) (*Book, error) {
 
 	text, encodingName := decodeText(data)
 	chapters := splitText(text)
-	abs, err := filepath.Abs(file)
-	if err != nil {
-		abs = file
-	}
+	// A text book is an EPUB book with no archive: only the exported fields
+	// are set, so Build has no images to resolve and no anchors to install.
 	b := &Book{
 		Title:    textTitle(file),
 		Language: textLanguage(text),
 		Chapters: chapters,
-		path:     abs,
-		images:   map[string]imageEntry{},
 	}
 	if strings.HasPrefix(encodingName, "GB") || encodingName == "Big5" {
 		b.Language = "zh"
@@ -209,22 +205,13 @@ func splitText(text string) []Chapter {
 	var (
 		chapters []Chapter
 		paras    []string
-		acc      string
-		base     string // the heading of the logical chapter
-		part     int    // fragments of one logical chapter
+		block    []string // raw lines between two blank lines
+		base     string   // the heading of the logical chapter
+		part     int      // fragments of one logical chapter
 		runes    int
 	)
 
-	flushParagraph := func() {
-		if acc == "" {
-			return
-		}
-		paras = append(paras, acc)
-		runes += utf8.RuneCountInString(acc)
-		acc = ""
-	}
 	emit := func() {
-		flushParagraph()
 		if len(paras) == 0 && base == "" {
 			return
 		}
@@ -241,71 +228,149 @@ func splitText(text string) []Chapter {
 			part++
 		}
 	}
+	// flushBlock turns the lines collected since the last blank line into
+	// paragraphs. A block is only joined as one paragraph when its lines are
+	// hard-wrapped; one paragraph per line stays one <p> per line, which is
+	// what makes a text book readable.
+	flushBlock := func() {
+		for _, p := range blockParagraphs(block, mode) {
+			paras = append(paras, p)
+			runes += utf8.RuneCountInString(p)
+			if runes >= maxChapterRunes {
+				emit()
+			}
+		}
+		block = nil
+	}
 
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
-			flushParagraph()
+			flushBlock()
 			continue
 		}
 		if looksLikeHeading(line) {
+			flushBlock()
 			emit()
 			base, part = line, 0
 			continue
 		}
-		switch mode {
-		case modeBlank:
-			if acc == "" {
-				acc = line
-			} else {
-				acc = joinWrapped(acc, line)
-			}
-		case modeIndent:
-			if isIndentedLine(raw) {
-				flushParagraph()
-				acc = line
-			} else if acc == "" {
-				acc = line
-			} else {
-				acc = joinWrapped(acc, line)
-			}
-		default: // modeLine
-			paras = append(paras, line)
-			runes += utf8.RuneCountInString(line)
-		}
-		if runes >= maxChapterRunes || utf8.RuneCountInString(acc) >= maxChapterRunes {
-			emit()
-		}
+		block = append(block, raw)
 	}
+	flushBlock()
 	emit()
 	return chapters
 }
 
-// detectParagraphMode samples the file and picks how to find paragraphs.
-func detectParagraphMode(lines []string) paragraphMode {
-	sampled, blanks, indented, nonEmpty := 0, 0, 0, 0
-	for _, raw := range lines {
-		if sampled++; sampled > 400 {
-			break
+// blockParagraphs turns the lines between two blank lines into paragraphs.
+// modeLine is already one paragraph per line; otherwise a line starts a new
+// paragraph when it is indented, when the line before it closed its paragraph,
+// and in a block whose lines each read as a finished paragraph, on every line.
+func blockParagraphs(block []string, mode paragraphMode) []string {
+	if len(block) == 0 {
+		return nil
+	}
+	if mode == modeLine || blockIsParagraphs(block) {
+		out := make([]string, 0, len(block))
+		for _, raw := range block {
+			if line := strings.TrimSpace(raw); line != "" {
+				out = append(out, line)
+			}
 		}
+		return out
+	}
+	width := wrapWidth(block)
+	var (
+		out  []string
+		acc  string
+		prev string
+	)
+	for _, raw := range block {
 		line := strings.TrimSpace(raw)
 		if line == "" {
-			blanks++
 			continue
 		}
-		nonEmpty++
-		if isIndentedLine(raw) {
-			indented++
+		switch {
+		case acc == "":
+			acc = line
+		case isIndentedLine(raw) || closesParagraph(prev, width):
+			out = append(out, acc)
+			acc = line
+		default:
+			acc = joinWrapped(acc, line)
+		}
+		prev = line
+	}
+	if acc != "" {
+		out = append(out, acc)
+	}
+	return out
+}
+
+// wrapWidth is the width hard-wrapped lines are cut at: the longest line of the
+// block, since a wrapped line only falls short when the next word did not fit.
+func wrapWidth(block []string) int {
+	width := 0
+	for _, raw := range block {
+		if n := utf8.RuneCountInString(strings.TrimSpace(raw)); n > width {
+			width = n
 		}
 	}
-	switch {
-	case blanks > 0:
-		return modeBlank
-	case nonEmpty > 0 && indented*2 >= nonEmpty:
-		return modeIndent
-	default:
-		return modeLine
+	return width
+}
+
+// closesParagraph reports whether a hard-wrapped line ended its paragraph. Every
+// line of a wrapped paragraph but the last one fills the wrap width, so a line
+// well short of it that ends a sentence closed the paragraph.
+func closesParagraph(line string, width int) bool {
+	n := utf8.RuneCountInString(line)
+	return width-n >= 2 && n*10 <= width*9 && endsParagraph(line)
+}
+
+// blockIsParagraphs reports whether a block holds whole paragraphs saved one
+// per line, the shape most downloaded novels come in, instead of the lines of
+// one hard-wrapped paragraph. Hard wrapping cuts most lines at the wrap width,
+// so only the closing line of each paragraph ends a sentence; text saved one
+// paragraph per line ends most of its lines that way.
+func blockIsParagraphs(block []string) bool {
+	if len(block) < 2 {
+		return false
 	}
+	ends := 0
+	for _, raw := range block {
+		if endsParagraph(strings.TrimSpace(raw)) {
+			ends++
+		}
+	}
+	return ends*2 >= len(block)
+}
+
+// endsParagraph reports whether a line ends a sentence, looking past the
+// closing quotes and brackets a quoted line may carry.
+func endsParagraph(line string) bool {
+	for line != "" {
+		r, size := utf8.DecodeLastRuneInString(line)
+		switch {
+		case strings.ContainsRune("”’」』）】》\"'", r):
+			line = strings.TrimRight(line[:len(line)-size], " \t\u3000")
+		case strings.ContainsRune("。！？…‥.!?", r):
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// detectParagraphMode picks how to find paragraphs. A blank line anywhere means
+// the file is divided into blocks; a file with none is one paragraph per line.
+func detectParagraphMode(lines []string) paragraphMode {
+	for _, raw := range lines {
+		if strings.TrimSpace(raw) == "" {
+			return modeBlock
+		}
+	}
+	return modeLine
 }
 
 // isIndentedLine reports a paragraph indent: an ideographic space, or two

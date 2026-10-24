@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -10,6 +9,7 @@ import (
 	"github.com/laix/layx-reader/internal/appstate"
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -17,12 +17,12 @@ import (
 // Without a book the window shows the home screen: the way in, and no page
 // counter or reading controls.
 func TestViewBuildsWithoutABook(t *testing.T) {
-	a := &app{opts: reader.DefaultOptions(), instant: true, status: "打开一本 EPUB 开始阅读"}
+	a := &app{opts: reader.DefaultOptions(), instant: true, status: locales.ReaderEmptyHint()}
 	tt := ui.NewTester(a.view, 900, 700)
-	if !tt.HasText("书库") {
+	if !tt.HasText(locales.SidebarLibraryHeading()) {
 		t.Fatalf("home screen not built: %q", tt.Texts())
 	}
-	if !tt.HasText("打开…") {
+	if !tt.HasText(locales.MenuOpen()) {
 		t.Errorf("home screen has no way to open a book: %q", tt.Texts())
 	}
 	if tt.HasText("第 1 页") {
@@ -81,21 +81,20 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 		layH:    600,
 	}
 	tt := ui.NewTester(a.view, 1000, 760)
-	pages := strconv.Itoa(layout.PageCount())
-	if !tt.HasText("1 of " + pages) {
+	if !tt.HasText(locales.PageLabelPages(1, layout.PageCount())) {
 		t.Fatalf("page counter missing: %q", tt.Texts())
 	}
-	if !tt.HasText("chapter") {
+	if !tt.HasText(a.chapterPagesLeft()) {
 		t.Errorf("the folio says nothing of the chapter: %q", tt.Texts())
 	}
 
 	if layout.PageCount() > 1 {
 		tt.Key(0, ui.KeyRight)
-		if !tt.HasText("2 of " + pages) {
+		if !tt.HasText(locales.PageLabelPages(2, layout.PageCount())) {
 			t.Errorf("page did not turn: %q", tt.Texts())
 		}
 		tt.Key(0, ui.KeyLeft)
-		if !tt.HasText("1 of " + pages) {
+		if !tt.HasText(locales.PageLabelPages(1, layout.PageCount())) {
 			t.Errorf("page did not turn back: %q", tt.Texts())
 		}
 	}
@@ -116,7 +115,7 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 // the reading position.
 func TestCoverTurnsAwayWithoutMovingThePage(t *testing.T) {
 	a := &app{showCover: true, page: 3, opts: reader.DefaultOptions(), instant: true}
-	if got := a.pageLabel(); got != "Cover" {
+	if got := a.pageLabel(); got != locales.PageLabelCover() {
 		t.Errorf("page label %q while the cover shows", got)
 	}
 	if !a.canTurn(1) || !a.canTurn(-1) {
@@ -176,7 +175,7 @@ func TestSidePanelsBuildAndJump(t *testing.T) {
 	a.pan.Refresh(bk, layout, 0)
 
 	tt := ui.NewTester(a.view, 1200, 800)
-	if err := tt.Click("目录"); err != nil {
+	if err := tt.Click(locales.PanelContents()); err != nil {
 		t.Fatalf("contents button: %v (%q)", err, tt.Texts())
 	}
 	if a.pan.Sidebar != appstate.SidebarToc {
@@ -217,20 +216,20 @@ func TestMenuBarCommands(t *testing.T) {
 	var files, views *mygo.MenuItem
 	for _, it := range menu.Items() {
 		switch it.Label {
-		case "文件":
+		case locales.MenuFile():
 			files = it
-		case "显示":
+		case locales.MenuView():
 			views = it
 		}
 	}
 	if files == nil || views == nil {
 		t.Fatalf("menu bar is missing its File or View menu: %v", menu.Items())
 	}
-	open := findMenuItem(files.Submenu, "打开…")
+	open := findMenuItem(files.Submenu, locales.MenuOpen())
 	if open == nil || open.Accelerator != "CmdOrCtrl+O" {
 		t.Fatalf("no Open command in the File menu: %+v", files.Submenu)
 	}
-	for _, label := range []string{"书库侧栏", "目录", "搜索", "显示设置…", "滚动阅读"} {
+	for _, label := range []string{locales.MenuSidebar(), locales.MenuContents(), locales.MenuSearch(), locales.MenuDisplaySettings(), locales.MenuScrollReading()} {
 		if findMenuItem(views.Submenu, label) == nil {
 			t.Errorf("the View menu has no %s", label)
 		}

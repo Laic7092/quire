@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/internal/store"
 	"github.com/laix/layx-reader/internal/widgets"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -263,9 +263,9 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 		Padding(0, 8+bar.Right, 0, 8+bar.Left).AlignItems(ui.Center).DragWindow().
 		Children(func() {
 			a.toolbarCluster(c, func() {
-				a.panelButton(c, appstate.SidebarToc, icons.ListBullet, "目录", "查看目录 (⌘T)")
-				a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, "书签", "查看书签")
-				a.panelButton(c, appstate.SidebarNotes, icons.NoteCard, "笔记", "查看笔记")
+				a.panelButton(c, appstate.SidebarToc, icons.ListBullet, locales.PanelContents(), locales.PanelContentsTip())
+				a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, locales.PanelBookmarks(), locales.PanelBookmarksTip())
+				a.panelButton(c, appstate.SidebarNotes, icons.NoteCard, locales.PanelNotes(), locales.PanelNotesTip())
 			})
 
 			// The book's name is centred in the window itself, not in the room
@@ -280,22 +280,22 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, a.status).FontSize(11).TextColor(t.Danger).SingleLine().MaxWidth(180)
 			}
 			a.toolbarCluster(c, func() {
-				a.toolbarButton(c, icons.Share, "分享", "分享", nil)
+				a.toolbarButton(c, icons.Share, locales.Share(), locales.Share(), nil)
 				var aa ui.Element
-				aa = a.toolbarTextButton(c, "Aa", "Aa", "Themes & Settings")
+				aa = a.toolbarTextButton(c, "Aa", "Aa", locales.ThemesSettings())
 				if aa.Clicked() {
 					a.aaOpen = !a.aaOpen
 					a.syncSettingsFields()
 				}
 				a.settingsPanel(c, aa)
-				a.toolbarButton(c, icons.Search, "搜索", "在书里搜索 (⌘F)", func() {
+				a.toolbarButton(c, icons.Search, locales.Search(), locales.SearchTip(), func() {
 					a.togglePanel(appstate.SidebarSearch)
 				})
 			})
 			ui.Box(c).Width(13)
 			b := ui.Box(c).Width(27).Height(27).Radius(13.5).Center().
 				Background(reader.UIColor(pal.Toolbar)).Cursor(ui.CursorPointer).
-				Label("添加书签").Tooltip("添加书签")
+				Label(locales.AddBookmark()).Tooltip(locales.AddBookmark())
 			b.Children(func() {
 				ui.Icon(c, icons.Bookmark).Size(15, 15).TextColor(reader.UIColor(pal.OnToolbar))
 			})
@@ -404,38 +404,38 @@ func (a *app) sourceList(c *ui.Context, t *ui.Theme, width float32) {
 		ui.Box(c).FillWidth().Height(top).DragWindow()
 		if a.libSearch {
 			ui.Row(c).Padding(0, 8, 2, 8).Children(func() {
-				field := ui.SearchField(c, &a.libQuery).Label("在书库中搜索").
-					Placeholder("搜索书库").FillWidth()
+				field := ui.SearchField(c, &a.libQuery).Label(locales.LibrarySearchLabel()).
+					Placeholder(locales.LibrarySearchPlaceholder()).FillWidth()
 				if field.Submitted() {
 					field.Focus()
 				}
 			})
 		}
-		a.sourceRow(c, t, width, icons.Search, "搜索", false, func() {
+		a.sourceRow(c, t, width, icons.Search, locales.Search(), false, func() {
 			a.libSearch = !a.libSearch
 			if !a.libSearch {
 				a.libQuery = ""
 			}
 		})
-		a.sourceRow(c, t, width, icons.House, "首页", a.libFilter == 0, func() {
+		a.sourceRow(c, t, width, icons.House, locales.SidebarHome(), a.libFilter == 0, func() {
 			a.libFilter, a.libSearch = 0, false
 		})
-		a.sourceRow(c, t, width, icons.Folder, "书架目录", false, func() { a.chooseDir() })
-		a.sourceRow(c, t, width, icons.FilePlus, "打开…", false, func() { a.chooseFile() })
+		a.sourceRow(c, t, width, icons.Folder, locales.SidebarShelfFolder(), false, func() { a.chooseDir() })
+		a.sourceRow(c, t, width, icons.FilePlus, locales.MenuOpen(), false, func() { a.chooseFile() })
 
-		a.sourceHeading(c, t, "书库")
-		a.sourceRow(c, t, width, icons.Grid, "全部", a.libFilter == 3, func() { a.libFilter = 3 })
-		a.sourceRow(c, t, width, icons.Half, "在读", a.libFilter == 1, func() { a.libFilter = 1 })
-		a.sourceRow(c, t, width, icons.Check, "已读完", a.libFilter == 2, func() { a.libFilter = 2 })
+		a.sourceHeading(c, t, locales.SidebarLibraryHeading())
+		a.sourceRow(c, t, width, icons.Grid, locales.SidebarAll(), a.libFilter == 3, func() { a.libFilter = 3 })
+		a.sourceRow(c, t, width, icons.Half, locales.SidebarReading(), a.libFilter == 1, func() { a.libFilter = 1 })
+		a.sourceRow(c, t, width, icons.Check, locales.SidebarFinished(), a.libFilter == 2, func() { a.libFilter = 2 })
 
-		a.sourceHeading(c, t, "我的收藏")
-		a.sourceRow(c, t, width, icons.Book, "我的图书", false, func() {
+		a.sourceHeading(c, t, locales.SidebarCollections())
+		a.sourceRow(c, t, width, icons.Book, locales.SidebarMyBooks(), false, func() {
 			a.libFilter, a.libSearch = 0, false
 		})
-		a.sourceRow(c, t, width, icons.Clock, "最近添加", false, func() {
+		a.sourceRow(c, t, width, icons.Clock, locales.SidebarRecent(), false, func() {
 			a.libFilter, a.sortByTitle = 0, false
 		})
-		a.sourceRow(c, t, width, icons.Plus, "新建收藏", false, func() {
+		a.sourceRow(c, t, width, icons.Plus, locales.SidebarNewCollection(), false, func() {
 			a.libFilter, a.libSearch = 0, false
 		})
 
@@ -496,7 +496,7 @@ func (a *app) accountRow(c *ui.Context, t *ui.Theme) {
 		avatar.Children(func() {
 			ui.Icon(c, icons.Person).Size(13, 13).TextColor(reader.UIColor(pal.Side))
 		})
-		ui.Text(c, "本机读者").FontSize(12).FontWeight(600).TextColor(t.Text).SingleLine().Grow(1)
+		ui.Text(c, locales.LocalReader()).FontSize(12).FontWeight(600).TextColor(t.Text).SingleLine().Grow(1)
 	})
 }
 
@@ -524,12 +524,12 @@ func (a *app) home(c *ui.Context, t *ui.Theme, m homeMetrics) {
 			top := m.firstGap
 			if a.libFilter == 0 {
 				if recent := a.byLastRead(a.inProgress(entries)); len(recent) > 0 {
-					a.shelfBand(c, t, m, 0, top, "继续阅读",
-						fmt.Sprintf("%d 本书没读完", len(recent)), recent)
+					a.shelfBand(c, t, m, 0, top, locales.ContinueReading(),
+						locales.BooksInProgress(len(recent)), recent)
 					top = m.bandGap
 				}
 			}
-			a.shelfBand(c, t, m, 1, top, "所有图书", a.libraryLine(), entries)
+			a.shelfBand(c, t, m, 1, top, locales.AllBooks(), a.libraryLine(), entries)
 			if a.libFilter == 0 {
 				a.goalsSection(c, t, m)
 			}
@@ -556,8 +556,8 @@ func (a *app) homeBar(c *ui.Context, t *ui.Theme) {
 func (a *app) weekRing(c *ui.Context, t *ui.Theme) {
 	st := a.readingStats(a.clock())
 	track := t.Accent.Alpha(0.22)
-	ring := ui.Box(c).Width(28).Height(28).Label("本周阅读").
-		Tooltip(fmt.Sprintf("本周读了 %d 天，目标 %d 天", st.DaysThisWeek, st.WeekGoal)).
+	ring := ui.Box(c).Width(28).Height(28).Label(locales.WeekRing()).
+		Tooltip(locales.WeekRingTip(st.DaysThisWeek, st.WeekGoal)).
 		Draw(func(p *ui.Painter, r ui.Rect) {
 			drawRing(p, r, st.weekProgress(), t.Accent, track, 3)
 		})
@@ -574,13 +574,13 @@ func (a *app) weekRing(c *ui.Context, t *ui.Theme) {
 func (a *app) homeTitle() string {
 	switch a.libFilter {
 	case 1:
-		return "在读"
+		return locales.SidebarReading()
 	case 2:
-		return "已读完"
+		return locales.SidebarFinished()
 	case 3:
-		return "全部"
+		return locales.SidebarAll()
 	}
-	return "首页"
+	return locales.SidebarHome()
 }
 
 // homeEmpty is the shelf with nothing on it: what to do, and how.
@@ -588,14 +588,14 @@ func (a *app) homeEmpty(c *ui.Context, t *ui.Theme, m homeMetrics) {
 	ui.Column(c).FillWidth().Padding(60, m.padding, 30, m.padding).Gap(10).
 		AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, icons.BookOpen).Size(40, 40).TextColor(t.TextMuted)
-		ui.Text(c, "这里还没有书").FontSize(15).FontWeight(600)
-		ui.Text(c, "把 EPUB 或 TXT 放进书架目录，或者直接打开一本。").
+		ui.Text(c, locales.HomeEmptyTitle()).FontSize(15).FontWeight(600)
+		ui.Text(c, locales.HomeEmptyHint()).
 			FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center)
 		ui.Row(c).Gap(8).Padding(6, 0, 0, 0).Children(func() {
-			if ui.Button(c, "打开…").Clicked() {
+			if ui.Button(c, locales.MenuOpen()).Clicked() {
 				a.chooseFile()
 			}
-			if ui.Button(c, "选择目录").Clicked() {
+			if ui.Button(c, locales.ChooseFolder()).Clicked() {
 				a.chooseDir()
 			}
 		})
@@ -623,7 +623,7 @@ func (a *app) shelfBand(c *ui.Context, t *ui.Theme, m homeMetrics, row int, top 
 				// The order is a small control that appears with the pointer,
 				// so the band keeps Books' clean line otherwise.
 				if head.Hovered() {
-					if widgets.GlyphButton(c, icons.Sort, "排序", "按最近阅读排序 / 按书名").Clicked() {
+					if widgets.GlyphButton(c, icons.Sort, locales.Sort(), locales.SortTip()).Clicked() {
 						a.sortByTitle = !a.sortByTitle
 					}
 				}
@@ -669,7 +669,7 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 	if read := a.readProgress(e); read > 0 && read < 1 {
 		board.Children(func() {
 			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(2).
-				Background(t.Accent).Label(e.Title + " 的进度")
+				Background(t.Accent).Label(locales.ProgressLabel(e.Title))
 		})
 	}
 }
@@ -679,8 +679,8 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 func (a *app) goalsSection(c *ui.Context, t *ui.Theme, m homeMetrics) {
 	st := a.readingStats(a.clock())
 	ui.Column(c).FillWidth().Padding(m.goalsGap, m.padding, 0, m.padding).Children(func() {
-		ui.Text(c, "阅读目标").FontSize(15).FontWeight(600).TextColor(t.Text)
-		ui.Text(c, "每天读一点，看看今年的进度。").FontSize(12).TextColor(t.TextMuted).
+		ui.Text(c, locales.GoalsTitle()).FontSize(15).FontWeight(600).TextColor(t.Text)
+		ui.Text(c, locales.GoalsHint()).FontSize(12).TextColor(t.TextMuted).
 			SingleLine()
 		a.goalCard(c, t, m, st)
 	})
@@ -696,17 +696,17 @@ func (a *app) goalCard(c *ui.Context, t *ui.Theme, m homeMetrics, st readingStat
 			Padding(28, 24, 24, 24)
 		card.Children(func() {
 			ui.Row(c).Absolute().Top(10).Right(12).Gap(2).Children(func() {
-				gear := widgets.GlyphButton(c, icons.Sliders, "阅读目标设置", "设置阅读目标")
+				gear := widgets.GlyphButton(c, icons.Sliders, locales.GoalsSettings(), locales.GoalsSettingsTip())
 				if gear.Clicked() {
 					a.goalsOpen = !a.goalsOpen
 				}
 				a.goalsPanel(c, gear)
-				if widgets.GlyphButton(c, icons.Share, "分享阅读记录", "复制阅读记录").Clicked() {
+				if widgets.GlyphButton(c, icons.Share, locales.ShareRecord(), locales.ShareRecordTip()).Clicked() {
 					a.shareStats(c, st)
 				}
 			})
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ring := ui.Box(c).Width(m.ring).Height(m.ring).Label("年度阅读目标").
+				ring := ui.Box(c).Width(m.ring).Height(m.ring).Label(locales.YearGoalLabel()).
 					Draw(func(p *ui.Painter, r ui.Rect) {
 						drawRing(p, r, st.yearProgress(), t.Accent, t.SurfaceHover, 9)
 					})
@@ -714,18 +714,18 @@ func (a *app) goalCard(c *ui.Context, t *ui.Theme, m homeMetrics, st readingStat
 					ui.Column(c).Fill().Center().Children(func() {
 						ui.Textf(c, "%d", st.BooksThisYear).FontSize(28).FontWeight(600).
 							TextColor(t.Text)
-						ui.Textf(c, "/ %d 本", st.BooksGoal).FontSize(11).TextColor(t.TextMuted)
-						ui.Text(c, "今年读完").FontSize(11).TextColor(t.TextMuted).Padding(4, 0, 0, 0)
+						ui.Text(c, locales.GoalOfBooks(st.BooksGoal)).FontSize(11).TextColor(t.TextMuted)
+						ui.Text(c, locales.FinishedThisYear()).FontSize(11).TextColor(t.TextMuted).Padding(4, 0, 0, 0)
 					})
 				})
 				ui.Row(c).Gap(44).Padding(18, 0, 0, 0).Center().Children(func() {
-					a.goalStat(c, t, st.Days, "阅读天数", "天")
-					a.goalStat(c, t, st.Streak, "连续阅读", "天")
-					a.goalStat(c, t, st.Finished, "已读完", "本")
+					a.goalStat(c, t, locales.StatDays(), locales.UnitDays(st.Days))
+					a.goalStat(c, t, locales.StatStreak(), locales.UnitDays(st.Streak))
+					a.goalStat(c, t, locales.SidebarFinished(), locales.UnitBooks(st.Finished))
 				})
 			})
 			if !a.goalCopied.IsZero() && a.clock().Sub(a.goalCopied) < 3*time.Second {
-				ui.Text(c, "阅读记录已复制").FontSize(11).TextColor(t.TextMuted).
+				ui.Text(c, locales.RecordCopied()).FontSize(11).TextColor(t.TextMuted).
 					FillWidth().TextAlign(ui.Center).Padding(10, 0, 0, 0)
 				c.After(3*time.Second - a.clock().Sub(a.goalCopied))
 			}
@@ -734,10 +734,10 @@ func (a *app) goalCard(c *ui.Context, t *ui.Theme, m homeMetrics, st readingStat
 }
 
 // goalStat is one of the three figures under the ring: a number and what it
-// counts.
-func (a *app) goalStat(c *ui.Context, t *ui.Theme, n int, label, unit string) {
+// counts, as the message of the figure writes them.
+func (a *app) goalStat(c *ui.Context, t *ui.Theme, label, value string) {
 	ui.Column(c).AlignItems(ui.Center).Children(func() {
-		ui.Textf(c, "%d %s", n, unit).FontSize(15).FontWeight(600).TextColor(t.Text)
+		ui.Text(c, value).FontSize(15).FontWeight(600).TextColor(t.Text)
 		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted).Padding(2, 0, 0, 0)
 	})
 }
@@ -755,27 +755,28 @@ func (a *app) goalsPanel(c *ui.Context, anchor ui.Element) {
 			Background(reader.UIColor(pal.Popover)).
 			Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.24)).
 			Children(func() {
-				ui.Text(c, "阅读目标").FontSize(11).TextColor(mutedOn(pal)).FillWidth().
+				ui.Text(c, locales.GoalsTitle()).FontSize(11).TextColor(mutedOn(pal)).FillWidth().
 					TextAlign(ui.Center)
-				a.goalChoices(c, "一年读完", "本", []int{6, 12, 24, 52}, a.goalBooks,
+				a.goalChoices(c, locales.GoalBooksLabel(), locales.GoalBooksCell, []int{6, 12, 24, 52}, a.goalBooks,
 					func(n int) { a.setGoals(n, a.goalDays) })
-				a.goalChoices(c, "一周阅读", "天", []int{3, 5, 7}, a.goalDays,
+				a.goalChoices(c, locales.GoalDaysLabel(), locales.GoalDaysCell, []int{3, 5, 7}, a.goalDays,
 					func(n int) { a.setGoals(a.goalBooks, n) })
 			})
 	})
 }
 
 // goalChoices is one goal as a segmented row: the numbers to pick from, with the
-// one in force filled.
-func (a *app) goalChoices(c *ui.Context, label, unit string, choices []int, chosen int, onPick func(int)) {
+// one in force filled. sayCell names one choice for assistive technology, as
+// "24 books a year".
+func (a *app) goalChoices(c *ui.Context, label string, sayCell func(int) string, choices []int, chosen int, onPick func(int)) {
 	pal := a.chrome
 	ui.Column(c).Children(func() {
-		ui.Text(c, label+"（"+unit+"）").FontSize(11).TextColor(mutedOn(pal))
+		ui.Text(c, label).FontSize(11).TextColor(mutedOn(pal))
 		ui.Row(c).FillWidth().Height(24).Radius(6).Padding(2).Gap(2).
 			Background(reader.UIColor(pal.Pressed)).Children(func() {
 			for _, n := range choices {
 				cell := ui.Box(c).Grow(1).FillHeight().Radius(5).Center().
-					Cursor(ui.CursorPointer).Label(fmt.Sprintf("%s %d %s", label, n, unit))
+					Cursor(ui.CursorPointer).Label(sayCell(n))
 				if n == chosen {
 					cell.Background(reader.UIColor(pal.Popover))
 				} else if cell.Hovered() {
@@ -804,8 +805,7 @@ func mutedOn(pal reader.Palette) ui.Color {
 // shareStats puts the reading record on the clipboard and notes it on the card
 // for a moment.
 func (a *app) shareStats(c *ui.Context, st readingStats) {
-	c.WriteClipboard(fmt.Sprintf(
-		"layx-reader 阅读记录：今年读完 %d 本（目标 %d 本），本周读了 %d 天（目标 %d 天），已读 %d 天，连续 %d 天。",
+	c.WriteClipboard(locales.ShareRecordText(
 		st.BooksThisYear, st.BooksGoal, st.DaysThisWeek, st.WeekGoal, st.Days, st.Streak))
 	a.goalCopied = a.clock()
 }
@@ -814,13 +814,13 @@ func (a *app) shareStats(c *ui.Context, st readingStats) {
 // and where they come from.
 func (a *app) libraryLine() string {
 	if a.pan == nil || a.pan.Library == nil || len(a.pan.Library.Entries) == 0 {
-		return "打开一本 EPUB 或 TXT，或者选一个放书的目录"
+		return locales.LibraryEmptyLine()
 	}
 	dir := a.pan.Library.Dir
 	if dir == "" {
-		return fmt.Sprintf("%d 本书", len(a.pan.Library.Entries))
+		return locales.LibraryCount(len(a.pan.Library.Entries))
 	}
-	return fmt.Sprintf("%d 本书 · %s", len(a.pan.Library.Entries), dir)
+	return locales.LibraryCountDir(len(a.pan.Library.Entries), dir)
 }
 
 // shelf is the whole library as the current filter and query leave it.
@@ -916,7 +916,8 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 			a.backEdge(c, t)
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
 			box := ui.Box(c).FillWidth().MaxWidth(wide).FillHeight().
-				Bind(&a.body).Label("书页").Focusable().
+				Bind(&a.body).Label(locales.PageLabel()).Focusable().
+				Cursor(a.linkCursor()).
 				HandleInput(a.handlePageInput).
 				Draw(a.drawSheet)
 			// Only a page has a selection to act on; the cover has none.
@@ -930,9 +931,9 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 				message := a.status
 				switch {
 				case a.loading:
-					message = "正在排版…"
+					message = locales.LayingOut()
 				case message == "":
-					message = "按「打开…」选一本 EPUB 或 TXT"
+					message = locales.ReaderEmptyHint()
 				}
 				ui.Column(c).Fill().Center().Padding(32).Gap(10).Children(func() {
 					if a.loading {
@@ -1030,9 +1031,9 @@ func (a *app) selectionHint() string {
 		return ""
 	}
 	if a.selCopied > 0 {
-		return fmt.Sprintf("Copied %d characters", a.selCopied)
+		return locales.SelectionCopied(a.selCopied)
 	}
-	return "Selected · ⌘C to copy"
+	return locales.SelectionSelected()
 }
 
 // chapterPagesLeft is how much of the chapter is still to read, as Books counts
@@ -1063,12 +1064,12 @@ func (a *app) chapterPagesLeft() string {
 	}
 	left := last - (a.page + a.pageStep())
 	if left <= 0 {
-		return "Last page of chapter"
+		return locales.ChapterLastPage()
 	}
 	if left == 1 {
-		return "1 page left in chapter"
+		return locales.ChapterOnePageLeft()
 	}
-	return fmt.Sprintf("%d pages left in chapter", left)
+	return locales.ChapterPagesLeft(left)
 }
 
 // backEdge is the way back to the library at the page's left edge: a chevron
@@ -1077,7 +1078,7 @@ func (a *app) chapterPagesLeft() string {
 // edge control: turning on is the keyboard's and the folio's job.
 func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
 	strip := ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(edgeWidth).Center().
-		Cursor(ui.CursorPointer).Label("返回书库").Tooltip("回到书库 (Esc)")
+		Cursor(ui.CursorPointer).Label(locales.BackToLibrary()).Tooltip(locales.BackToLibraryTip())
 	strip.OnClick(a.closeBook)
 	strip.Children(func() {
 		if !strip.Hovered() {
@@ -1119,7 +1120,7 @@ func (a *app) closeBook() {
 		a.paint.ClearImages()
 	}
 	if a.win != nil {
-		a.win.SetTitle("layx-reader")
+		a.win.SetTitle(appName)
 		a.win.SetRepresentedFile("")
 	}
 	if a.pan != nil {

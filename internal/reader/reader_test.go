@@ -324,14 +324,11 @@ func TestFontsAndThemes(t *testing.T) {
 		if p.Theme != theme {
 			t.Errorf("%q palette says %q", theme, p.Theme)
 		}
-		if p.Paper.A == 0 || p.Ink.A == 0 || p.Desk.A == 0 || p.Chrome.A == 0 {
+		if p.Paper.A == 0 || p.Ink.A == 0 || p.Desk.A == 0 || p.Chrome.A == 0 || p.Link.A == 0 {
 			t.Errorf("%q palette has holes: %+v", theme, p)
 		}
 		if theme.Dark() != (theme == ThemeQuiet || theme == ThemeBold) {
 			t.Errorf("%q darkness is wrong", theme)
-		}
-		if theme.Label() == "" {
-			t.Errorf("%q has no label", theme)
 		}
 	}
 	if System(false) != ThemeOriginal || System(true) != ThemeQuiet {

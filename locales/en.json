@@ -1,0 +1,929 @@
+{
+  "@@locale": "en",
+  "windowTitle": "{title} — layx-reader",
+  "@windowTitle": {
+    "description": "The window title while the book titled {title} is open.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "openedBook": "{title}",
+  "@openedBook": {
+    "description": "The status line the reader shows as it opens the book titled {title}.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "menuFile": "File",
+  "@menuFile": {
+    "description": "The macOS menu bar: the File menu."
+  },
+  "menuEdit": "Edit",
+  "@menuEdit": {
+    "description": "The macOS menu bar: the Edit menu."
+  },
+  "menuView": "View",
+  "@menuView": {
+    "description": "The macOS menu bar: the View menu."
+  },
+  "menuOpen": "Open…",
+  "@menuOpen": {
+    "description": "The File menu item and the library's buttons that open a book."
+  },
+  "menuCopySelection": "Copy Selected Text",
+  "@menuCopySelection": {
+    "description": "The Edit menu item that copies the text selected on the page."
+  },
+  "menuSidebar": "Library Sidebar",
+  "@menuSidebar": {
+    "description": "The View menu item that hides or shows the library's source list."
+  },
+  "menuSortByTitle": "Sort by Title",
+  "@menuSortByTitle": {
+    "description": "The View menu item that orders the shelf by title instead of by last read."
+  },
+  "menuScrollReading": "Scroll Reading",
+  "@menuScrollReading": {
+    "description": "The View menu item that turns the reader into a scrolling column."
+  },
+  "menuContents": "Contents",
+  "@menuContents": {
+    "description": "The View menu item that opens the table of contents."
+  },
+  "menuSearch": "Search",
+  "@menuSearch": {
+    "description": "The View menu item that opens the search panel."
+  },
+  "menuDisplaySettings": "Display Settings…",
+  "@menuDisplaySettings": {
+    "description": "The View menu item that opens the display settings."
+  },
+  "openDialogTitle": "Open EPUB or TXT",
+  "@openDialogTitle": {
+    "description": "The title of the dialog that picks a book."
+  },
+  "bookFiles": "Books",
+  "@bookFiles": {
+    "description": "The name of the EPUB and TXT files in the open dialog."
+  },
+  "openFailed": "Could not open it: {error}",
+  "@openFailed": {
+    "description": "The status line when the dialog could not show.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "chooseFolderTitle": "Choose Library Folder",
+  "@chooseFolderTitle": {
+    "description": "The title of the dialog that picks the folder of books."
+  },
+  "chooseFolderFailed": "Could not open the folder: {error}",
+  "@chooseFolderFailed": {
+    "description": "The shelf's status line when the folder dialog failed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "readBookFailed": "Could not read the book: {error}",
+  "@readBookFailed": {
+    "description": "The status line when a book could not be parsed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "not an EPUB archive"
+      }
+    }
+  },
+  "layoutTooNarrow": "Window too narrow: make it wider",
+  "@layoutTooNarrow": {
+    "description": "The status line when the window has no room for a line of text."
+  },
+  "layoutFailed": "Layout failed: {error}",
+  "@layoutFailed": {
+    "description": "The status line when the page could not be typeset.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "out of memory"
+      }
+    }
+  },
+  "resumePage": "Last read: page {page} ({how})",
+  "@resumePage": {
+    "description": "The status line a book opens with in page mode.",
+    "placeholders": {
+      "page": {
+        "type": "int",
+        "example": "12"
+      },
+      "how": {
+        "type": "String",
+        "example": "exact position"
+      }
+    }
+  },
+  "resumeScroll": "Last read: {percent}% ({how})",
+  "@resumeScroll": {
+    "description": "The status line a book opens with in scroll mode.",
+    "placeholders": {
+      "percent": {
+        "type": "int",
+        "example": "42"
+      },
+      "how": {
+        "type": "String",
+        "example": "exact position"
+      }
+    }
+  },
+  "resumeScrollHere": "Last read here ({how})",
+  "@resumeScrollHere": {
+    "description": "The status line of a scroll-mode book whose position could not be measured.",
+    "placeholders": {
+      "how": {
+        "type": "String",
+        "example": "progress"
+      }
+    }
+  },
+  "howNode": "exact position",
+  "@howNode": {
+    "description": "How the reading position was restored: the node it recorded."
+  },
+  "howAnchor": "chapter mark",
+  "@howAnchor": {
+    "description": "How the reading position was restored: the anchor it recorded."
+  },
+  "howProgress": "progress",
+  "@howProgress": {
+    "description": "How the reading position was restored: estimated from the recorded progress."
+  },
+  "panelContents": "Contents",
+  "@panelContents": {
+    "description": "The reading panel of the table of contents, its toolbar button and its window label."
+  },
+  "panelContentsTip": "Show contents (⌘T)",
+  "@panelContentsTip": {
+    "description": "The tooltip of the toolbar button that opens the contents panel."
+  },
+  "panelBookmarks": "Bookmarks",
+  "@panelBookmarks": {
+    "description": "The reading panel of the bookmarks."
+  },
+  "panelBookmarksTip": "Show bookmarks",
+  "@panelBookmarksTip": {
+    "description": "The tooltip of the toolbar button that opens the bookmarks panel."
+  },
+  "panelNotes": "Notes",
+  "@panelNotes": {
+    "description": "The reading panel of the notes."
+  },
+  "panelNotesTip": "Show notes",
+  "@panelNotesTip": {
+    "description": "The tooltip of the toolbar button that opens the notes panel."
+  },
+  "share": "Share",
+  "@share": {
+    "description": "The toolbar button that shares the book."
+  },
+  "search": "Search",
+  "@search": {
+    "description": "The toolbar button and the source list row that search the book."
+  },
+  "searchTip": "Search this book (⌘F)",
+  "@searchTip": {
+    "description": "The tooltip of the toolbar button that opens the search panel."
+  },
+  "addBookmark": "Add Bookmark",
+  "@addBookmark": {
+    "description": "The round control in the toolbar that bookmarks the page."
+  },
+  "themesSettings": "Themes & Settings",
+  "settingsSmallerText": "Smaller text",
+  "@settingsSmallerText": {
+    "description": "The display settings: the A that makes the text smaller."
+  },
+  "settingsLargerText": "Larger text",
+  "@settingsLargerText": {
+    "description": "The display settings: the A that makes the text larger."
+  },
+  "settingsAppearance": "Appearance",
+  "@settingsAppearance": {
+    "description": "The display settings: the heading over the row of reading sizes."
+  },
+  "settingsCustomize": "Customize",
+  "@settingsCustomize": {
+    "description": "The display settings: the control that opens the detailed settings."
+  },
+  "settingsSize": "Size",
+  "@settingsSize": {
+    "description": "The detailed display settings: the font size."
+  },
+  "settingsLeading": "Leading",
+  "@settingsLeading": {
+    "description": "The detailed display settings: the space between lines."
+  },
+  "settingsMargins": "Margins",
+  "@settingsMargins": {
+    "description": "The detailed display settings: the page's margins."
+  },
+  "settingsTypeface": "Typeface",
+  "@settingsTypeface": {
+    "description": "The detailed display settings: the face the book is set in."
+  },
+  "settingsSerif": "Serif",
+  "@settingsSerif": {
+    "description": "The face with serifs."
+  },
+  "settingsSans": "Sans",
+  "@settingsSans": {
+    "description": "The face without serifs."
+  },
+  "settingsAlignment": "Alignment",
+  "@settingsAlignment": {
+    "description": "The detailed display settings: how the lines are aligned."
+  },
+  "settingsJustified": "Justified",
+  "@settingsJustified": {
+    "description": "Lines aligned at both ends."
+  },
+  "settingsLeft": "Left",
+  "@settingsLeft": {
+    "description": "Lines aligned at the left end only."
+  },
+  "settingsTwoPages": "Two Pages",
+  "@settingsTwoPages": {
+    "description": "The detailed display settings: whether a wide window shows two pages."
+  },
+  "settingsScrolling": "Scrolling",
+  "@settingsScrolling": {
+    "description": "The detailed display settings: whether the book scrolls instead of turning pages."
+  },
+  "settingsReset": "Reset to Defaults",
+  "@settingsReset": {
+    "description": "The detailed display settings: the button that restores every choice."
+  },
+  "themeOriginal": "Original",
+  "@themeOriginal": {
+    "description": "The name of the reading paper that keeps the book's own colours."
+  },
+  "themeQuiet": "Quiet",
+  "@themeQuiet": {
+    "description": "The name of a reading paper."
+  },
+  "themePaper": "Paper",
+  "@themePaper": {
+    "description": "The name of a reading paper."
+  },
+  "themeBold": "Bold",
+  "@themeBold": {
+    "description": "The name of a reading paper."
+  },
+  "themeCalm": "Calm",
+  "@themeCalm": {
+    "description": "The name of a reading paper."
+  },
+  "themeFocus": "Focus",
+  "@themeFocus": {
+    "description": "The name of a reading paper."
+  },
+  "@themesSettings": {
+    "description": "The popover of the display settings and its toolbar button."
+  },
+  "librarySearchLabel": "Search the library",
+  "@librarySearchLabel": {
+    "description": "The accessibility label of the library's search field."
+  },
+  "librarySearchPlaceholder": "Search library",
+  "@librarySearchPlaceholder": {
+    "description": "The placeholder of the library's search field."
+  },
+  "sidebarHome": "Home",
+  "@sidebarHome": {
+    "description": "The source list row and the title of the library's home page."
+  },
+  "sidebarShelfFolder": "Shelf Folder",
+  "@sidebarShelfFolder": {
+    "description": "The source list row that picks the folder of books."
+  },
+  "sidebarLibraryHeading": "Library",
+  "@sidebarLibraryHeading": {
+    "description": "The heading over the library's filters in the source list."
+  },
+  "sidebarAll": "All",
+  "@sidebarAll": {
+    "description": "The source list row and the title that show every book."
+  },
+  "sidebarReading": "Reading",
+  "@sidebarReading": {
+    "description": "The source list row and the title that show the books being read."
+  },
+  "sidebarFinished": "Finished",
+  "@sidebarFinished": {
+    "description": "The source list row, the title and the figure that count the books read to the end."
+  },
+  "sidebarCollections": "My Collections",
+  "@sidebarCollections": {
+    "description": "The heading over the collections in the source list."
+  },
+  "sidebarMyBooks": "My Books",
+  "@sidebarMyBooks": {
+    "description": "The source list row of the reader's own books."
+  },
+  "sidebarRecent": "Recently Added",
+  "@sidebarRecent": {
+    "description": "The source list row of the books added last."
+  },
+  "sidebarNewCollection": "New Collection",
+  "@sidebarNewCollection": {
+    "description": "The source list row that makes a collection."
+  },
+  "localReader": "Local Reader",
+  "@localReader": {
+    "description": "The name at the foot of the source list: who is reading, on this machine."
+  },
+  "continueReading": "Continue Reading",
+  "@continueReading": {
+    "description": "The title of the home page's band of part-read books."
+  },
+  "booksInProgress": "{count, plural, =0 {No books in progress} one {# book in progress} other {# books in progress}}",
+  "@booksInProgress": {
+    "description": "The caption under the band of part-read books.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "allBooks": "All Books",
+  "@allBooks": {
+    "description": "The title of the home page's band of every book."
+  },
+  "weekRing": "This Week",
+  "@weekRing": {
+    "description": "The accessibility label of the small ring that counts the week's reading days."
+  },
+  "weekRingTip": "Read {days} of {goal} days this week",
+  "@weekRingTip": {
+    "description": "The tooltip of the small ring that counts the week's reading days.",
+    "placeholders": {
+      "days": {
+        "type": "int",
+        "example": "3"
+      },
+      "goal": {
+        "type": "int",
+        "example": "5"
+      }
+    }
+  },
+  "homeEmptyTitle": "No books here yet",
+  "@homeEmptyTitle": {
+    "description": "The home page's title while neither the folder nor an opened book gives it any."
+  },
+  "homeEmptyHint": "Put EPUB or TXT files in the shelf folder, or open one.",
+  "@homeEmptyHint": {
+    "description": "What to do when the home page has no books."
+  },
+  "chooseFolder": "Choose Folder",
+  "@chooseFolder": {
+    "description": "The button that picks the folder of books."
+  },
+  "sort": "Sort",
+  "@sort": {
+    "description": "The accessibility label of the small control that orders a band of covers."
+  },
+  "sortTip": "Sort by last read, or by title",
+  "@sortTip": {
+    "description": "The tooltip of the small control that orders a band of covers."
+  },
+  "progressLabel": "{title} progress",
+  "@progressLabel": {
+    "description": "The accessibility label of the line that shows how far into a book the reader got.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "goalsTitle": "Reading Goals",
+  "@goalsTitle": {
+    "description": "The heading of the reading goals, and the heading of their settings."
+  },
+  "goalsHint": "Read a little every day and watch the year fill up.",
+  "@goalsHint": {
+    "description": "The caption under the heading of the reading goals."
+  },
+  "goalsSettings": "Reading Goal Settings",
+  "@goalsSettings": {
+    "description": "The accessibility label of the control that opens the goals' settings."
+  },
+  "goalsSettingsTip": "Set reading goals",
+  "@goalsSettingsTip": {
+    "description": "The tooltip of the control that opens the goals' settings."
+  },
+  "shareRecord": "Share Reading Record",
+  "@shareRecord": {
+    "description": "The accessibility label of the control that copies the reading record."
+  },
+  "shareRecordTip": "Copy the reading record",
+  "@shareRecordTip": {
+    "description": "The tooltip of the control that copies the reading record."
+  },
+  "yearGoalLabel": "Yearly reading goal",
+  "@yearGoalLabel": {
+    "description": "The accessibility label of the big ring of the year's reading."
+  },
+  "goalOfBooks": "/ {goal} books",
+  "@goalOfBooks": {
+    "description": "The books aimed at this year, under the number finished.",
+    "placeholders": {
+      "goal": {
+        "type": "int",
+        "example": "24"
+      }
+    }
+  },
+  "finishedThisYear": "Finished this year",
+  "@finishedThisYear": {
+    "description": "What the number in the big ring counts."
+  },
+  "statDays": "Days read",
+  "@statDays": {
+    "description": "The figure of the reading days under the big ring."
+  },
+  "statStreak": "Day streak",
+  "@statStreak": {
+    "description": "The figure of the days read in a row under the big ring."
+  },
+  "unitDays": "{count, plural, one {# day} other {# days}}",
+  "@unitDays": {
+    "description": "A number of days, as a figure of the reading record shows it.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "unitBooks": "{count, plural, one {# book} other {# books}}",
+  "@unitBooks": {
+    "description": "A number of books, as a figure of the reading record shows it.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "7"
+      }
+    }
+  },
+  "recordCopied": "Reading record copied",
+  "@recordCopied": {
+    "description": "The note the goals card carries after it copied the reading record."
+  },
+  "goalBooksLabel": "Books a year",
+  "@goalBooksLabel": {
+    "description": "The books-a-year goal in the goals' settings."
+  },
+  "goalDaysLabel": "Days a week",
+  "goalDaysCell": "{count, plural, one {# day a week} other {# days a week}}",
+  "@goalDaysCell": {
+    "description": "The accessibility label of one choice of the days-a-week goal.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "5"
+      }
+    }
+  },
+  "goalBooksCell": "{count, plural, one {# book a year} other {# books a year}}",
+  "@goalBooksCell": {
+    "description": "The accessibility label of one choice of the books-a-year goal.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "24"
+      }
+    }
+  },
+  "@goalDaysLabel": {
+    "description": "The days-a-week goal in the goals' settings."
+  },
+  "shareRecordText": "layx-reader reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {total} days read, {streak} in a row.",
+  "@shareRecordText": {
+    "description": "The reading record put on the clipboard.",
+    "placeholders": {
+      "books": {
+        "type": "int",
+        "example": "7"
+      },
+      "goal": {
+        "type": "int",
+        "example": "24"
+      },
+      "days": {
+        "type": "int",
+        "example": "3"
+      },
+      "goalDays": {
+        "type": "int",
+        "example": "5"
+      },
+      "total": {
+        "type": "int",
+        "example": "120"
+      },
+      "streak": {
+        "type": "int",
+        "example": "6"
+      }
+    }
+  },
+  "libraryEmptyLine": "Open an EPUB or TXT, or choose a folder of books",
+  "@libraryEmptyLine": {
+    "description": "The caption under the home page's title while the library holds no book."
+  },
+  "libraryCount": "{count, plural, one {# book} other {# books}}",
+  "@libraryCount": {
+    "description": "The caption under the home page's title: how many books it holds.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "42"
+      }
+    }
+  },
+  "libraryCountDir": "{count, plural, one {# book} other {# books}} · {dir}",
+  "@libraryCountDir": {
+    "description": "The caption under the home page's title: how many books it holds, and where they come from.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "42"
+      },
+      "dir": {
+        "type": "String",
+        "example": "~/Books"
+      }
+    }
+  },
+  "layingOut": "Laying out…",
+  "@layingOut": {
+    "description": "The reader's message while the page is being typeset."
+  },
+  "readerEmptyHint": "Choose Open… to read an EPUB or TXT",
+  "@readerEmptyHint": {
+    "description": "The reader's message while no book is open."
+  },
+  "pageLabel": "Book page",
+  "@pageLabel": {
+    "description": "The accessibility label of the page of the open book."
+  },
+  "backToLibrary": "Back to Library",
+  "@backToLibrary": {
+    "description": "The accessibility label of the page's left edge, which goes back to the library."
+  },
+  "backToLibraryTip": "Back to the library (Esc)",
+  "@backToLibraryTip": {
+    "description": "The tooltip of the page's left edge, which goes back to the library."
+  },
+  "selectionCopied": "Copied {count, plural, one {# character} other {# characters}}",
+  "@selectionCopied": {
+    "description": "The note the folio carries after the selection was copied.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "128"
+      }
+    }
+  },
+  "selectionSelected": "Selected · ⌘C to copy",
+  "@selectionSelected": {
+    "description": "The note the folio carries while text is selected."
+  },
+  "chapterLastPage": "Last page of chapter",
+  "@chapterLastPage": {
+    "description": "How much of the chapter is left, at its end."
+  },
+  "chapterOnePageLeft": "1 page left in chapter",
+  "@chapterOnePageLeft": {
+    "description": "How much of the chapter is left, with one page to go."
+  },
+  "chapterPagesLeft": "{count, plural, one {# page left in chapter} other {# pages left in chapter}}",
+  "pageLabelCover": "Cover",
+  "@pageLabelCover": {
+    "description": "The folio's page label while the cover is in front of the book."
+  },
+  "pageLabelNone": "— of —",
+  "@pageLabelNone": {
+    "description": "The folio's page label while the book is being laid out."
+  },
+  "pageLabelPages": "{page} of {pages}",
+  "@pageLabelPages": {
+    "description": "The folio's page label: the page in front of the reader, and how many the book has.",
+    "placeholders": {
+      "page": {
+        "type": "int",
+        "example": "12"
+      },
+      "pages": {
+        "type": "int",
+        "example": "418"
+      }
+    }
+  },
+  "scrollPercent": "{percent}%",
+  "@scrollPercent": {
+    "description": "The folio's label in scroll mode: how far down the column the reader is.",
+    "placeholders": {
+      "percent": {
+        "type": "int",
+        "example": "42"
+      }
+    }
+  },
+  "@chapterPagesLeft": {
+    "description": "How much of the chapter is left, in pages.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "shelfSearchLabel": "Search the shelf",
+  "@shelfSearchLabel": {
+    "description": "The accessibility label of the shelf panel's search field."
+  },
+  "shelfRefresh": "Refresh Shelf",
+  "@shelfRefresh": {
+    "description": "The accessibility label of the shelf panel's button that rescans the folder."
+  },
+  "shelfRefreshTip": "Rescan the folder",
+  "@shelfRefreshTip": {
+    "description": "The tooltip of the shelf panel's button that rescans the folder."
+  },
+  "shelfChooseFolderTip": "Use another library folder",
+  "@shelfChooseFolderTip": {
+    "description": "The tooltip of the shelf panel's button that picks another folder."
+  },
+  "shelfNoFolder": "No library folder yet",
+  "@shelfNoFolder": {
+    "description": "The shelf panel's message while no folder is chosen."
+  },
+  "shelfNoFolderHint": "Use the folder button above to pick a folder of EPUB / TXT files",
+  "@shelfNoFolderHint": {
+    "description": "What to do when the shelf has no folder."
+  },
+  "shelfEmpty": "No books in this folder",
+  "@shelfEmpty": {
+    "description": "The shelf panel's message while the folder holds no book."
+  },
+  "shelfEmptyHint": "Only .epub and .txt files in this folder are listed",
+  "@shelfEmptyHint": {
+    "description": "What the shelf scans when the folder holds no book."
+  },
+  "shelfNoMatch": "No books match “{query}”",
+  "@shelfNoMatch": {
+    "description": "The shelf panel's message while its search matches no book.",
+    "placeholders": {
+      "query": {
+        "type": "String",
+        "example": "walden"
+      }
+    }
+  },
+  "shelfNoMatchHint": "Clear the field to show every book",
+  "@shelfNoMatchHint": {
+    "description": "What to do when the shelf's search matches no book."
+  },
+  "shelfCount": "{count, plural, one {# book} other {# books}}",
+  "@shelfCount": {
+    "description": "The shelf panel's line under the field: how many books it lists.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "42"
+      }
+    }
+  },
+  "shelfCountFiltered": "{matched} / {total} books",
+  "@shelfCountFiltered": {
+    "description": "The shelf panel's line under the field while a search filters the books.",
+    "placeholders": {
+      "matched": {
+        "type": "int",
+        "example": "3"
+      },
+      "total": {
+        "type": "int",
+        "example": "42"
+      }
+    }
+  },
+  "tocEmpty": "This book has no contents",
+  "@tocEmpty": {
+    "description": "The contents panel's message while the book has no navigation document."
+  },
+  "tocEmptyHint": "A nav or NCX document, or the chapter headings of a TXT, shows up here",
+  "@tocEmptyHint": {
+    "description": "What the contents panel lists."
+  },
+  "tocCount": "{count, plural, one {# entry} other {# entries}}",
+  "@tocCount": {
+    "description": "The contents panel's line under its field: how many entries it lists.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "52"
+      }
+    }
+  },
+  "emptyBookmarks": "No bookmarks yet",
+  "@emptyBookmarks": {
+    "description": "The bookmarks panel's message while the book has none."
+  },
+  "emptyBookmarksHint": "Bookmarks in this book show up here",
+  "@emptyBookmarksHint": {
+    "description": "What the bookmarks panel lists."
+  },
+  "emptyNotes": "No notes yet",
+  "@emptyNotes": {
+    "description": "The notes panel's message while the book has none."
+  },
+  "emptyNotesHint": "Notes and highlighted text in this book show up here",
+  "@emptyNotesHint": {
+    "description": "What the notes panel lists."
+  },
+  "emptyPanel": "No panel is open",
+  "@emptyPanel": {
+    "description": "The message a panel shows when the host opened none."
+  },
+  "shelfChooseFolderFirst": "Choose a library folder first",
+  "@shelfChooseFolderFirst": {
+    "description": "The shelf's status line before a folder is chosen."
+  },
+  "shelfScanning": "Scanning…",
+  "@shelfScanning": {
+    "description": "The shelf's status line while it scans the folder."
+  },
+  "shelfScanFailed": "Scan failed: {error}",
+  "@shelfScanFailed": {
+    "description": "The shelf's status line when the scan failed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "searchNoIndex": "The index is not ready yet",
+  "@searchNoIndex": {
+    "description": "The search panel's status line while the book has no index."
+  },
+  "searchSearching": "Searching…",
+  "@searchSearching": {
+    "description": "The search panel's status line while a search runs."
+  },
+  "searchNotFound": "Nothing found for “{query}”",
+  "@searchNotFound": {
+    "description": "The search panel's status line when the search found nothing.",
+    "placeholders": {
+      "query": {
+        "type": "String",
+        "example": "walden"
+      }
+    }
+  },
+  "searchNotFoundShort": "Nothing found",
+  "@searchNotFoundShort": {
+    "description": "The search panel's line under its field when the search found nothing."
+  },
+  "searchResults": "{count, plural, one {# result} other {# results}}",
+  "@searchResults": {
+    "description": "The search panel's line under its field: how many hits it lists.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "searchFieldLabel": "Search the book",
+  "@searchFieldLabel": {
+    "description": "The accessibility label of the search panel's field."
+  },
+  "searchEmptyTitle": "Type a word to search the whole book",
+  "@searchEmptyTitle": {
+    "description": "The search panel's message before a word is typed."
+  },
+  "searchEmptyHint": "Results show the chapter, the page and the context; click one to jump there",
+  "@searchEmptyHint": {
+    "description": "What the search panel lists."
+  },
+  "searchNoHitsHint": "Try another word, or shorter words separated by spaces",
+  "@searchNoHitsHint": {
+    "description": "What to do when the search found nothing."
+  },
+  "searchChapter": "Chapter {number}",
+  "@searchChapter": {
+    "description": "The chapter of a hit whose book names it not.",
+    "placeholders": {
+      "number": {
+        "type": "int",
+        "example": "7"
+      }
+    }
+  },
+  "searchPage": "Page {page}",
+  "@searchPage": {
+    "description": "The page of a hit.",
+    "placeholders": {
+      "page": {
+        "type": "int",
+        "example": "132"
+      }
+    }
+  },
+  "menuCopy": "Copy",
+  "@menuCopy": {
+    "description": "The page's context menu item that copies the selection."
+  },
+  "menuSelectPage": "Select Page",
+  "@menuSelectPage": {
+    "description": "The page's context menu item that selects the whole page."
+  },
+  "menuClearSelection": "Clear Selection",
+  "@menuClearSelection": {
+    "description": "The page's context menu item that drops the selection."
+  },
+  "searchSelection": "Search for “{query}”",
+  "@searchSelection": {
+    "description": "The page's context menu item that searches the selected words.",
+    "placeholders": {
+      "query": {
+        "type": "String",
+        "example": "the pond"
+      }
+    }
+  },
+  "timeJustNow": "Just now",
+  "@timeJustNow": {
+    "description": "When a book was last opened: less than a minute ago."
+  },
+  "timeMinutesAgo": "{count, plural, one {# minute ago} other {# minutes ago}}",
+  "@timeMinutesAgo": {
+    "description": "When a book was last opened: minutes ago.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "timeHoursAgo": "{count, plural, one {# hour ago} other {# hours ago}}",
+  "@timeHoursAgo": {
+    "description": "When a book was last opened: hours ago.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "timeYesterday": "Yesterday",
+  "@timeYesterday": {
+    "description": "When a book was last opened: the day before."
+  },
+  "timeDaysAgo": "{count, plural, one {# day ago} other {# days ago}}",
+  "@timeDaysAgo": {
+    "description": "When a book was last opened: days ago.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "4"
+      }
+    }
+  },
+  "mygo.appName": "layx-reader",
+  "@mygo.appName": {
+    "description": "The app's name, which packaging writes where systems list it."
+  },
+  "mygo.appDescription": "An EPUB and TXT reader",
+  "@mygo.appDescription": {
+    "description": "The app's description, which packaging writes where systems list it."
+  }
+}

@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/icons"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 )
 
 // settingsWidth is how wide the display settings panel is, in DIPs, measured
@@ -32,7 +33,7 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 			AttachTo(anchor, ui.AnchorBottom, ui.AnchorTop).Margin(9, 0, 0, 0).
 			Children(func() {
 				ui.Row(c).FillWidth().Height(24).Center().Children(func() {
-					ui.Text(c, "Themes & Settings").FontSize(11).FontWeight(600).
+					ui.Text(c, locales.ThemesSettings()).FontSize(11).FontWeight(600).
 						TextColor(a.settingsMuted())
 				})
 				a.settingsDivider(c)
@@ -81,14 +82,14 @@ func (a *app) sizeRow(c *ui.Context) {
 		group := ui.Row(c).Width(130).Height(38).Radius(19).
 			Background(reader.UIColor(pal.Raised)).AlignItems(ui.Center)
 		group.Children(func() {
-			a.sizeCell(c, 13, "Smaller text", func() { a.changeFont(-1) })
+			a.sizeCell(c, 13, locales.SettingsSmallerText(), func() { a.changeFont(-1) })
 			divider := ui.Box(c).Width(1).Height(20).Background(reader.UIColor(pal.OnToolbar).Alpha(0.30))
 			divider.Margin(0, 0)
-			a.sizeCell(c, 21, "Larger text", func() { a.changeFont(1) })
+			a.sizeCell(c, 21, locales.SettingsLargerText(), func() { a.changeFont(1) })
 		})
 		appearance := ui.Box(c).Width(63).Height(38).Radius(19).Center().
 			Background(reader.UIColor(pal.Raised)).Cursor(ui.CursorPointer).
-			Label("Appearance")
+			Label(locales.SettingsAppearance())
 		appearance.OnClick(func() { a.aaMore = !a.aaMore })
 		appearance.Children(func() {
 			ui.Icon(c, icons.SunHorizon).Size(17, 17).TextColor(a.settingsInk())
@@ -109,6 +110,24 @@ func (a *app) sizeCell(c *ui.Context, size float32, label string, onClick func()
 	})
 }
 
+// themeLabel is the name of a paper in the language the app shows. The papers
+// are the reader's own, so the reader names them; the catalogs say the names.
+func themeLabel(t reader.Theme) string {
+	switch t {
+	case reader.ThemeQuiet:
+		return locales.ThemeQuiet()
+	case reader.ThemePaper:
+		return locales.ThemePaper()
+	case reader.ThemeBold:
+		return locales.ThemeBold()
+	case reader.ThemeCalm:
+		return locales.ThemeCalm()
+	case reader.ThemeFocus:
+		return locales.ThemeFocus()
+	}
+	return locales.ThemeOriginal()
+}
+
 // themeGrid is the papers: three cards a row, each printed in its own colours,
 // with its "Aa" and its name inside, and a ring around the one being read.
 func (a *app) themeGrid(c *ui.Context) {
@@ -123,7 +142,7 @@ func (a *app) themeCard(c *ui.Context, theme reader.Theme) {
 	pal := reader.ForTheme(theme)
 	chosen := a.paperTheme(c.Theme().Dark) == theme
 	card := ui.Column(c).Height(55).Radius(12).Background(reader.UIColor(pal.Paper)).
-		Center().Cursor(ui.CursorPointer).Label(theme.Label())
+		Center().Cursor(ui.CursorPointer).Label(themeLabel(theme))
 	switch {
 	case chosen:
 		// The ring is the paper's own ink, so it reads on white and on
@@ -137,7 +156,7 @@ func (a *app) themeCard(c *ui.Context, theme reader.Theme) {
 	card.Children(func() {
 		ui.Column(c).Gap(0).Center().Children(func() {
 			ui.Text(c, "Aa").FontSize(24).TextColor(reader.UIColor(pal.Ink))
-			ui.Text(c, theme.Label()).FontSize(10).TextColor(reader.UIColor(pal.Ink))
+			ui.Text(c, themeLabel(theme)).FontSize(10).TextColor(reader.UIColor(pal.Ink))
 		})
 	})
 }
@@ -153,28 +172,28 @@ func (a *app) settingsDivider(c *ui.Context) {
 func (a *app) customRow(c *ui.Context) {
 	pal := a.chrome
 	row := ui.Row(c).FillWidth().Height(36).Center().Gap(7).Radius(12).
-		Background(reader.UIColor(pal.Raised)).Cursor(ui.CursorPointer).Label("Customize")
+		Background(reader.UIColor(pal.Raised)).Cursor(ui.CursorPointer).Label(locales.SettingsCustomize())
 	row.OnClick(func() { a.aaMore = !a.aaMore })
 	row.Children(func() {
 		ui.Icon(c, icons.Gear).Size(13, 13).TextColor(a.settingsInk())
-		ui.Text(c, "Customize").FontSize(12.5).FontWeight(600).TextColor(a.settingsInk())
+		ui.Text(c, locales.SettingsCustomize()).FontSize(12.5).FontWeight(600).TextColor(a.settingsInk())
 	})
 }
 
 // settingsDetail is what "Customize" opens: the size, the leading and the
 // margins as sliders, the face and the alignment as pairs, and two pages or one.
 func (a *app) settingsDetail(c *ui.Context) {
-	a.sliderRow(c, "Size", fmt.Sprintf("%.0f", a.opts.FontSize), &a.uiSize,
+	a.sliderRow(c, locales.SettingsSize(), fmt.Sprintf("%.0f", a.opts.FontSize), &a.uiSize,
 		reader.MinFontSize, reader.MaxFontSize, func() {
 			a.setOptions(withFontSize(a.opts, round(float32(a.uiSize), 1)))
 		})
-	a.sliderRow(c, "Leading", fmt.Sprintf("%.2f", a.opts.LineHeight), &a.uiLeading,
+	a.sliderRow(c, locales.SettingsLeading(), fmt.Sprintf("%.2f", a.opts.LineHeight), &a.uiLeading,
 		reader.MinLeading, reader.MaxLeading, func() {
 			o := a.opts
 			o.LineHeight = round(float32(a.uiLeading), 0.05)
 			a.setOptions(o)
 		})
-	a.sliderRow(c, "Margins", fmt.Sprintf("%.0f", a.opts.Margin), &a.uiMargin,
+	a.sliderRow(c, locales.SettingsMargins(), fmt.Sprintf("%.0f", a.opts.Margin), &a.uiMargin,
 		reader.MinMargin, reader.MaxMargin, func() {
 			o := a.opts
 			o.Margin = round(float32(a.uiMargin), 1)
@@ -184,28 +203,28 @@ func (a *app) settingsDetail(c *ui.Context) {
 	if a.opts.Font == reader.FontSans {
 		face = 1
 	}
-	a.choose(c, "Typeface", face, func(choice int) {
+	a.choose(c, locales.SettingsTypeface(), face, func(choice int) {
 		o := a.opts
 		o.Font = reader.FontSerif
 		if choice == 1 {
 			o.Font = reader.FontSans
 		}
 		a.setOptions(o)
-	}, "Serif", "Sans")
+	}, locales.SettingsSerif(), locales.SettingsSans())
 	align := 0
 	if !a.opts.Justify {
 		align = 1
 	}
-	a.choose(c, "Alignment", align, func(choice int) {
+	a.choose(c, locales.SettingsAlignment(), align, func(choice int) {
 		o := a.opts
 		o.Justify = choice == 0
 		a.setOptions(o)
-	}, "Justified", "Left")
+	}, locales.SettingsJustified(), locales.SettingsLeft())
 	// The switch writes the setting itself, so the comparison setOptions makes
 	// would see no change: save it and lay the sheet out again here.
 	// The row is the control, as Books lets the whole line be pressed; the
 	// pill at its right shows the state.
-	a.switchRow(c, "Two Pages", a.opts.Spread, func(on bool) {
+	a.switchRow(c, locales.SettingsTwoPages(), a.opts.Spread, func(on bool) {
 		a.opts.Spread = on
 		a.savePrefs()
 		a.layW, a.layH = 0, 0
@@ -213,12 +232,12 @@ func (a *app) settingsDetail(c *ui.Context) {
 	// Scrolling reads the book as one column. It is a layout mode, so it goes
 	// through setOptions like the type settings: the sheet follows once the
 	// reader stops pressing.
-	a.switchRow(c, "Scrolling", a.opts.Scroll, func(on bool) {
+	a.switchRow(c, locales.SettingsScrolling(), a.opts.Scroll, func(on bool) {
 		o := a.opts
 		o.Scroll = on
 		a.setOptions(o)
 	})
-	if ui.Button(c, "Reset to Defaults").Clicked() {
+	if ui.Button(c, locales.SettingsReset()).Clicked() {
 		a.setOptions(reader.DefaultOptions())
 		a.syncSettingsFields()
 	}

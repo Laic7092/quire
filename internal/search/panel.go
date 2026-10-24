@@ -1,11 +1,11 @@
 package search
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/widgets"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -46,7 +46,7 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 	col := ui.Column(c).Fill()
 	col.Children(func() {
 		ui.Row(c).Padding(8, 10).Children(func() {
-			field := ui.SearchField(c, &p.Query).Label("全文搜索").Grow(1)
+			field := ui.SearchField(c, &p.Query).Label(locales.SearchFieldLabel()).Grow(1)
 			if field.Changed() || field.Submitted() {
 				search = true
 			}
@@ -61,9 +61,9 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 
 		switch {
 		case strings.TrimSpace(p.Query) == "":
-			widgets.Empty(c, "输入关键词搜索全书", "结果会给出章节、页码和上下文；点一条就跳过去")
+			widgets.Empty(c, locales.SearchEmptyTitle(), locales.SearchEmptyHint())
 		case len(p.Hits) == 0:
-			widgets.Empty(c, p.statusText(), "换个词试试，或先用空格分开更短的词")
+			widgets.Empty(c, p.statusText(), locales.SearchNoHitsHint())
 		default:
 			p.list.Key = func(i int) any { return i }
 			ui.List(c, &p.list, len(p.Hits), func(i int) { p.row(c, i) }).Grow(1).Padding(2, 6)
@@ -86,9 +86,9 @@ func (p *Panel) statusText() string {
 	case strings.TrimSpace(p.Query) == "":
 		return ""
 	case len(p.Hits) == 0:
-		return "未找到"
+		return locales.SearchNotFoundShort()
 	default:
-		return fmt.Sprintf("%d 条结果", len(p.Hits))
+		return locales.SearchResults(len(p.Hits))
 	}
 }
 
@@ -100,7 +100,7 @@ func (p *Panel) row(c *ui.Context, i int) {
 
 	label := strings.TrimSpace(h.Title)
 	if label == "" {
-		label = fmt.Sprintf("第 %d 章", h.Chapter+1)
+		label = locales.SearchChapter(h.Chapter + 1)
 	}
 	page, hasPage := 0, false
 	if p.PageOf != nil {
@@ -120,7 +120,7 @@ func (p *Panel) row(c *ui.Context, i int) {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, label).FontSize(12).FontWeight(500).Grow(1).SingleLine()
 			if hasPage {
-				ui.Textf(c, "第 %d 页", page+1).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, locales.SearchPage(page+1)).FontSize(11).TextColor(t.TextMuted)
 			}
 		})
 		if snippet := strings.TrimSpace(h.Snippet); snippet != "" {

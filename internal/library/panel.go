@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/icons"
 	"github.com/laix/layx-reader/internal/widgets"
+	"github.com/laix/layx-reader/locales"
 )
 
 // Panel draws the shelf as a sidebar: a field that filters the books, the
@@ -60,14 +61,14 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 	col := ui.Column(c).Fill()
 	col.Children(func() {
 		ui.Row(c).Gap(6).Padding(8, 10).AlignItems(ui.Center).Children(func() {
-			ui.SearchField(c, &p.Query).Label("搜索书架").Grow(1)
+			ui.SearchField(c, &p.Query).Label(locales.ShelfSearchLabel()).Grow(1)
 			if p.OnReload != nil {
-				if widgets.IconButton(c, icons.Refresh, "刷新书架", "重新扫描目录").Clicked() {
+				if widgets.IconButton(c, icons.Refresh, locales.ShelfRefresh(), locales.ShelfRefreshTip()).Clicked() {
 					p.OnReload()
 				}
 			}
 			if p.OnPickDir != nil {
-				if widgets.IconButton(c, icons.Folder, "选择目录", "换一个书库目录").Clicked() {
+				if widgets.IconButton(c, icons.Folder, locales.ChooseFolder(), locales.ShelfChooseFolderTip()).Clicked() {
 					p.OnPickDir()
 				}
 			}
@@ -84,11 +85,11 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 
 		switch {
 		case p.Lib == nil:
-			widgets.Empty(c, "还没有书库目录", "用上面的文件夹按钮选一个装满 EPUB / TXT 的目录")
+			widgets.Empty(c, locales.ShelfNoFolder(), locales.ShelfNoFolderHint())
 		case len(p.Lib.Entries) == 0:
-			widgets.Empty(c, "这个目录里没有书", "支持 .epub 和 .txt，只扫描目录这一层")
+			widgets.Empty(c, locales.ShelfEmpty(), locales.ShelfEmptyHint())
 		case len(rows) == 0:
-			widgets.Empty(c, fmt.Sprintf("没有匹配「%s」的书", strings.TrimSpace(p.Query)), "清空搜索框显示全部")
+			widgets.Empty(c, locales.ShelfNoMatch(strings.TrimSpace(p.Query)), locales.ShelfNoMatchHint())
 		default:
 			ui.List(c, &p.list, len(rows), func(i int) {
 				p.row(c, t, rows[i], i)
@@ -112,9 +113,9 @@ func (p *Panel) countLabel(matched int) string {
 		return ""
 	}
 	if strings.TrimSpace(p.Query) == "" {
-		return fmt.Sprintf("%d 本", matched)
+		return locales.ShelfCount(matched)
 	}
-	return fmt.Sprintf("%d / %d 本", matched, len(p.Lib.Entries))
+	return locales.ShelfCountFiltered(matched, len(p.Lib.Entries))
 }
 
 // row draws one book: its cover or a placeholder, its title and a line of

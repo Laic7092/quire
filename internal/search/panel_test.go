@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
 func testPanel() *Panel {
 	return &Panel{
 		Query:  "ray",
-		Status: "3 条结果",
+		Status: locales.SearchResults(3),
 		Hits: []Hit{
 			{Chapter: 0, Title: "第一章", Snippet: "hello 「ray」 of light", Offset: 2,
 				Loc: render.Location{Chapter: 0, Node: 2, Offset: 2}},
@@ -29,11 +30,11 @@ func TestPanelShowsHitsAndJumps(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 420, 520)
 	tt.Frame()
 
-	if !tt.HasText("3 条结果") {
+	if !tt.HasText(locales.SearchResults(3)) {
 		t.Errorf("status is not shown; texts = %q", tt.Texts())
 	}
 	// A hit is two lines: its chapter and page, then the snippet.
-	if !tt.HasText("第一章") || !tt.HasText("第 2 页") {
+	if !tt.HasText("第一章") || !tt.HasText(locales.SearchPage(2)) {
 		t.Errorf("first hit is not shown; texts = %q", tt.Texts())
 	}
 	if !tt.HasText("hello 「ray」 of light") {
@@ -51,10 +52,10 @@ func TestPanelShowsHitsAndJumps(t *testing.T) {
 }
 
 func TestPanelEmptyState(t *testing.T) {
-	p := &Panel{Query: "nothing", Status: "未找到"}
+	p := &Panel{Query: "nothing", Status: locales.SearchNotFoundShort()}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 420, 320)
 	tt.Frame()
-	if !tt.HasText("未找到") || !tt.HasText("换个词试试，或先用空格分开更短的词") {
+	if !tt.HasText(locales.SearchNotFoundShort()) || !tt.HasText(locales.SearchNoHitsHint()) {
 		t.Errorf("empty status is not shown; texts = %q", tt.Texts())
 	}
 }
@@ -67,7 +68,7 @@ func TestPanelSearchCallback(t *testing.T) {
 
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 420, 520)
 	tt.Frame()
-	if err := tt.Click("全文搜索"); err != nil {
+	if err := tt.Click(locales.SearchFieldLabel()); err != nil {
 		t.Fatal(err)
 	}
 	tt.Type("風")

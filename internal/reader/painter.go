@@ -24,6 +24,9 @@ type UIPainter struct {
 	// bitmaps are the images the paginator placed, decoded once per id.
 	bitmaps map[paint.ImageID]*ui.Bitmap
 	dx, dy  float32
+	// noCull turns off skipping the runs outside the clip, so a test can
+	// paint them and prove the skip changes no pixel.
+	noCull bool
 }
 
 // glyphFace is one parsed face and the outlines it has handed out so far.
@@ -243,6 +246,17 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	}
 	upem := float32(gf.face.Upem())
 	if upem <= 0 {
+		return
+	}
+	// A tile is one viewport tall and the column replays the tiles around the
+	// viewport, so most of the runs handed here lie outside it. Turning their
+	// outlines into a path, flattening and hashing it costs the painter more
+	// than drawing the glyph does, and nothing below the clip would show:
+	// skip them before any of that work. run.Y is the baseline in the tile's
+	// own coordinates and dy is where the tile's top edge lands this frame.
+	vis := u.P.Visible()
+	baseline := u.dy + run.Y
+	if !u.noCull && (baseline+run.Size < vis.Y || baseline-run.Size > vis.Y+vis.H) {
 		return
 	}
 	scale := run.Size / upem

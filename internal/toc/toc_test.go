@@ -1,7 +1,12 @@
 package toc
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -279,5 +284,228 @@ func TestEntryTitleIsTrimmedOfNothing(t *testing.T) {
 	}
 	if !strings.Contains(entries[0].Title, "第三章") {
 		t.Error("title lost its text")
+	}
+}
+
+// writeNavEPUB writes a small EPUB 3 book whose navigation document nests: one
+// section under chapter one, then chapter two. Both sections live in the same
+// XHTML file, so the rows have to be told apart by their #fragment anchors.
+func writeNavEPUB(t *testing.T) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	add := func(name, body string) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(w, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("mimetype", "application/epub+zip")
+	add("META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`)
+	add("OEBPS/content.opf", `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>目录测试</dc:title><dc:language>zh</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="c1"/><itemref idref="c2"/></spine>
+</package>`)
+	para := strings.Repeat("这一章有足够的文字，让排版能把它分成好几行。", 12)
+	add("OEBPS/c1.xhtml", `<html><body><h1>第一章</h1>
+<p>`+para+`</p><h2 id="one">第一节</h2><p>`+para+`</p><h2 id="two">第二节</h2><p>`+para+`</p></body></html>`)
+	add("OEBPS/c2.xhtml", `<html><body><h1>第二章</h1><p>`+para+`</p></body></html>`)
+	add("OEBPS/nav.xhtml", `<html><body><nav epub:type="toc"><ol>
+<li><a href="c1.xhtml#one">第一节</a><ol><li><a href="c1.xhtml#two">第二节</a></li></ol></li>
+<li><a href="c2.xhtml">第二章</a></li>
+</ol></nav></body></html>`)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "nav.epub")
+	if err := os.WriteFile(file, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// A book with a real navigation document gets its own rows, nesting and
+// fragment targets, instead of one guessed row per chapter.
+func TestBuildFromNavigationDocument(t *testing.T) {
+	b, err := book.Open(writeNavEPUB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := Build(b, nil, -1)
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d (%+v), want 3", len(entries), entries)
+	}
+	wantTitles := []string{"第一节", "第二节", "第二章"}
+	wantLevels := []int{0, 1, 0}
+	wantGroups := []bool{true, false, false}
+	for i, e := range entries {
+		if e.Title != wantTitles[i] {
+			t.Errorf("entry %d title = %q, want %q", i, e.Title, wantTitles[i])
+		}
+		if e.Level != wantLevels[i] {
+			t.Errorf("entry %d level = %d, want %d", i, e.Level, wantLevels[i])
+		}
+		if e.Group != wantGroups[i] {
+			t.Errorf("entry %d group = %v, want %v", i, e.Group, wantGroups[i])
+		}
+		if e.Chapter != 0 && e.Chapter != 1 {
+			t.Errorf("entry %d chapter = %d", i, e.Chapter)
+		}
+	}
+	if entries[0].Chapter != 0 || entries[1].Chapter != 0 || entries[2].Chapter != 1 {
+		t.Errorf("chapters = %d/%d/%d, want 0/0/1", entries[0].Chapter, entries[1].Chapter, entries[2].Chapter)
+	}
+	// The first two rows name sections inside chapter one, each with its own
+	// fragment anchor; the third names chapter two itself.
+	if entries[2].Anchor != render.AnchorID(2) {
+		t.Errorf("chapter two anchor = %d, want 2", entries[2].Anchor)
+	}
+	root := render.AnchorID(len(b.Chapters))
+	if entries[0].Anchor <= root || entries[1].Anchor <= root {
+		t.Errorf("section anchors = %d/%d, want fragments beyond %d",
+			entries[0].Anchor, entries[1].Anchor, root)
+	}
+	if entries[0].Anchor == entries[1].Anchor {
+		t.Errorf("both sections share anchor %d", entries[0].Anchor)
+	}
+	if entries[0].Page != -1 || entries[0].HasLoc {
+		t.Errorf("a row without a layout has page %d, loc %v", entries[0].Page, entries[0].HasLoc)
+	}
+}
+
+// The rows of a navigation document land where their anchors are, and the row
+// being read is the last one at or before the reading position.
+func TestNavigationRowsLocateAndMarkCurrent(t *testing.T) {
+	b, err := book.Open(writeNavEPUB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := sampleLayout(t, b)
+	entries := Build(b, layout, -1)
+	for i, e := range entries {
+		if !e.HasLoc || e.Page < 0 {
+			t.Fatalf("entry %d (%q) did not resolve to a page", i, e.Title)
+		}
+	}
+
+	loc, ok := layout.Locate(entries[1].Anchor)
+	if !ok {
+		t.Fatal("the second section has no location")
+	}
+	entries = BuildAt(b, layout, loc)
+	if !entries[1].Current {
+		t.Errorf("reading the second section marks %+v", currentOf(entries))
+	}
+	if entries[0].Current || entries[2].Current {
+		t.Errorf("more than the second section is current: %+v", currentOf(entries))
+	}
+
+	first, ok := layout.Locate(entries[0].Anchor)
+	if !ok {
+		t.Fatal("the first section has no location")
+	}
+	entries = BuildAt(b, layout, first)
+	if !entries[0].Current || entries[1].Current {
+		t.Errorf("reading the first section marks %+v", currentOf(entries))
+	}
+}
+
+// currentOf lists the titles marked Current, for failure messages.
+func currentOf(entries []Entry) []string {
+	var out []string
+	for _, e := range entries {
+		if e.Current {
+			out = append(out, e.Title)
+		}
+	}
+	return out
+}
+
+// A navigation document with a single entry for a thirty-chapter book is a
+// stub, not a table of contents: the chapters themselves are better rows.
+func TestNavigationStubFallsBackToChapters(t *testing.T) {
+	b := fakeBook("第一章 甲", "第二章 乙", "第三章 丙")
+	b.Toc = []book.TOCEntry{{Title: "第一章 甲", Chapter: 0, Anchor: 1}}
+	entries := Build(b, nil, -1)
+	if len(entries) != len(b.Chapters) {
+		t.Fatalf("entries = %d, want the %d chapters", len(entries), len(b.Chapters))
+	}
+	for i, e := range entries {
+		if e.Chapter != i || e.Title != b.Chapters[i].Title {
+			t.Errorf("entry %d = {%q chapter %d}, want a chapter row", i, e.Title, e.Chapter)
+		}
+	}
+}
+
+// Some books put whole paragraphs in their NCX. Those rows are dropped, and a
+// document that is mostly such rows is not trusted at all.
+func TestNavigationParagraphLabelsAreNotRows(t *testing.T) {
+	b := fakeBook("第一章 甲", "第二章 乙")
+	long := strings.Repeat("这是一整段正文，不是标题。", 10)
+	b.Toc = []book.TOCEntry{
+		{Title: "第一章 甲", Chapter: 0, Anchor: 1},
+		{Title: long, Chapter: 0, Anchor: 3},
+		{Title: long, Chapter: 1, Anchor: 4},
+		{Title: long, Chapter: 1, Anchor: 5},
+	}
+	entries := Build(b, nil, -1)
+	if len(entries) != len(b.Chapters) {
+		t.Fatalf("entries = %d (%+v), want the %d chapters", len(entries), entries, len(b.Chapters))
+	}
+	if entries[0].Title != "第一章 甲" || entries[1].Title != "第二章 乙" {
+		t.Errorf("titles = %q/%q, want the chapter titles", entries[0].Title, entries[1].Title)
+	}
+
+	// A single paragraph label among real ones is dropped row by row.
+	b.Toc = []book.TOCEntry{
+		{Title: "第一章 甲", Chapter: 0, Anchor: 1},
+		{Title: long, Chapter: 1, Anchor: 4},
+	}
+	entries = Build(b, nil, -1)
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d (%+v), want 2", len(entries), entries)
+	}
+	if entries[0].Anchor != 1 || entries[1].Chapter != 1 {
+		t.Errorf("rows = %+v, want the nav row then chapter two's own row", entries)
+	}
+}
+
+// A navigation document that nests under a root nobody lists starts at the
+// shallowest level it has, and a chapter no row names still gets a row.
+func TestNavigationDepthNormalized(t *testing.T) {
+	b := fakeBook("第一章 甲", "第二章 乙", "第三章 丙")
+	b.Toc = []book.TOCEntry{
+		{Title: "第一章 甲", Chapter: 0, Anchor: 1, Depth: 1},
+		{Title: "第一幕", Chapter: 0, Anchor: 4, Depth: 2},
+		{Title: "第二章 乙", Chapter: 1, Anchor: 2, Depth: 1},
+	}
+	entries := Build(b, nil, -1)
+	if len(entries) != 4 {
+		t.Fatalf("entries = %d (%+v), want 4", len(entries), entries)
+	}
+	if entries[0].Level != 0 || entries[1].Level != 1 || entries[2].Level != 0 {
+		t.Errorf("levels = %d/%d/%d, want 0/1/0", entries[0].Level, entries[1].Level, entries[2].Level)
+	}
+	if !entries[0].Group {
+		t.Error("the row with a nested row under it is not a group")
+	}
+	// Chapter three has no row of its own, and still appears, after the two
+	// chapters the navigation document named.
+	if entries[3].Chapter != 2 || entries[3].Title != "第三章 丙" {
+		t.Errorf("unnamed chapter row = %+v", entries[3])
 	}
 }

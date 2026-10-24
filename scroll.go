@@ -1,11 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -273,7 +273,7 @@ func (a *app) scrollLabel() string {
 	if a.layout == nil {
 		return "—"
 	}
-	return fmt.Sprintf("%d%%", int(a.scrollProgress()*100+0.5))
+	return locales.ScrollPercent(int(a.scrollProgress()*100 + 0.5))
 }
 
 // chapterScreensLeft is how much of the chapter is below the column, counted in
@@ -290,20 +290,34 @@ func (a *app) chapterScreensLeft() string {
 	view := a.scrollViewport()
 	left := end - (a.scrollY + view)
 	if left <= 0 {
-		return "Last page of chapter"
+		return locales.ChapterLastPage()
 	}
 	screens := int((left + view - 1) / view)
 	if screens == 1 {
-		return "1 page left in chapter"
+		return locales.ChapterOnePageLeft()
 	}
-	return fmt.Sprintf("%d pages left in chapter", screens)
+	return locales.ChapterPagesLeft(screens)
 }
 
 // resumeScrollNote is the status line a scroll-mode book opens with: how far
 // into the book the saved position is, and which store path found it.
 func resumeScrollNote(l *render.Layout, loc render.Location, how string) string {
 	if p, ok := l.Progress(loc); ok {
-		return fmt.Sprintf("上次读到 %d%%（%s）", int(p*100+0.5), how)
+		return locales.ResumeScroll(int(p*100+0.5), resumeHow(how))
 	}
-	return "上次读到这里（" + how + "）"
+	return locales.ResumeScrollHere(resumeHow(how))
+}
+
+// resumeHow names the store's degradation path in the language the app shows,
+// so the note the reader opens with says where the position came from.
+func resumeHow(how string) string {
+	switch how {
+	case "node":
+		return locales.HowNode()
+	case "anchor":
+		return locales.HowAnchor()
+	case "progress":
+		return locales.HowProgress()
+	}
+	return how
 }

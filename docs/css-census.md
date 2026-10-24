@@ -243,7 +243,7 @@ linked/read/missing/声明数。
 
 ## 结论：CSS 子集第一批做这 11 项
 
-顺序按"书数 × 现有 `render.Style` 字段"排，全部是 `internal/book` 里的纯映射，不需要
+顺序按"书数 × 现有 `render.Style` 字段"排，全部是 `layx/epub/html.go` 里的纯映射，不需要
 改布局器：
 
 1. **`margin-top` / `margin-bottom` / `margin-left` / `margin-right`**（1540 条 / 12 本，

@@ -2,6 +2,10 @@ package library
 
 import (
 	"archive/zip"
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +79,15 @@ func TestScanMiniEPUB(t *testing.T) {
 // a book built for the test.
 func TestScanEPUBCoverImage(t *testing.T) {
 	dir := t.TempDir()
-	cover := append([]byte("\x89PNG\r\n\x1a\n"), []byte("not a real png")...)
+	// A real PNG: the shelf only keeps covers a painter can decode, so a file
+	// that merely starts like one is not enough.
+	var pic bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 2, 3))
+	img.Set(0, 0, color.RGBA{R: 0x30, G: 0x80, B: 0x40, A: 0xff})
+	if err := png.Encode(&pic, img); err != nil {
+		t.Fatal(err)
+	}
+	cover := pic.Bytes()
 	writeTestEPUB(t, filepath.Join(dir, "covered.epub"), `
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>封面书</dc:title>
@@ -278,4 +290,16 @@ func writeFile(t *testing.T, dir, name, content string, modified time.Time) {
 	if err := os.Chtimes(path, modified, modified); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// isImage reports whether data starts like a PNG or a JPEG, the two formats a
+// shelf cover is kept in.
+func isImage(data []byte) bool {
+	switch {
+	case len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n":
+		return true
+	case len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff:
+		return true
+	}
+	return false
 }

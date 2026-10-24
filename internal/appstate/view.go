@@ -4,6 +4,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/store"
 	"github.com/laix/layx-reader/internal/widgets"
+	"github.com/laix/layx-reader/locales"
 )
 
 // Showing reports whether a panel is open; the host floats it over the page.
@@ -13,13 +14,13 @@ func (a *App) Showing() bool { return a.Sidebar != SidebarNone }
 func (a *App) Title() string {
 	switch a.Sidebar {
 	case SidebarToc:
-		return "目录"
+		return locales.PanelContents()
 	case SidebarBookmarks:
-		return "书签"
+		return locales.PanelBookmarks()
 	case SidebarNotes:
-		return "笔记"
+		return locales.PanelNotes()
 	case SidebarSearch:
-		return "搜索"
+		return locales.Search()
 	}
 	return ""
 }
@@ -67,11 +68,11 @@ func (a *App) View(c *ui.Context) ui.Element {
 		case SidebarSearch:
 			a.Search.View(c)
 		case SidebarBookmarks:
-			widgets.Empty(c, "还没有书签", "这本书的书签会列在这里")
+			widgets.Empty(c, locales.EmptyBookmarks(), locales.EmptyBookmarksHint())
 		case SidebarNotes:
-			widgets.Empty(c, "还没有笔记", "这本书的笔记和划线的文字会列在这里")
+			widgets.Empty(c, locales.EmptyNotes(), locales.EmptyNotesHint())
 		default:
-			widgets.Empty(c, "没有打开的页面", "")
+			widgets.Empty(c, locales.EmptyPanel(), "")
 		}
 	})
 	return col

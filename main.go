@@ -22,6 +22,7 @@ import (
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -99,6 +100,7 @@ type app struct {
 	// many runes the last copy took (0 for none). pressX and pressY are where
 	// that press began, which a released click turns the page from. Only the
 	// UI thread touches them, and only the draw callback reads the rectangles.
+	hoverLink   bool
 	sel         reader.Selection
 	selQuads    []render.SelectionQuad
 	selDragging bool
@@ -201,15 +203,15 @@ type app struct {
 // scrolling column the reader is.
 func (a *app) pageLabel() string {
 	if a.showCover {
-		return "Cover"
+		return locales.PageLabelCover()
 	}
 	if a.scrolling() {
 		return a.scrollLabel()
 	}
 	if a.layout == nil {
-		return "— of —"
+		return locales.PageLabelNone()
 	}
-	return fmt.Sprintf("%d of %d", a.page+1, a.layout.PageCount())
+	return locales.PageLabelPages(a.page+1, a.layout.PageCount())
 }
 
 // progress is how much of the book has been read, from 0 to 1, for the footer:
@@ -469,7 +471,7 @@ func (a *app) ensureLayout(w, h float32) {
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
 		a.loading = false
 		a.failed, a.failW, a.failH, a.failSize = true, w, h, opts.FontSize
-		a.status = "窗口太窄：把窗口拉宽一些"
+		a.status = locales.LayoutTooNarrow()
 		return
 	}
 	if a.win == nil || a.book == nil || a.fonts == nil {
@@ -494,6 +496,7 @@ func (a *app) ensureLayout(w, h float32) {
 	a.failed = false
 
 	bookPtr, fonts, win := a.book, a.fonts, a.win
+	linkColor := reader.Current().Link
 	doc, docAt := a.doc, a.docAt
 	size := opts.FontSize
 	ctx := context.Background()
@@ -505,11 +508,11 @@ func (a *app) ensureLayout(w, h float32) {
 	}
 
 	go func() {
-		var images map[render.ImageID]book.Image
+		var images map[render.ImageID][]byte
 		index := prevIndex
 		rebuilt := false
 		if doc == nil || docAt != size {
-			d, imgs, err := bookPtr.Build(size)
+			d, imgs, err := bookPtr.BuildWith(size, book.Options{LinkColor: linkColor})
 			if err != nil {
 				win.Update(func() {
 					defer a.refresh(win)
@@ -518,7 +521,7 @@ func (a *app) ensureLayout(w, h float32) {
 					}
 					a.loading = false
 					a.failed, a.failW, a.failH, a.failSize = true, w, h, size
-					a.status = "排版失败：" + err.Error()
+					a.status = locales.LayoutFailed(err.Error())
 				})
 				return
 			}
@@ -542,13 +545,13 @@ func (a *app) ensureLayout(w, h float32) {
 			a.loading = false
 			if err != nil {
 				a.failed, a.failW, a.failH, a.failSize = true, w, h, size
-				a.status = "排版失败：" + err.Error()
+				a.status = locales.LayoutFailed(err.Error())
 				return
 			}
 			// Decoding belongs on the UI thread and happens once per build.
 			if rebuilt && a.paint != nil {
-				for id, img := range images {
-					a.paint.SetImage(id, img.Data)
+				for id, data := range images {
+					a.paint.SetImage(id, data)
 				}
 			}
 			a.doc, a.docAt = doc, docAt
@@ -594,7 +597,7 @@ func (a *app) ensureLayout(w, h float32) {
 					a.pendingResume = false
 					if page, how := a.pan.Resume(layout); how != "" {
 						a.page = a.snapPage(page)
-						a.resumeNote = "上次读到第 " + fmt.Sprint(page+1) + " 页（" + how + "）"
+						a.resumeNote = locales.ResumePage(page+1, resumeHow(how))
 						a.status = a.resumeNote
 					}
 				}
@@ -639,13 +642,13 @@ func (a *app) chooseFile() {
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:  win,
-			Title:   "打开 EPUB 或 TXT",
-			Filters: []mygo.FileFilter{{Name: "书籍", Extensions: []string{"epub", "txt"}}},
+			Title:   locales.OpenDialogTitle(),
+			Filters: []mygo.FileFilter{{Name: locales.BookFiles(), Extensions: []string{"epub", "txt"}}},
 		})
 		if err != nil {
 			win.Update(func() {
 				defer a.refresh(win)
-				a.status = "打开失败：" + err.Error()
+				a.status = locales.OpenFailed(err.Error())
 			})
 			return
 		}
@@ -668,13 +671,13 @@ func (a *app) chooseDir() {
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:    win,
-			Title:     "选择书库目录",
+			Title:     locales.ChooseFolderTitle(),
 			Directory: true,
 		})
 		if err != nil {
 			win.Update(func() {
 				defer a.refresh(win)
-				a.pan.Shelf.Status = "打开目录失败：" + err.Error()
+				a.pan.Shelf.Status = locales.ChooseFolderFailed(err.Error())
 			})
 			return
 		}
@@ -722,7 +725,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 			if a.opening == path {
 				a.opening = ""
 			}
-			a.status = "无法读取：" + err.Error()
+			a.status = locales.ReadBookFailed(err.Error())
 		})
 		return
 	}
@@ -749,7 +752,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		a.clearSelection()
 		a.hitQuads = nil
 		a.file = path
-		a.status = "《" + b.Title + "》"
+		a.status = locales.OpenedBook(b.Title)
 		a.pendingResume = true
 		a.resumeNote = ""
 		a.layScroll = false
@@ -759,13 +762,21 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 			a.pan.Opened(b, path)
 			a.pan.Refresh(b, nil, 0)
 		}
-		win.SetTitle("《" + b.Title + "》 — layx-reader")
+		title := appName
+		if a.book != nil {
+			title = locales.WindowTitle(a.book.Title)
+		}
+		win.SetTitle(title)
 		// The proxy icon in the title bar, the Window menu and the Dock's
 		// recent list all follow the file being read.
 		win.SetRepresentedFile(path)
 		_ = mygo.App.AddRecentDocument(path)
 	})
 }
+
+// appName is the reader's name: the window's title while no book is open, and
+// what the About box and the menus call it. Its messages are in the catalogs.
+const appName = "layx-reader"
 
 // windowOptions are the reader's window. Every platform gets the Books-style
 // shell: no system title bar, the view runs to the top edge, and its own bars
@@ -775,7 +786,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 // configures on Linux — and c.TitleBar() reports it.
 func windowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	o := mygo.WindowOptions{
-		Title:         "layx-reader",
+		Title:         appName,
 		Width:         787,
 		Height:        590,
 		MinWidth:      640,
@@ -852,20 +863,23 @@ func (a *app) menuAction(fn func()) {
 }
 
 // menuBar is the macOS menu bar. The other platforms keep the window's own
-// shortcuts: a native UI window has no menu bar there.
+// shortcuts: a native UI window has no menu bar there. The labels follow the
+// language the app shows, so the bar is made again when it changes.
 func (a *app) menuBar() *mygo.Menu {
 	copySelection := &mygo.MenuItem{
-		ID:       "copySelection",
-		Label:    "复制选中的文字",
-		Disabled: true, // the first frame enables it as the selection appears
+		ID:    "copySelection",
+		Label: locales.MenuCopySelection(),
+		// The first frame keeps this in step with the selection.
+		Disabled: len(a.selQuads) == 0,
 		// No accelerator: ⌘C must reach the view for the page selection and
 		// the focused search field. An enabled menu item would take the key
 		// first and copy neither of them.
 		Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.copyPageText) },
 	}
 	a.menuCopy = copySelection
+	a.menuCopyOn = len(a.selQuads) > 0
 	scroll := &mygo.MenuItem{
-		Label:   "滚动阅读",
+		Label:   locales.MenuScrollReading(),
 		Type:    mygo.MenuItemCheckbox,
 		Checked: a.opts.Scroll,
 		Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -888,13 +902,13 @@ func (a *app) menuBar() *mygo.Menu {
 	}
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu},
-		{Label: "文件", Submenu: []*mygo.MenuItem{
-			{Label: "打开…", Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { a.chooseFile() }},
+		{Label: locales.MenuFile(), Submenu: []*mygo.MenuItem{
+			{Label: locales.MenuOpen(), Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { a.chooseFile() }},
 			{Role: mygo.RoleOpenRecent},
 			mygo.Separator(),
 			{Role: mygo.RoleClose},
 		}},
-		{Label: "编辑", Submenu: []*mygo.MenuItem{
+		{Label: locales.MenuEdit(), Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleUndo},
 			{Role: mygo.RoleRedo},
 			mygo.Separator(),
@@ -904,15 +918,15 @@ func (a *app) menuBar() *mygo.Menu {
 			mygo.Separator(),
 			copySelection,
 		}},
-		{Label: "显示", Submenu: []*mygo.MenuItem{
-			{Label: "书库侧栏", Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
-			{Label: "按书名排序", Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: locales.MenuView(), Submenu: []*mygo.MenuItem{
+			{Label: locales.MenuSidebar(), Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
+			{Label: locales.MenuSortByTitle(), Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.menuAction(func() { a.sortByTitle = !a.sortByTitle })
 			}},
 			scroll,
-			{Label: "目录", Accelerator: "CmdOrCtrl+T", Click: show(appstate.SidebarToc)},
-			{Label: "搜索", Accelerator: "CmdOrCtrl+F", Click: show(appstate.SidebarSearch)},
-			{Label: "显示设置…", Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.MenuContents(), Accelerator: "CmdOrCtrl+T", Click: show(appstate.SidebarToc)},
+			{Label: locales.MenuSearch(), Accelerator: "CmdOrCtrl+F", Click: show(appstate.SidebarSearch)},
+			{Label: locales.MenuDisplaySettings(), Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.menuAction(func() { a.aaOpen = true })
 			}},
 			mygo.Separator(),
@@ -1045,9 +1059,27 @@ func main() {
 			win.Focus()
 		}
 	})
-	// The app speaks Chinese: MyGo's own strings, including the menu roles',
-	// follow. Set before the menu is built.
-	mygo.App.SetLanguages("zh-Hans")
+	// The app speaks the languages of its catalogs, and MyGo's own strings,
+	// including the menu roles', follow: importing the catalogs registers them
+	// with package i18n, which is what makes those the app's languages.
+	//
+	// The menu bar and the window title are set once, so they are set again
+	// when the language the app shows changes: switching it in System Settings
+	// relabels them without a restart.
+	mygo.App.OnLocaleChanged(func(string) {
+		if runtime.GOOS == "darwin" {
+			mygo.App.SetMenu(a.menuBar())
+		}
+		if a.win == nil {
+			return
+		}
+		if a.book != nil {
+			a.win.SetTitle(locales.WindowTitle(a.book.Title))
+		} else {
+			a.win.SetTitle(appName)
+		}
+		a.win.Invalidate()
+	})
 	if runtime.GOOS == "darwin" {
 		// Closing the window leaves the app in the Dock, as every Mac app;
 		// clicking the icon brings back a window with the reader as it was.

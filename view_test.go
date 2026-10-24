@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"image/png"
 	"os"
 	"strings"
@@ -16,8 +15,8 @@ import (
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render/paint"
-	"strconv"
 )
 
 // newWindow builds an app with a real book, a real layout and a real shelf,
@@ -55,8 +54,8 @@ func newWindow(t *testing.T) *app {
 	}
 
 	paint := reader.NewUIPainter(nil, fonts)
-	for id, img := range images {
-		paint.SetImage(id, img.Data)
+	for id, data := range images {
+		paint.SetImage(id, data)
 	}
 	pan := appstate.New(st)
 	pan.Library = lib
@@ -106,15 +105,17 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 	pan := a.pan
 
 	shots := []struct {
-		name   string
-		dark   bool
-		want   string
+		name string
+		dark bool
+		// want is the text the screen must show, read after render: a page
+		// label or a message of the catalogs, in the language the app shows.
+		want   func(a *app) string
 		w, h   int // 0 is 1180×800
 		render func(t *testing.T)
 	}{
 		// One page on the sheet, as the reader shows a book in a window too
 		// narrow for the pair.
-		{name: "reader", want: "5 of ", render: func(t *testing.T) {
+		{name: "reader", want: func(a *app) string { return a.pageLabel() }, render: func(t *testing.T) {
 			a.opts.Spread = false
 			one, err := reader.BuildLayout(context.Background(), doc, a.fonts, paperW, paperH,
 				singleOptions())
@@ -125,16 +126,16 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			a.clearSelection()
 			pan.Refresh(bk, one, 4)
 		}},
-		{name: "toc", want: bk.Chapters[0].Title, render: func(*testing.T) {
+		{name: "toc", want: func(*app) string { return bk.Chapters[0].Title }, render: func(*testing.T) {
 			pan.Show(appstate.SidebarToc)
 		}},
-		{name: "bookmarks", want: "还没有书签", render: func(*testing.T) {
+		{name: "bookmarks", want: func(*app) string { return locales.EmptyBookmarks() }, render: func(*testing.T) {
 			pan.Show(appstate.SidebarBookmarks)
 		}},
-		{name: "notes", want: "还没有笔记", render: func(*testing.T) {
+		{name: "notes", want: func(*app) string { return locales.EmptyNotes() }, render: func(*testing.T) {
 			pan.Show(appstate.SidebarNotes)
 		}},
-		{name: "search", want: "条结果", render: func(t *testing.T) {
+		{name: "search", want: func(*app) string { return locales.SearchFieldLabel() }, render: func(t *testing.T) {
 			pan.Show(appstate.SidebarSearch)
 			ix, err := search.NewIndex(bk, a.doc)
 			if err != nil {
@@ -149,7 +150,7 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 		}},
 		// The veils over the page: a search hit in amber, the hit the panel
 		// points at darker, and a drag selection over the lines below it.
-		{name: "highlight", want: "Selected", render: func(t *testing.T) {
+		{name: "highlight", want: func(*app) string { return locales.SelectionSelected() }, render: func(t *testing.T) {
 			if len(pan.Search.Hits) == 0 {
 				t.Fatal("the search shot left no hits")
 			}
@@ -171,10 +172,10 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 				}
 			}
 		}},
-		{name: "cover", want: "Cover", render: func(*testing.T) {
+		{name: "cover", want: func(*app) string { return locales.PageLabelCover() }, render: func(*testing.T) {
 			pan.Show(appstate.SidebarNone)
 			a.showCover = true
-		}}, {name: "home", want: "3 本书", render: func(t *testing.T) {
+		}}, {name: "home", want: func(*app) string { return locales.LibraryCount(3) }, render: func(t *testing.T) {
 			a.showCover = false
 			a.book, a.status = nil, ""
 			for i, e := range pan.Library.Entries {
@@ -193,15 +194,15 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 		}},
 		// The home page at the window size the macOS prototype is drawn at:
 		// the shot the layout is measured against.
-		{name: "home-prototype", w: 818, h: 612, want: "3 本书", render: func(*testing.T) {}},
+		{name: "home-prototype", w: 818, h: 612, want: func(*app) string { return locales.LibraryCount(3) }, render: func(*testing.T) {}},
 		// The same page at a wide window and near the minimum: the measures follow
 		// the width, so the covers and margins grow or shrink instead of staying
 		// at the reference window's numbers.
-		{name: "home-wide", w: 1440, h: 900, want: "3 本书", render: func(*testing.T) {}},
-		{name: "home-narrow", w: 700, h: 520, want: "继续阅读", render: func(*testing.T) {}},
+		{name: "home-wide", w: 1440, h: 900, want: func(*app) string { return locales.LibraryCount(3) }, render: func(*testing.T) {}},
+		{name: "home-narrow", w: 700, h: 520, want: func(*app) string { return locales.ContinueReading() }, render: func(*testing.T) {}},
 		// The display settings: the four papers, the size, the leading, the
 		// face, the alignment, the margins and the spread.
-		{name: "settings", want: "Two Pages", render: func(t *testing.T) {
+		{name: "settings", want: func(*app) string { return locales.SettingsTwoPages() }, render: func(t *testing.T) {
 			a.book, a.page = bk, 4
 			a.showCover = false
 			a.aaOpen, a.aaMore = true, true
@@ -209,7 +210,7 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			pan.Show(appstate.SidebarNone)
 		}},
 		// An open book: two pages side by side once the window is wide enough.
-		{name: "spread", w: 1280, want: "5 of ", render: func(t *testing.T) {
+		{name: "spread", w: 1280, want: func(a *app) string { return a.pageLabel() }, render: func(t *testing.T) {
 			a.aaOpen = false
 			a.opts.Spread = true
 			sw := float32((1280 - 2*pagePadding) / 2)
@@ -227,7 +228,7 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 		}},
 		// A window near the minimum size, with a panel floating over it, still
 		// lays the page out at the whole window's measure and says where it is.
-		{name: "narrow", w: 700, h: 520, want: "5 of ", render: func(t *testing.T) {
+		{name: "narrow", w: 700, h: 520, want: func(a *app) string { return a.pageLabel() }, render: func(t *testing.T) {
 			w := float32(700 - 2*pagePadding)
 			ph := float32(520 - headerHeight - footerHeight - 2*pagePadding)
 			narrow, err := reader.BuildLayout(context.Background(), doc, a.fonts, w, ph, reader.Options{FontSize: reader.DefaultFontSize})
@@ -240,7 +241,7 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			pan.Show(appstate.SidebarToc)
 			pan.Refresh(bk, narrow, 4)
 		}},
-		{name: "dark", dark: true, want: a.pageLabel(), render: func(t *testing.T) {
+		{name: "dark", dark: true, want: func(a *app) string { return a.pageLabel() }, render: func(t *testing.T) {
 			reader.SetPalette(reader.Night)
 			a.theme, a.themeSys = reader.ThemeNight, false
 			// Lay the book out again on the night paper at this window's size:
@@ -271,7 +272,7 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 		}},
 		// The scrolling column: the same book as one flow, its first viewport
 		// of tiles on the sheet and the folio counting in percent.
-		{name: "scroll", want: "0%", render: func(t *testing.T) {
+		{name: "scroll", want: func(*app) string { return locales.ScrollPercent(0) }, render: func(t *testing.T) {
 			reader.SetPalette(reader.Quiet)
 			a.theme, a.themeSys = reader.ThemeQuiet, false
 			a.opts.Scroll, a.opts.Spread = true, false
@@ -297,16 +298,13 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			w, h = 1180, 800
 		}
 		tt := ui.NewTester(a.view, w, h)
-		// The window declares Chinese as the app's language, so MyGo's own
-		// strings follow it; the tester starts in English.
-		tt.SetLocale("zh-Hans")
 		if s.dark {
 			tt.SetDark(true)
 		}
 		s.render(t)
 		tt.Frame()
-		if !tt.HasText(s.want) {
-			t.Errorf("%s: %q is missing from %q", s.name, s.want, tt.Texts())
+		if want := s.want(a); !tt.HasText(want) {
+			t.Errorf("%s: %q is missing from %q", s.name, want, tt.Texts())
 		}
 		if os.Getenv("SNAP") != "" {
 			f, err := os.Create("/tmp/snap-" + s.name + ".png")
@@ -339,10 +337,9 @@ func TestNarrowWindowExplainsItself(t *testing.T) {
 func TestDragSelectsTextAndCopiesIt(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 
-	box, ok := tt.Find("书页")
+	box, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("the page box is not labelled: %q", tt.Texts())
 	}
@@ -445,7 +442,6 @@ func TestSearchHitsAreHighlighted(t *testing.T) {
 	}
 
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 	if !tt.HasText(a.pageLabel()) {
 		t.Errorf("page label missing: %q", tt.Texts())
@@ -464,10 +460,9 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	a.pan.SetIndex(ix)
 
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 
-	box, ok := tt.Find("书页")
+	box, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("the page box is not labelled: %q", tt.Texts())
 	}
@@ -475,10 +470,10 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	// Nothing selected: the menu is there, but copying is not.
 	tt.RightClickAt(box.X+120, box.Y+120)
 	menu := strings.Join(tt.Menu(), "|")
-	if !strings.Contains(menu, "复制") || !strings.Contains(menu, "选中本页") {
+	if !strings.Contains(menu, locales.MenuCopy()) || !strings.Contains(menu, locales.MenuSelectPage()) {
 		t.Fatalf("the page menu has no selection commands: %q", menu)
 	}
-	if err := tt.ChooseMenuItem("复制"); err == nil {
+	if err := tt.ChooseMenuItem(locales.MenuCopy()); err == nil {
 		t.Error("the menu copied with nothing selected")
 	}
 
@@ -493,7 +488,7 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	}
 	tt.RightClickAt(box.X+120, box.Y+120)
 	tt.Frame()
-	if err := tt.ChooseMenuItem("复制"); err != nil {
+	if err := tt.ChooseMenuItem(locales.MenuCopy()); err != nil {
 		t.Fatalf("copy from the menu: %v (menu %q)", err, strings.Join(tt.Menu(), "|"))
 	}
 	if got := tt.Clipboard(); got != want {
@@ -503,7 +498,7 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	// 选中本页 covers the page, 清除选区 drops it.
 	tt.RightClickAt(box.X+120, box.Y+120)
 	tt.Frame()
-	if err := tt.ChooseMenuItem("选中本页"); err != nil {
+	if err := tt.ChooseMenuItem(locales.MenuSelectPage()); err != nil {
 		t.Fatalf("select page: %v (menu %q)", err, strings.Join(tt.Menu(), "|"))
 	}
 	if len(a.selQuads) == 0 {
@@ -514,7 +509,7 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	}
 	tt.RightClickAt(box.X+120, box.Y+120)
 	tt.Frame()
-	if err := tt.ChooseMenuItem("清除选区"); err != nil {
+	if err := tt.ChooseMenuItem(locales.MenuClearSelection()); err != nil {
 		t.Fatalf("clear selection: %v (menu %q)", err, strings.Join(tt.Menu(), "|"))
 	}
 	if len(a.selQuads) != 0 {
@@ -556,7 +551,6 @@ func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 
 	if err := tt.Click("Aa"); err != nil {
@@ -564,23 +558,23 @@ func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 	}
 	// The papers and the size are on the panel itself; the rest is one press
 	// away, under 自定义, as Books arranges it.
-	for _, want := range []string{"Themes & Settings", "Original", "Calm", "Paper", "Bold", "Customize"} {
+	for _, want := range []string{locales.ThemesSettings(), locales.ThemeOriginal(), locales.ThemeCalm(), locales.ThemePaper(), locales.ThemeBold(), locales.SettingsCustomize()} {
 		if !tt.HasText(want) {
 			t.Fatalf("the panel has no %q: %q", want, tt.Texts())
 		}
 	}
-	if err := tt.Click("Customize"); err != nil {
+	if err := tt.Click(locales.SettingsCustomize()); err != nil {
 		t.Fatalf("no 自定义 row: %v", err)
 	}
 	tt.Frame()
-	for _, want := range []string{"Size", "Leading", "Typeface", "Alignment", "Margins", "Two Pages"} {
+	for _, want := range []string{locales.SettingsSize(), locales.SettingsLeading(), locales.SettingsTypeface(), locales.SettingsAlignment(), locales.SettingsMargins(), locales.SettingsTwoPages()} {
 		if !tt.HasText(want) {
 			t.Fatalf("the panel has no %q: %q", want, tt.Texts())
 		}
 	}
 
 	// The paper: the swatch is the page's own pair of colours.
-	if err := tt.Click("Original"); err != nil {
+	if err := tt.Click(locales.ThemeOriginal()); err != nil {
 		t.Fatalf("no white theme: %v", err)
 	}
 	if got := reader.Current().Theme; got != reader.ThemeWhite {
@@ -590,13 +584,13 @@ func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 		t.Errorf("saved theme %q, want white", got)
 	}
 
-	if err := tt.Click("Sans"); err != nil {
+	if err := tt.Click(locales.SettingsSans()); err != nil {
 		t.Fatalf("no sans choice: %v", err)
 	}
 	if a.opts.Font != reader.FontSans {
 		t.Errorf("face %q after choosing 黑体", a.opts.Font)
 	}
-	if err := tt.Click("Left"); err != nil {
+	if err := tt.Click(locales.SettingsLeft()); err != nil {
 		t.Fatalf("no left alignment: %v", err)
 	}
 	if a.opts.Justify {
@@ -614,7 +608,7 @@ func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 	if !a.opts.Spread {
 		t.Fatal("a book does not open as a spread by default")
 	}
-	if err := tt.Click("Two Pages"); err != nil {
+	if err := tt.Click(locales.SettingsTwoPages()); err != nil {
 		t.Fatalf("no spread switch: %v", err)
 	}
 	if a.opts.Spread {
@@ -639,12 +633,11 @@ func TestSpreadShowsTwoPagesAndTurnsByThePair(t *testing.T) {
 	a.pan.Refresh(a.book, two, 4)
 
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 	if got := a.pagesOnSheet(); got != 2 {
 		t.Fatalf("%d pages on a 1180 wide sheet", got)
 	}
-	if got, want := a.pageLabel(), "5 of "+strconv.Itoa(two.PageCount()); got != want {
+	if got, want := a.pageLabel(), locales.PageLabelPages(5, two.PageCount()); got != want {
 		t.Errorf("page label %q, want %q", got, want)
 	}
 
@@ -680,7 +673,6 @@ func TestTurnSlidesAndLands(t *testing.T) {
 	a := newWindow(t)
 	a.instant = false
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 
 	at := time.Now()
@@ -722,14 +714,13 @@ func TestTurnSlidesAndLands(t *testing.T) {
 func TestEscapeGoesBackToTheLibrary(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetLocale("zh-Hans")
 	tt.Frame()
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
 	if a.book != nil {
 		t.Errorf("the book is still open after Escape: %q", tt.Texts())
 	}
-	if !tt.HasText("书库") {
+	if !tt.HasText(locales.SidebarLibraryHeading()) {
 		t.Errorf("no library after Escape: %q", tt.Texts())
 	}
 }
@@ -743,7 +734,7 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
 	tt.SetTitleBar(bar)
-	btn, ok := tt.Find("目录")
+	btn, ok := tt.Find(locales.PanelContents())
 	if !ok {
 		t.Fatalf("the reader's bar is missing: %q", tt.Texts())
 	}
@@ -754,7 +745,7 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 	lib := &app{opts: reader.DefaultOptions(), instant: true}
 	lt := ui.NewTester(lib.view, 900, 700)
 	lt.SetTitleBar(bar)
-	row, ok := lt.Find("搜索")
+	row, ok := lt.Find(locales.Search())
 	if !ok {
 		t.Fatalf("the library's source list is missing: %q", lt.Texts())
 	}
@@ -783,7 +774,7 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 
 	rlt := ui.NewTester(lib.view, 900, 700)
 	rlt.SetTitleBar(right)
-	ring, ok := rlt.Find("本周阅读")
+	ring, ok := rlt.Find(locales.WeekRing())
 	if !ok {
 		t.Fatalf("the library's reading ring is missing: %q", rlt.Texts())
 	}
@@ -797,7 +788,7 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 func TestNoTitleBarKeepsTheViewMargins(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
-	got, ok := tt.Find("目录")
+	got, ok := tt.Find(locales.PanelContents())
 	if !ok {
 		t.Fatalf("the reader's bar is missing: %q", tt.Texts())
 	}
@@ -813,32 +804,32 @@ func TestNoTitleBarKeepsTheViewMargins(t *testing.T) {
 func TestReadingBarOpensThePanels(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
-	for _, label := range []string{"目录", "书签", "笔记"} {
+	for _, label := range []string{locales.PanelContents(), locales.PanelBookmarks(), locales.PanelNotes()} {
 		if _, ok := tt.Find(label); !ok {
 			t.Fatalf("no %s button in the reading bar: %q", label, tt.Texts())
 		}
 	}
 
-	if err := tt.Click("书签"); err != nil {
+	if err := tt.Click(locales.PanelBookmarks()); err != nil {
 		t.Fatalf("bookmarks button: %v (%q)", err, tt.Texts())
 	}
 	if a.pan.Sidebar != appstate.SidebarBookmarks {
 		t.Fatalf("panel %q after clicking 书签", a.pan.Sidebar)
 	}
-	if !tt.HasText("还没有书签") {
+	if !tt.HasText(locales.EmptyBookmarks()) {
 		t.Errorf("the bookmarks panel is not drawn: %q", tt.Texts())
 	}
-	if err := tt.Click("书签"); err != nil {
+	if err := tt.Click(locales.PanelBookmarks()); err != nil {
 		t.Fatalf("bookmarks button again: %v (%q)", err, tt.Texts())
 	}
 	if a.pan.Showing() {
 		t.Errorf("panel %q after a second click on 书签", a.pan.Sidebar)
 	}
 
-	if err := tt.Click("笔记"); err != nil {
+	if err := tt.Click(locales.PanelNotes()); err != nil {
 		t.Fatalf("notes button: %v (%q)", err, tt.Texts())
 	}
-	if a.pan.Sidebar != appstate.SidebarNotes || !tt.HasText("还没有笔记") {
+	if a.pan.Sidebar != appstate.SidebarNotes || !tt.HasText(locales.EmptyNotes()) {
 		t.Errorf("panel %q, texts %q after clicking 笔记", a.pan.Sidebar, tt.Texts())
 	}
 }
@@ -854,23 +845,23 @@ func TestPanelsFloatOverThePage(t *testing.T) {
 	for range 4 {
 		tt.Frame()
 	}
-	before, ok := tt.Find("书页")
+	before, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("no page to measure: %q", tt.Texts())
 	}
-	if err := tt.Click("目录"); err != nil {
+	if err := tt.Click(locales.PanelContents()); err != nil {
 		t.Fatalf("contents button: %v (%q)", err, tt.Texts())
 	}
-	after, ok := tt.Find("书页")
+	after, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("the page is gone while the panel is open: %q", tt.Texts())
 	}
 	if after != before {
 		t.Errorf("the page moved when the panel opened: %+v -> %+v", before, after)
 	}
-	// The panel's own header says how many chapters it lists; it is the one
-	// text that is only in the card, not in the window's bar.
-	count, ok := tt.Find(fmt.Sprintf("%d 章", len(a.pan.Toc.Entries)))
+	// The panel's own header says how many rows it lists; it is the one text
+	// that is only in the card, not in the window's bar.
+	count, ok := tt.Find(locales.TocCount(len(a.pan.Toc.Entries)))
 	if !ok {
 		t.Fatalf("the contents did not build: %q", tt.Texts())
 	}
@@ -888,23 +879,23 @@ func TestTheLeftEdgeGoesBackToTheLibrary(t *testing.T) {
 	for range 4 {
 		tt.Frame()
 	}
-	if _, ok := tt.Find("返回书库"); !ok {
+	if _, ok := tt.Find(locales.BackToLibrary()); !ok {
 		t.Fatalf("no way back at the page's left edge: %q", tt.Texts())
 	}
-	if _, ok := tt.Find("下一页"); ok {
+	if _, ok := tt.Find("Next Page"); ok {
 		t.Errorf("the right edge still turns pages: %q", tt.Texts())
 	}
-	if _, ok := tt.Find("上一页"); ok {
+	if _, ok := tt.Find("Previous Page"); ok {
 		t.Errorf("the left edge still turns pages: %q", tt.Texts())
 	}
 
-	before, ok := tt.Find("书页")
+	before, ok := tt.Find(locales.PageLabel())
 	if !ok {
 		t.Fatalf("no page to measure: %q", tt.Texts())
 	}
 	tt.Move(8, 400)
 	tt.Frame()
-	after, ok := tt.Find("书页")
+	after, ok := tt.Find(locales.PageLabel())
 	if !ok || after != before {
 		t.Errorf("the page moved when the chevron showed: %+v -> %+v", before, after)
 	}
@@ -913,7 +904,7 @@ func TestTheLeftEdgeGoesBackToTheLibrary(t *testing.T) {
 	if a.book != nil {
 		t.Errorf("the book is still open after the left edge click")
 	}
-	if !tt.HasText("首页") {
+	if !tt.HasText(locales.SidebarHome()) {
 		t.Errorf("no library after the left edge click: %q", tt.Texts())
 	}
 }
@@ -927,7 +918,7 @@ func TestClickTurnsAndDragSelects(t *testing.T) {
 	for range 4 {
 		tt.Frame()
 	}
-	body, ok := tt.Find("书页")
+	body, ok := tt.Find(locales.PageLabel())
 	if !ok || a.layout.PageCount() < 3 {
 		t.Fatalf("no page to turn: %q", tt.Texts())
 	}

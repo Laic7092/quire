@@ -2,7 +2,6 @@ package appstate
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -39,7 +39,7 @@ func TestShelfPanelOpensABook(t *testing.T) {
 	a.Open = func(path string) { opened = path }
 
 	tt := ui.NewTester(func(c *ui.Context) { a.Shelf.View(c) }, 360, 600)
-	if !tt.HasText("书架") || !tt.HasText("阿Ｑ正傳") {
+	if !tt.HasText(locales.ShelfSearchLabel()) || !tt.HasText("阿Ｑ正傳") {
 		t.Fatalf("shelf did not build: %q", tt.Texts())
 	}
 	if err := tt.Click("阿Ｑ正傳"); err != nil {
@@ -91,7 +91,7 @@ func TestShowAndClose(t *testing.T) {
 	st := newStore(t)
 	a := New(st)
 	a.Show(SidebarSearch)
-	if !a.Showing() || a.Title() != "搜索" {
+	if !a.Showing() || a.Title() != locales.Search() {
 		t.Fatalf("shows %q", a.Title())
 	}
 	a.Show(SidebarNone)
@@ -193,7 +193,7 @@ func TestTocAndSearchJump(t *testing.T) {
 
 	a.Show(SidebarToc)
 	tt := ui.NewTester(func(c *ui.Context) { a.View(c) }, 320, 500)
-	if !tt.HasText(fmt.Sprintf("%d 章", len(bk.Chapters))) || !tt.HasText(bk.Chapters[0].Title) {
+	if !tt.HasText(locales.TocCount(len(a.Toc.Entries))) || !tt.HasText(bk.Chapters[0].Title) {
 		t.Fatalf("toc did not build: %q", tt.Texts())
 	}
 	if jumped {
@@ -223,7 +223,7 @@ func TestBackgroundWorkAppliesOnTheUIThread(t *testing.T) {
 	if len(a.Shelf.Lib.Entries) == 0 {
 		t.Errorf("no entries after applying the published update")
 	}
-	if a.Shelf.Status != "3 本" {
+	if a.Shelf.Status != locales.ShelfCount(3) {
 		t.Errorf("status %q after the scan", a.Shelf.Status)
 	}
 }
@@ -240,12 +240,12 @@ func TestPanelViewDrawsTheChosenPanel(t *testing.T) {
 	if a.Sidebar != SidebarToc {
 		t.Fatalf("panel %q after two frames without a click", a.Sidebar)
 	}
-	if !tt.HasText("章") {
+	if !tt.HasText(locales.TocEmpty()) {
 		t.Errorf("the contents did not build: %q", tt.Texts())
 	}
 	a.Show(SidebarSearch)
 	tt.Frame()
-	if !tt.HasText("全文搜索") || a.Sidebar != SidebarSearch {
+	if !tt.HasText(locales.SearchFieldLabel()) || a.Sidebar != SidebarSearch {
 		t.Errorf("panel %q after showing search: %q", a.Sidebar, tt.Texts())
 	}
 	if err := st.Flush(); err != nil {
@@ -261,8 +261,8 @@ func TestPanelViewDrawsTheChosenPanel(t *testing.T) {
 func TestBookmarksAndNotesPanels(t *testing.T) {
 	a := New(nil)
 	for _, tc := range []struct{ side, title, empty string }{
-		{SidebarBookmarks, "书签", "还没有书签"},
-		{SidebarNotes, "笔记", "还没有笔记"},
+		{SidebarBookmarks, locales.PanelBookmarks(), locales.EmptyBookmarks()},
+		{SidebarNotes, locales.PanelNotes(), locales.EmptyNotes()},
 	} {
 		a.Show(tc.side)
 		if got := a.Title(); got != tc.title {

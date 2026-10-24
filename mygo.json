@@ -2,18 +2,26 @@
   "name": "layx-reader",
   "identifier": "com.laix.layxreader",
   "version": "0.1.0",
+  "i18n": {
+    "dir": "locales",
+    "source": "en"
+  },
   "copyright": "© 2026 Laix",
   "out": "build",
   "fileAssociations": [
     {
-      "ext": ["epub"],
-      "name": "EPUB 电子书",
+      "ext": [
+        "epub"
+      ],
+      "name": "EPUB eBook",
       "mimeType": "application/epub+zip",
       "role": "Viewer"
     },
     {
-      "ext": ["txt"],
-      "name": "纯文本",
+      "ext": [
+        "txt"
+      ],
+      "name": "Plain Text",
       "mimeType": "text/plain",
       "role": "Viewer"
     }

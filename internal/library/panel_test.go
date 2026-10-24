@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/locales"
 )
 
 // TestPanelDrawsAndOpens runs the panel headless: it shows titles and
@@ -36,7 +37,7 @@ func TestPanelDrawsAndOpens(t *testing.T) {
 	if !tt.HasText("TXT") {
 		t.Fatalf("row detail not shown: %v", tt.Texts())
 	}
-	if !tt.HasText("2 本") {
+	if !tt.HasText(locales.ShelfCount(2)) {
 		t.Fatalf("count not shown: %v", tt.Texts())
 	}
 
@@ -56,21 +57,21 @@ func TestPanelDrawsAndOpens(t *testing.T) {
 	if tt.HasText("Alpha") {
 		t.Fatalf("query BETA still shows Alpha: %v", tt.Texts())
 	}
-	if !tt.HasText("beta") || !tt.HasText("1 / 2 本") {
+	if !tt.HasText("beta") || !tt.HasText(locales.ShelfCountFiltered(1, 2)) {
 		t.Fatalf("filtered list wrong: %v", tt.Texts())
 	}
 
 	// A query that matches nothing explains itself.
 	p.Query = "nothing"
 	tt.Frame()
-	if !tt.HasText("没有匹配") {
+	if !tt.HasText(locales.ShelfNoMatch("nothing")) {
 		t.Fatalf("empty result shows no hint: %v", tt.Texts())
 	}
 
 	// Refresh reports to the caller instead of scanning inside View.
 	p.Query = ""
 	tt.Frame()
-	if err := tt.Click("刷新书架"); err != nil {
+	if err := tt.Click(locales.ShelfRefresh()); err != nil {
 		t.Fatal(err)
 	}
 	if reloaded != 1 {
@@ -82,13 +83,13 @@ func TestPanelDrawsAndOpens(t *testing.T) {
 func TestPanelEmptyStates(t *testing.T) {
 	p := &Panel{Selected: -1}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 300, 300)
-	if !tt.HasText("还没有书库目录") {
+	if !tt.HasText(locales.ShelfNoFolder()) {
 		t.Fatalf("nil library: %v", tt.Texts())
 	}
 
 	p.Lib = &Library{Dir: t.TempDir()}
 	tt.Frame()
-	if !tt.HasText("这个目录里没有书") {
+	if !tt.HasText(locales.ShelfEmpty()) {
 		t.Fatalf("empty directory: %v", tt.Texts())
 	}
 }

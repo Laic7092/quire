@@ -4,10 +4,12 @@
 阅读器，分页与滚动两种模式。断行、分页、行位置和字形位置全部由本地 `github.com/laix/layx`
 的 `render` 引擎产出；本仓库做四件事：
 
-1. `internal/book`：`archive/zip` + `encoding/xml` 解析 EPUB（container.xml →
-   OPF → spine），用 `golang.org/x/net/html` 的 tokenizer 把 XHTML 映射成
-   `render.Document` 的最小标签子集，并把图片映射成 `render.NodeImage`；同时
-   解析 TXT（编码探测、章节标题、段落切分）并复用同一条 `Chapter` 管线。
+1. `internal/book`：只做入口和 TXT。EPUB（container.xml → OPF → spine、nav/NCX
+   目录、XHTML → `render.Document` 的标签子集、图片映射成 `render.NodeImage`）
+   全部来自上层模块 `github.com/laix/layx/epub`，本仓库不再保存副本；
+   `Book` / `Chapter` 就是该模块的类型别名。这里剩下的是 TXT 路径（编码探测、
+   章节标题、段落切分），它把纯文本转成同样的 `Chapter`，所以后面的排版、
+   目录、搜索都不知道书不是 EPUB。
 2. `internal/reader`：加载字体（内置 XCharter 做正文衬线、Inter 做窗口文字，CJK
    回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`（分页用
    `ModePaged`，滚动用 `ModeScroll` + tile），并实现 `paint.Painter`，把
@@ -65,6 +67,9 @@
   层级按标题里的「第N卷/部/篇/册」猜。
 - `internal/search`：全文搜索。索引走 `render.NodeText`，命中映射回 `render.Location`；
   面板按 `layout.PageOf` 显示页码，滚动模式没有页，就只按位置跳转。
+- `internal/toc`：目录。行来自书的 nav/NCX（`epub.Book.Toc`）：嵌套层级、章内
+  `#fragment` 目标都是真的，点一行由 `Layout.Locate` 落在页或滚动位置；目录标签
+  太离谱（整段正文）或只有一个条目的桩目录才退回按章节建行，TXT 一直走这条。
 - `internal/store`：持久化。`os.UserConfigDir()/layx-reader/state.json`（Linux 是
   `~/.config`，macOS 是 `~/Library/Application Support`），原子写 + 2s 合并写入，
   存书架、每本书的阅读位置和字号/面板偏好；`PageFor` 按 node → anchor → progress →
@@ -75,6 +80,9 @@
 
 `docs/integration-notes.md` 记的是当前仍然成立的结论：宿主依赖 layx / MyGo 的哪些
 不变量、还缺哪些 API、宿主为此写了什么。历史轮次不再保留。
+
+两个 layx module 都是本地 `replace`（`github.com/laix/layx` 负责排版，
+`github.com/laix/layx/epub` 负责 EPUB → `render.Document`），所以改上层库不用发版。
 
 ## 运行
 
@@ -159,6 +167,31 @@ macOS 上额外做了这些：
 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`。正文的 XCharter 是内置的，
 `-serif` / `LAYX_SERIF` 找到的系统衬线只作为它缺字时的后备。
 
+## 界面语言（i18n）
+
+界面文案走 MyGo 的 catalogs：`mygo.json` 里的 `i18n` 指向 `locales/`，源语言是**英文**
+（`en.json`，带每条文案的说明与占位符类型），`zh-Hans.json` 是简体中文翻译。
+`go tool mygo generate .`（`mygo dev` / `mygo build` 也会）从这两份 JSON 生成
+`locales/catalog_gen.go`——每个 key 一个类型化函数，例如：
+
+```go
+ui.Text(c, locales.PanelContents())          // "Contents" / "目录"
+ui.Text(c, locales.LibraryCount(3))          // "3 books" / "3 本书"
+ui.Text(c, locales.ChapterPagesLeft(12))     // "12 pages left in chapter" / "本章还有 12 页"
+```
+
+- 语言跟随系统（`mygo.App.Locale()` 在 app 的语言里挑用户读得最顺的一个），没有切换入口。
+  没有设置 `App.SetLanguages`：catalogs 的语言就是 app 的语言。
+- MyGo 自己的控件文案（搜索框的 Clear、菜单角色等）随同一种语言：生成的文件按 app 的语言
+  import 了 `github.com/egoist/mygo/locales/zh-Hans`。
+- 语言在运行时改变时（macOS 的系统设置），`OnLocaleChanged` 会把窗口标题和菜单重新做一遍；
+  视图每帧重建，正文之外的面板自己就跟着换了。已经打开的 TXT 没有标题的合成章节名
+  （「第 N 节」）和书籍内容不进 catalogs，按书的内容处理。
+- 新增一门语言：往 `locales/` 放一份 `<tag>.json`（key 与 `en.json` 相同，中文这种只有
+  `other` 复数形式的语言直接写普通消息也行），跑 `go tool mygo i18n check .` 再
+  `go tool mygo generate .`。缺翻译时回落到源语言。
+- 两份 JSON 之外不要往 `locales/` 放别的东西：它同时是一个 Go 包，`*.json` 会被 embed。
+
 ## 测试
 
 ```sh
@@ -166,6 +199,7 @@ go build ./...
 go vet ./...
 CGO_ENABLED=0 go test ./...
 go tool mygo vet .
+go tool mygo i18n check .   # 文案：key、占位符、复数形式
 ```
 
 `internal/book/testdata/mini.epub` 是最小测试书（两章，nav 目录）。
@@ -187,7 +221,7 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 **它用了什么、读者表示了没有**。这是给"覆盖面"做的账本，不是基准测试：
 
 - `lost:` 是真正会让人看出差别的东西——表格结构被摊平、`<pre>` 空白被折叠、
-  脚注上标变成普通字符、列表标记没画、链接不可跳转；
+  脚注上标变成普通字符、列表标记没画；
 - `unstyled:` 文字还在、样式丢了（`<cite>`、`<small>`、`<ins>`）；
 - `walked:` 是纯容器（`<nav>`、`<header>`、`<footer>`），丢掉的只是标签；
 - 末尾的 corpus-wide 汇总就是"该不该做某个特性"的分母：语料里用时为 0 的构造，
@@ -196,6 +230,17 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 `-paint` 会走完绘制路径，所以坏矩形、缺失的字形 run 这类问题在这里就暴露，
 而不是在用户屏幕上。`internal/reader` 的常量在这里有一份副本：这个工具必须
 不依赖 GTK/cgo 就能在无显示环境里跑。
+
+## 链接
+
+正文里的 `<a href>` 由 `epub` 映射成 `render.Node.Link`，render 给出命中矩形
+（`Page.Links()` / `Tile.Links()`，分页和滚动两种模式都有）。`links.go` 把点击
+变成动作：书内目标经 `epub.Book.ResolveLink` 变成 chapter + `AnchorID`，再
+`Layout.Locate` 落在页或滚动位置；外部 URL 交给 `ui.SafeToOpen` 过滤后用
+`Services.OpenURL` 打开，`javascript:` 之类不会执行。点击落在链接上时不再翻页。
+链接文字是主题里的蓝色（`reader.Palette.Link`，深色纸上是浅蓝）带下划线，颜色在
+`book.BuildWith` 时烘进文档，所以换主题会和墨色一起重排；指针移到链接上时整张书页
+的鼠标变成手形，移开变回箭头。
 
 ## 封面与图片
 

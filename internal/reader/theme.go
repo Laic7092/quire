@@ -34,23 +34,6 @@ var ThemeOrder = []Theme{
 	ThemeBold, ThemeCalm, ThemeFocus,
 }
 
-// Label is the theme's name, for the display settings.
-func (t Theme) Label() string {
-	switch t {
-	case ThemeQuiet:
-		return "Quiet"
-	case ThemePaper:
-		return "Paper"
-	case ThemeBold:
-		return "Bold"
-	case ThemeCalm:
-		return "Calm"
-	case ThemeFocus:
-		return "Focus"
-	}
-	return "Original"
-}
-
 // Dark reports whether reading on the theme means reading at night, which the
 // window's own look follows.
 func (t Theme) Dark() bool { return t == ThemeQuiet || t == ThemeBold }
@@ -73,6 +56,10 @@ type Palette struct {
 	Select  paint.Color
 	Match   paint.Color
 	MatchOn paint.Color
+	// Link paints link text and the rule under it. It travels with the paper
+	// rather than the ink, so a link stays recognisable in every theme; it is
+	// baked into the document, so a theme change rebuilds it with the rest.
+	Link paint.Color
 
 	// Desk is the space around the page, Chrome the bars, Side the library's own
 	// panel, Popover the menus and the display settings. Line separates them,
@@ -104,6 +91,7 @@ var (
 		Theme:     ThemeOriginal,
 		Paper:     paint.Color{R: 0xff, G: 0xff, B: 0xff, A: 0xff},
 		Ink:       paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 0xff},
+		Link:      paint.Color{R: 0x1a, G: 0x5f, B: 0xc4, A: 0xff},
 		Select:    paint.Color{R: 0x2f, G: 0x6a, B: 0xc8, A: 0x38},
 		Match:     paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x59},
 		MatchOn:   paint.Color{R: 0xf0, G: 0x92, B: 0x2e, A: 0x8a},
@@ -129,6 +117,7 @@ var (
 		Theme:     ThemeQuiet,
 		Paper:     paint.Color{R: 0x4a, G: 0x4a, B: 0x4d, A: 0xff},
 		Ink:       paint.Color{R: 0xe8, G: 0xe8, B: 0xee, A: 0xff},
+		Link:      paint.Color{R: 0x9e, G: 0xc4, B: 0xff, A: 0xff},
 		Select:    paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x59},
 		Match:     paint.Color{R: 0xd8, G: 0xac, B: 0x45, A: 0x60},
 		MatchOn:   paint.Color{R: 0xe8, G: 0xb4, B: 0x3c, A: 0x8c},
@@ -152,6 +141,7 @@ var (
 		Theme:     ThemePaper,
 		Paper:     paint.Color{R: 0xee, G: 0xed, B: 0xed, A: 0xff},
 		Ink:       paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 0xff},
+		Link:      paint.Color{R: 0x1a, G: 0x5f, B: 0xc4, A: 0xff},
 		Select:    paint.Color{R: 0x2f, G: 0x6a, B: 0xc8, A: 0x40},
 		Match:     paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x60},
 		MatchOn:   paint.Color{R: 0xf0, G: 0x92, B: 0x2e, A: 0x90},
@@ -175,6 +165,7 @@ var (
 		Theme:     ThemeBold,
 		Paper:     paint.Color{R: 0x29, G: 0x29, B: 0x2b, A: 0xff},
 		Ink:       paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 0xff},
+		Link:      paint.Color{R: 0x9e, G: 0xc4, B: 0xff, A: 0xff},
 		Select:    paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x55},
 		Match:     paint.Color{R: 0xd8, G: 0xac, B: 0x45, A: 0x60},
 		MatchOn:   paint.Color{R: 0xe8, G: 0xb4, B: 0x3c, A: 0x8c},
@@ -198,6 +189,7 @@ var (
 		Theme:     ThemeCalm,
 		Paper:     paint.Color{R: 0xf0, G: 0xe2, B: 0xc9, A: 0xff},
 		Ink:       paint.Color{R: 0x2a, G: 0x24, B: 0x1c, A: 0xff},
+		Link:      paint.Color{R: 0x1c, G: 0x55, B: 0xa8, A: 0xff},
 		Select:    paint.Color{R: 0x9a, G: 0x6d, B: 0x2f, A: 0x55},
 		Match:     paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x59},
 		MatchOn:   paint.Color{R: 0xf0, G: 0x92, B: 0x2e, A: 0x8a},
@@ -221,6 +213,7 @@ var (
 		Theme:     ThemeFocus,
 		Paper:     paint.Color{R: 0xff, G: 0xfc, B: 0xf4, A: 0xff},
 		Ink:       paint.Color{R: 0x2b, G: 0x2a, B: 0x26, A: 0xff},
+		Link:      paint.Color{R: 0x1c, G: 0x55, B: 0xa8, A: 0xff},
 		Select:    paint.Color{R: 0x2f, G: 0x6a, B: 0xc8, A: 0x38},
 		Match:     paint.Color{R: 0xf2, G: 0xc1, B: 0x4e, A: 0x59},
 		MatchOn:   paint.Color{R: 0xf0, G: 0x92, B: 0x2e, A: 0x8a},

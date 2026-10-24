@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/laix/layx/epub"
 )
 
 // Open opens an EPUB or a plain text book. The extension decides; with an
@@ -15,10 +17,10 @@ func Open(file string) (*Book, error) {
 	case ".txt", ".text":
 		return openText(file)
 	case ".epub":
-		return openEPUB(file)
+		return epub.Open(file)
 	}
 	if isZipArchive(file) {
-		return openEPUB(file)
+		return epub.Open(file)
 	}
 	return openText(file)
 }

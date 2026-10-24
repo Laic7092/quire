@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/appstate"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
@@ -51,7 +52,13 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.selDragging = true
 		return true
 	case ui.InputPointerMove:
-		if !a.selDragging || a.layout == nil {
+		// A move with no press on the sheet is the pointer passing over the
+		// text, which is when a link under it shows the hand cursor.
+		if !a.selDragging {
+			a.trackLinkHover(ev.X, ev.Y)
+			return false
+		}
+		if a.layout == nil {
 			return false
 		}
 		if dx, dy := ev.X-a.pressX, ev.Y-a.pressY; dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
@@ -70,12 +77,19 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return false
 		}
 		a.selDragging = false
-		// A release that did not leave its press is a click, and a click turns
-		// the page: inside the window a pointer may wobble a little without
-		// meaning to select anything. A scrolling column has no page to turn,
-		// so the click only clears the selection.
-		if !a.selMoved && !a.scrolling() {
-			a.turn(a.turnAt(a.pressX))
+		// A release that did not leave its press is a click. A click on a link
+		// follows it, and any other click turns the page: inside the window a
+		// pointer may wobble a little without meaning to select anything. A
+		// scrolling column has no page to turn, so its click only clears the
+		// selection.
+		if !a.selMoved {
+			if link, ok := a.linkAt(a.pressX, a.pressY); ok {
+				a.openLink(link)
+				return true
+			}
+			if !a.scrolling() {
+				a.turn(a.turnAt(a.pressX))
+			}
 		}
 		return true
 	}
@@ -236,7 +250,7 @@ func searchLabel(text string) string {
 	if len(runes) > 12 {
 		query = string(runes[:12]) + "…"
 	}
-	return "搜索「" + query + "」"
+	return locales.SearchSelection(query)
 }
 
 // refreshMarks rebuilds the search hits' rectangles for the current layout. The
@@ -281,7 +295,7 @@ func (a *app) drawMarks(p *ui.Painter, box ui.Rect, page int) {
 // choice is found again.
 func (a *app) pageMenu(c *ui.Context, m *ui.Menu) {
 	text := a.selectedText()
-	if m.Item("复制").Shortcut(ui.Cmd, ui.KeyC).Disabled(text == "").Chosen() {
+	if m.Item(locales.MenuCopy()).Shortcut(ui.Cmd, ui.KeyC).Disabled(text == "").Chosen() {
 		a.copySelection(c)
 	}
 	if label := searchLabel(text); label != "" {
@@ -290,11 +304,11 @@ func (a *app) pageMenu(c *ui.Context, m *ui.Menu) {
 			a.searchSelection(text)
 		}
 	}
-	if m.Item("选中本页").Disabled(a.showCover || a.layout == nil).Chosen() {
+	if m.Item(locales.MenuSelectPage()).Disabled(a.showCover || a.layout == nil).Chosen() {
 		a.selectPage()
 	}
 	m.Separator()
-	if m.Item("清除选区").Disabled(len(a.selQuads) == 0).Chosen() {
+	if m.Item(locales.MenuClearSelection()).Disabled(len(a.selQuads) == 0).Chosen() {
 		a.clearSelection()
 	}
 }
