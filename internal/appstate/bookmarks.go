@@ -132,11 +132,11 @@ func (a *App) BookmarkHere() bool {
 	if !ok || a.layout == nil || a.Store == nil || a.BookKey == "" {
 		return false
 	}
-	add, ok := store.PositionAt(a.layout, loc)
-	if !ok {
+	if _, exists := a.bookmarkAt(loc); exists {
 		return false
 	}
-	if a.Bookmarked(loc) {
+	add, ok := store.PositionAt(a.layout, loc)
+	if !ok {
 		return false
 	}
 	a.Store.AddBookmark(a.BookKey, store.Bookmark{Position: add})
@@ -152,11 +152,9 @@ func (a *App) ToggleBookmark(loc render.Location) bool {
 	if a.layout == nil || a.Store == nil || a.BookKey == "" {
 		return false
 	}
-	for _, e := range a.Bookmarks.Entries {
-		if e.HasLoc && samePlace(a.layout, e.Loc, loc) {
-			a.RemoveBookmark(e.ID)
-			return false
-		}
+	if old, exists := a.bookmarkAt(loc); exists {
+		a.RemoveBookmark(old.ID)
+		return false
 	}
 	add, ok := store.PositionAt(a.layout, loc)
 	if !ok {
@@ -166,6 +164,21 @@ func (a *App) ToggleBookmark(loc render.Location) bool {
 	a.Store.SaveSoon(0)
 	a.rebuildBookmarks(a.book)
 	return true
+}
+
+// bookmarkAt returns the bookmark standing at loc. It reads the store, not the
+// rows: adding and removing are rare one-off actions, and a page turn between
+// two of them must not leave a stale copy of the rows in the way.
+func (a *App) bookmarkAt(loc render.Location) (store.Bookmark, bool) {
+	if a.Store == nil || a.BookKey == "" || a.layout == nil {
+		return store.Bookmark{}, false
+	}
+	for _, b := range a.Store.BookmarksOf(a.BookKey) {
+		if p, how := store.Locate(a.layout, b.Position); how != "none" && samePlace(a.layout, p, loc) {
+			return b, true
+		}
+	}
+	return store.Bookmark{}, false
 }
 
 // RemoveBookmark drops the bookmark with id and republishes the panel. It
