@@ -5,28 +5,43 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/internal/appstate"
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx/render"
 )
 
 // The view builds headlessly, as MyGo's tester draws frames without a window.
+// Without a book the window shows the home screen: the way in, and no page
+// counter or reading controls.
 func TestViewBuildsWithoutABook(t *testing.T) {
-	a := &app{fontSize: reader.DefaultFontSize, status: "打开一本 EPUB 开始阅读"}
+	a := &app{opts: reader.DefaultOptions(), instant: true, status: "打开一本 EPUB 开始阅读"}
 	tt := ui.NewTester(a.view, 900, 700)
-	if !tt.HasText("打开") {
-		t.Fatalf("toolbar not built: %q", tt.Texts())
+	if !tt.HasText("书库") {
+		t.Fatalf("home screen not built: %q", tt.Texts())
 	}
-	if !tt.HasText("— / —") {
-		t.Errorf("empty page counter missing: %q", tt.Texts())
+	if !tt.HasText("打开…") {
+		t.Errorf("home screen has no way to open a book: %q", tt.Texts())
 	}
-	if !tt.HasText("A-") || !tt.HasText("A+") {
-		t.Errorf("font buttons missing: %q", tt.Texts())
+	if tt.HasText("第 1 页") {
+		t.Errorf("reading controls shown without a book: %q", tt.Texts())
 	}
 	// Keys must not panic while nothing is open.
 	tt.Key(0, ui.KeyLeft)
 	tt.Key(0, ui.KeyRight)
 	tt.Key(0, ui.KeyEqual)
+	tt.Key(0, ui.KeyHome)
+}
+
+// singleOptions is the defaults with one page on the sheet: the page-turning
+// tests need the page to move one at a time whatever the window's size, while
+// the app itself opens a book as an open book, two pages at a time.
+func singleOptions() reader.Options {
+	o := reader.DefaultOptions()
+	o.Spread = false
+	return o
 }
 
 // With a laid-out book the tester exercises the real drawing callback and the
@@ -48,42 +63,43 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, err := reader.BuildLayout(context.Background(), doc, fonts, 900, 600, reader.DefaultFontSize)
+	layout, err := reader.BuildLayout(context.Background(), doc, fonts, 900, 600, reader.Options{FontSize: reader.DefaultFontSize})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	a := &app{
-		fonts:    fonts,
-		paint:    reader.NewUIPainter(nil, fonts),
-		book:     bk,
-		doc:      doc,
-		docAt:    reader.DefaultFontSize,
-		layout:   layout,
-		fontSize: reader.DefaultFontSize,
-		layW:     900,
-		layH:     600,
+		fonts:   fonts,
+		paint:   reader.NewUIPainter(nil, fonts),
+		book:    bk,
+		doc:     doc,
+		docAt:   reader.DefaultFontSize,
+		layout:  layout,
+		opts:    singleOptions(),
+		instant: true,
+		layW:    900,
+		layH:    600,
 	}
 	tt := ui.NewTester(a.view, 1000, 760)
 	pages := strconv.Itoa(layout.PageCount())
-	if !tt.HasText("1 / " + pages) {
+	if !tt.HasText("1 of " + pages) {
 		t.Fatalf("page counter missing: %q", tt.Texts())
 	}
-	if !tt.HasText(bk.Chapters[0].Title) {
-		t.Errorf("chapter title missing: %q", tt.Texts())
+	if !tt.HasText("chapter") {
+		t.Errorf("the folio says nothing of the chapter: %q", tt.Texts())
 	}
 
 	if layout.PageCount() > 1 {
 		if err := tt.Click("下一页"); err != nil {
 			t.Fatal(err)
 		}
-		if !tt.HasText("2 / " + pages) {
+		if !tt.HasText("2 of " + pages) {
 			t.Errorf("page did not turn: %q", tt.Texts())
 		}
 		if err := tt.Click("上一页"); err != nil {
 			t.Fatal(err)
 		}
-		if !tt.HasText("1 / " + pages) {
+		if !tt.HasText("1 of " + pages) {
 			t.Errorf("page did not turn back: %q", tt.Texts())
 		}
 	}
@@ -91,20 +107,20 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 	// The window will not own a background job in a tester (a.win is nil), but
 	// the font keys still update the state without panicking.
 	tt.Key(0, ui.KeyEqual)
-	if a.fontSize <= reader.DefaultFontSize {
-		t.Errorf("font size %g after +", a.fontSize)
+	if a.opts.FontSize <= reader.DefaultFontSize {
+		t.Errorf("font size %g after +", a.opts.FontSize)
 	}
 	tt.Key(0, ui.KeyMinus)
-	if a.fontSize != reader.DefaultFontSize {
-		t.Errorf("font size %g after -", a.fontSize)
+	if a.opts.FontSize != reader.DefaultFontSize {
+		t.Errorf("font size %g after -", a.opts.FontSize)
 	}
 }
 
 // The cover sits in front of page 0: the first turn puts it away and keeps
 // the reading position.
 func TestCoverTurnsAwayWithoutMovingThePage(t *testing.T) {
-	a := &app{showCover: true, page: 3, fontSize: reader.DefaultFontSize}
-	if got := a.pageLabel(); got != "封面" {
+	a := &app{showCover: true, page: 3, opts: reader.DefaultOptions(), instant: true}
+	if got := a.pageLabel(); got != "Cover" {
 		t.Errorf("page label %q while the cover shows", got)
 	}
 	if !a.canTurn(1) || !a.canTurn(-1) {
@@ -121,4 +137,139 @@ func TestCoverTurnsAwayWithoutMovingThePage(t *testing.T) {
 	if a.page != 3 {
 		t.Errorf("page moved to %d without a layout", a.page)
 	}
+}
+
+// The side panels are part of the window: the table of contents opens from the
+// toolbar and a row jumps the reader to that chapter's page.
+func TestSidePanelsBuildAndJump(t *testing.T) {
+	fontPath, err := reader.FindFont("")
+	if err != nil {
+		t.Skipf("no system font: %v", err)
+	}
+	fonts, err := reader.OpenFont(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bk, err := book.Open("internal/book/testdata/mini.epub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := bk.DocumentSized(reader.DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := reader.BuildLayout(context.Background(), doc, fonts, 600, 400, reader.Options{FontSize: reader.DefaultFontSize})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := &app{
+		fonts:   fonts,
+		paint:   reader.NewUIPainter(nil, fonts),
+		book:    bk,
+		doc:     doc,
+		docAt:   reader.DefaultFontSize,
+		layout:  layout,
+		opts:    singleOptions(),
+		instant: true,
+		layW:    600,
+		layH:    400,
+		pan:     appstate.New(nil),
+	}
+	a.pan.Jump = a.gotoPage
+	a.pan.Refresh(bk, layout, 0)
+
+	tt := ui.NewTester(a.view, 1200, 800)
+	if err := tt.Click("侧栏"); err != nil {
+		t.Fatalf("sidebar button: %v (%q)", err, tt.Texts())
+	}
+	if a.pan.Sidebar != appstate.SidebarToc {
+		t.Fatalf("sidebar %q after clicking 侧栏", a.pan.Sidebar)
+	}
+	// The reader still draws its page next to the panel.
+	if !tt.HasText(a.chapterLabel()) {
+		t.Errorf("chapter label missing: %q", tt.Texts())
+	}
+	if !tt.HasText(bk.Chapters[0].Title) {
+		t.Fatalf("toc row missing: %q", tt.Texts())
+	}
+
+	// With one chapter per page the second row is a different page; clicking
+	// it is what a reader does to jump.
+	if layout.PageCount() > 1 && len(a.pan.Toc.Entries) > 1 {
+		want := a.pan.Toc.Entries[1].Page
+		before := a.page
+		if err := tt.Click(bk.Chapters[1].Title); err != nil {
+			t.Fatalf("toc row: %v (%q)", err, tt.Texts())
+		}
+		if a.page == before {
+			t.Errorf("page stayed at %d after a toc jump", before)
+		}
+		if want >= 0 && a.page != want {
+			t.Errorf("jumped to page %d, want %d", a.page, want)
+		}
+	}
+}
+
+// The macOS menu bar carries the reader's commands, and the page-copy item
+// starts disabled because nothing is selected.
+func TestMenuBarCommands(t *testing.T) {
+	a := &app{opts: reader.DefaultOptions(), pan: appstate.New(nil)}
+	menu := a.menuBar()
+
+	var files, views *mygo.MenuItem
+	for _, it := range menu.Items() {
+		switch it.Label {
+		case "文件":
+			files = it
+		case "显示":
+			views = it
+		}
+	}
+	if files == nil || views == nil {
+		t.Fatalf("menu bar is missing its File or View menu: %v", menu.Items())
+	}
+	open := findMenuItem(files.Submenu, "打开…")
+	if open == nil || open.Accelerator != "CmdOrCtrl+O" {
+		t.Fatalf("no Open command in the File menu: %+v", files.Submenu)
+	}
+	for _, label := range []string{"侧栏", "目录", "搜索", "显示设置…"} {
+		if findMenuItem(views.Submenu, label) == nil {
+			t.Errorf("the View menu has no %s", label)
+		}
+	}
+	if a.menuCopy == nil || !a.menuCopy.Disabled {
+		t.Fatalf("page copy starts enabled without a selection: %+v", a.menuCopy)
+	}
+	// The first frame with a selection enables it, and clearing disables it
+	// again without rebuilding the menu.
+	a.selQuads = []render.SelectionQuad{{}}
+	a.syncMenu()
+	if a.menuCopy.Disabled {
+		t.Error("page copy stayed disabled with a selection")
+	}
+	a.selQuads = nil
+	a.syncMenu()
+	if !a.menuCopy.Disabled {
+		t.Error("page copy stayed enabled after the selection cleared")
+	}
+}
+
+// The Books-style shell is the window on every platform, not a macOS-only
+// arrangement: the same binary hides the system title bar whether it runs on
+// macOS, Windows or Linux, and only the buttons' side differs.
+func TestWindowHidesTheSystemTitleBarEverywhere(t *testing.T) {
+	o := windowOptions(func(*ui.Context) {})
+	if o.TitleBarStyle != mygo.TitleBarHidden {
+		t.Errorf("TitleBarStyle = %v, want TitleBarHidden on every platform", o.TitleBarStyle)
+	}
+}
+
+func findMenuItem(items []*mygo.MenuItem, label string) *mygo.MenuItem {
+	for _, it := range items {
+		if it.Label == label {
+			return it
+		}
+	}
+	return nil
 }

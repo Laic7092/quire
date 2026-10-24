@@ -1,6 +1,26 @@
 {
   "name": "layx-reader",
-  "identifier": "com.example.layxreader",
+  "identifier": "com.laix.layxreader",
   "version": "0.1.0",
-  "out": "build"
+  "copyright": "© 2026 Laix",
+  "out": "build",
+  "fileAssociations": [
+    {
+      "ext": ["epub"],
+      "name": "EPUB 电子书",
+      "mimeType": "application/epub+zip",
+      "role": "Viewer"
+    },
+    {
+      "ext": ["txt"],
+      "name": "纯文本",
+      "mimeType": "text/plain",
+      "role": "Viewer"
+    }
+  ],
+  "macos": {
+    "infoPlist": {
+      "LSApplicationCategoryType": "public.app-category.books"
+    }
+  }
 }

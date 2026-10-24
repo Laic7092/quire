@@ -38,7 +38,7 @@ func TestBuildLayoutAndDrawGlyphs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, err := BuildLayout(context.Background(), doc, fonts, 480, 640, 18)
+	layout, err := BuildLayout(context.Background(), doc, fonts, 480, 640, Options{FontSize: 18})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestFontSizeChangesPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	small, err := BuildLayout(context.Background(), docSmall, fonts, 420, 560, 16)
+	small, err := BuildLayout(context.Background(), docSmall, fonts, 420, 560, Options{FontSize: 16})
 	if err != nil {
 		t.Fatal(err)
 	}
-	large, err := BuildLayout(context.Background(), docLarge, fonts, 420, 560, 28)
+	large, err := BuildLayout(context.Background(), docLarge, fonts, 420, 560, Options{FontSize: 28})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestUIPainterInTester(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, err := BuildLayout(context.Background(), doc, fonts, 400, 560, 18)
+	layout, err := BuildLayout(context.Background(), doc, fonts, 400, 560, Options{FontSize: 18})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestUIPainterDrawsImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	layout, err := BuildLayout(context.Background(), doc, fonts, 400, 400, 18)
+	layout, err := BuildLayout(context.Background(), doc, fonts, 400, 400, Options{FontSize: 18})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestTextBookPaginates(t *testing.T) {
 	if len(images) != 0 {
 		t.Errorf("text book reported %d images", len(images))
 	}
-	layout, err := BuildLayout(context.Background(), doc, fonts, 420, 560, 18)
+	layout, err := BuildLayout(context.Background(), doc, fonts, 420, 560, Options{FontSize: 18})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,5 +251,88 @@ func TestTextBookPaginates(t *testing.T) {
 	}
 	if got := ChapterOfPage(layout, len(b.Chapters), layout.PageCount()-1); got < 1 {
 		t.Errorf("chapter of the last page = %d, want a later chapter", got)
+	}
+}
+
+// The reading options are clamped to what the settings offer, and a change of
+// any of them means the text has to be laid out again.
+func TestOptionsNormalizeAndCompare(t *testing.T) {
+	o := Options{FontSize: 200, LineHeight: 9, Font: "papyrus", Margin: 1000}.Normalized()
+	if o.FontSize != MaxFontSize || o.LineHeight != MaxLeading || o.Margin != MaxMargin {
+		t.Errorf("options not clamped: %+v", o)
+	}
+	if o.Font != FontSerif {
+		t.Errorf("unknown face %q kept", o.Font)
+	}
+	if zero := (Options{}).Normalized(); zero.FontSize != DefaultFontSize ||
+		zero.LineHeight != 1.18 || zero.Margin != Margin || zero.Font != FontSerif {
+		t.Errorf("zero options = %+v, want the sizes of the defaults", zero)
+	}
+
+	base := DefaultOptions()
+	for _, change := range []func(*Options){
+		func(o *Options) { o.FontSize = 20 },
+		func(o *Options) { o.LineHeight = 1.8 },
+		func(o *Options) { o.Font = FontSans },
+		func(o *Options) { o.Justify = false },
+		func(o *Options) { o.Margin = 80 },
+	} {
+		other := base
+		change(&other)
+		if base.Same(other) {
+			t.Errorf("%+v and %+v lay out the same", base, other)
+		}
+	}
+	if !base.Same(DefaultOptions()) {
+		t.Error("the defaults do not lay out the same as themselves")
+	}
+}
+
+// A system without a serif face sets both choices in the sans one instead of
+// failing, and the theme names round-trip through their palettes.
+func TestFontsAndThemes(t *testing.T) {
+	path, err := FindFont("")
+	if err != nil {
+		t.Skipf("no system font: %v", err)
+	}
+	fonts, err := OpenFonts(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fonts.Family(FontSerif); got != "book" {
+		t.Errorf("serif family without a serif face = %q, want the sans one", got)
+	}
+	if got := fonts.Family(FontSans); got != "book" {
+		t.Errorf("sans family = %q", got)
+	}
+	serif, err := OpenFonts(path, FindSerif(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "book"
+	if serif.SerifPath != "" {
+		want = "book-serif"
+	}
+	if got := serif.Family(FontSerif); got != want {
+		t.Errorf("serif family = %q, want %q", got, want)
+	}
+
+	for _, theme := range ThemeOrder {
+		p := ForTheme(theme)
+		if p.Theme != theme {
+			t.Errorf("%q palette says %q", theme, p.Theme)
+		}
+		if p.Paper.A == 0 || p.Ink.A == 0 || p.Desk.A == 0 || p.Chrome.A == 0 {
+			t.Errorf("%q palette has holes: %+v", theme, p)
+		}
+		if theme.Dark() != (theme == ThemeQuiet || theme == ThemeBold) {
+			t.Errorf("%q darkness is wrong", theme)
+		}
+		if theme.Label() == "" {
+			t.Errorf("%q has no label", theme)
+		}
+	}
+	if System(false) != ThemeOriginal || System(true) != ThemeQuiet {
+		t.Errorf("system papers: %q %q", System(false), System(true))
 	}
 }

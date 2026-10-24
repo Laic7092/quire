@@ -1,0 +1,155 @@
+package store
+
+import (
+	"math"
+	"time"
+
+	"github.com/laix/layx/render"
+)
+
+// PageFor maps a persisted Position back onto a page of l.
+//
+// It tries, in order: the exact node (PageOf with the recorded chapter, node and
+// rune offset), the host anchor (Locate then PageOf), the recorded progress
+// (proportional page) and finally the first page of the recorded chapter. It
+// reports which path produced the page, so the reader can show the adapter cost
+// in its status bar.
+//
+// A position recorded against a different revision of the book is not
+// detectable: PageOf succeeds whenever the node number exists in the new
+// chapter, even if that node now holds different text. See
+// docs/explore/friction-storage.md.
+//
+// how is one of "node", "anchor", "progress", "chapter", or "none" when the
+// layout has no pages at all (nil, scroll mode, empty document). page is -1 in
+// that case.
+func PageFor(l *render.Layout, p Position) (page int, how string) {
+	if l == nil {
+		return -1, "none"
+	}
+	pages := l.PageCount()
+	if pages <= 0 {
+		return -1, "none"
+	}
+
+	// Node 0 is a valid render.NodeID (the chapter root), so a zero Node cannot
+	// be told apart from "not recorded"; treat it as unset. Falling through
+	// costs at most the few lines between a chapter root and the recorded
+	// offset.
+	if p.Node > 0 && p.Node <= math.MaxInt32 {
+		loc := render.Location{
+			Chapter: p.Chapter,
+			Node:    render.NodeID(p.Node),
+			Offset:  p.Offset,
+		}
+		if n, ok := l.PageOf(loc); ok {
+			return n, "node"
+		}
+	}
+
+	if p.Anchor != 0 {
+		if loc, ok := l.Locate(render.AnchorID(p.Anchor)); ok {
+			if n, ok := l.PageOf(loc); ok {
+				return n, "anchor"
+			}
+		}
+	}
+
+	if q := float64(p.Progress); q > 0 && !math.IsNaN(q) && !math.IsInf(q, 0) {
+		if q > 1 {
+			q = 1
+		}
+		n := int(q * float64(pages))
+		if n >= pages {
+			n = pages - 1
+		}
+		if n < 0 {
+			n = 0
+		}
+		return n, "progress"
+	}
+
+	// Chapter start. PageRange rejects an out-of-range chapter, so clamp
+	// through ChapterPages, which always knows every chapter.
+	if first, _, ok := l.PageRange(p.Chapter); ok {
+		return first, "chapter"
+	}
+	if starts := l.ChapterPages(); len(starts) > 0 {
+		i := p.Chapter
+		if i < 0 {
+			i = 0
+		}
+		if i >= len(starts) {
+			i = len(starts) - 1
+		}
+		return starts[i], "chapter"
+	}
+	return -1, "none"
+}
+
+// PositionFor records page as a Position, the inverse of PageFor.
+//
+// layx has no "top of page" accessor, so the page slot is rebuilt from the
+// chapter geometry: contentHeight is ChapterContentTop(chapter)/firstPage for
+// any chapter that does not start on page 0, and the probe is taken one pixel
+// into the slot. If that resolves to another page the page is treated as
+// unreachable (a blank page) and the call reports false; the caller should keep
+// the previous position instead of recording a wrong one.
+func PositionFor(l *render.Layout, page int) (Position, bool) {
+	if l == nil || page < 0 || page >= l.PageCount() {
+		return Position{}, false
+	}
+	h, ok := pageSlotHeight(l)
+	if !ok {
+		return Position{}, false
+	}
+	eps := h / 512 // about one pixel for a 500px page slot
+	for _, y := range []float32{float32(page)*h + eps, float32(page)*h + 1} {
+		loc, ok := l.LocationAt(y)
+		if !ok {
+			continue
+		}
+		if n, ok := l.PageOf(loc); !ok || n != page {
+			continue
+		}
+		p := Position{
+			Chapter: loc.Chapter,
+			Anchor:  uint32(loc.Anchor),
+			Offset:  loc.Offset,
+			Updated: time.Now(),
+		}
+		if loc.Node >= 0 {
+			p.Node = uint32(loc.Node)
+		}
+		if pr, ok := l.Progress(loc); ok {
+			p.Progress = pr
+		}
+		return p, true
+	}
+	return Position{}, false
+}
+
+// pageSlotHeight recovers the paged content height (viewport height minus the
+// top and bottom margins). render does not expose it, but ChapterContentTop
+// returns firstPage*contentHeight, so any chapter that does not start on page 0
+// gives the height back.
+func pageSlotHeight(l *render.Layout) (float32, bool) {
+	starts := l.ChapterPages()
+	if len(starts) == 0 {
+		return 0, false
+	}
+	for i := len(starts) - 1; i >= 0; i-- {
+		if starts[i] <= 0 {
+			continue
+		}
+		top, ok := l.ChapterContentTop(i)
+		if !ok || top <= 0 {
+			continue
+		}
+		h := top / float32(starts[i])
+		if h > 0 {
+			return h, true
+		}
+	}
+	return 0, false
+}

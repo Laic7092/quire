@@ -16,27 +16,31 @@ import (
 // offsets them to the element's rect and clips to it once, so the per-op
 // Save/ClipRect/Restore of a page needs no state here.
 type UIPainter struct {
-	P    *ui.Painter
-	Face *font.Face
+	P *ui.Painter
 
+	// faces are the go-text faces of the fonts the runs name, parsed on first
+	// use: a page that mixes the serif and sans faces draws from both.
+	faces map[*paint.Font]*glyphFace
+	// bitmaps are the images the paginator placed, decoded once per id.
+	bitmaps map[paint.ImageID]*ui.Bitmap
+	dx, dy  float32
+}
+
+// glyphFace is one parsed face and the outlines it has handed out so far.
+type glyphFace struct {
+	face     *font.Face
 	outlines map[uint32][]font.Segment
-	bitmaps  map[paint.ImageID]*ui.Bitmap
-	dx, dy   float32
 }
 
 // NewUIPainter prepares a painter for one element. The outline and image
 // caches live as long as the painter, so keep it for the whole window and
 // reuse it. Run the SetImage calls on the UI thread.
 func NewUIPainter(p *ui.Painter, fonts *Fonts) *UIPainter {
-	up := &UIPainter{
-		P:        p,
-		outlines: make(map[uint32][]font.Segment),
-		bitmaps:  make(map[paint.ImageID]*ui.Bitmap),
+	return &UIPainter{
+		P:       p,
+		faces:   make(map[*paint.Font]*glyphFace),
+		bitmaps: make(map[paint.ImageID]*ui.Bitmap),
 	}
-	if fonts != nil {
-		up.Face = fonts.Face
-	}
-	return up
 }
 
 // SetImage decodes data once and keeps the bitmap for id. It reports whether
@@ -84,12 +88,20 @@ func (u *UIPainter) DrawCover(p *ui.Painter, id paint.ImageID, box ui.Rect, pad 
 	if p == nil || bitmap == nil || box.W <= 0 || box.H <= 0 {
 		return false
 	}
-	p.Fill(box, uiColor(Paper), 0)
+	p.Fill(box, uiColor(Current().Paper), 0)
 	r := ui.Rect{X: box.X + pad, Y: box.Y + pad, W: box.W - 2*pad, H: box.H - 2*pad}
 	if r.W <= 0 || r.H <= 0 {
 		r = box
 	}
-	p.Image(bitmap, r, ui.Contain)
+	// The cover keeps the shape the book was published in: it is centred in
+	// the space, as tall as the page allows, and never stretched to fill it.
+	iw, ih := bitmap.Size()
+	if iw > 0 && ih > 0 {
+		scale := min(r.W/float32(iw), r.H/float32(ih))
+		w, h := float32(iw)*scale, float32(ih)*scale
+		r = ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y + (r.H-h)/2, W: w, H: h}
+	}
+	p.Image(bitmap, r, ui.FillBox)
 	return true
 }
 
@@ -108,6 +120,35 @@ func (u *UIPainter) DrawPage(p *ui.Painter, page *render.Page, box ui.Rect) {
 
 func (u *UIPainter) Save()    {}
 func (u *UIPainter) Restore() {}
+
+// FillQuads fills highlight rectangles on one page: the quads whose Page is
+// page, placed inside box, which must be the box the page was drawn in. Quads
+// carry page coordinates, margins included, so they line up with DrawPage's
+// output as they are. Each rectangle is cut to box, so a page drawn smaller
+// than the layout it came from never paints on the desk around it.
+//
+// It paints over the text rather than under it, as the page's display list
+// starts with its own opaque sheet: the colours are translucent veils, the way
+// a reader marks a line it does not want to hide.
+func (u *UIPainter) FillQuads(p *ui.Painter, box ui.Rect, page int, quads []render.SelectionQuad, colour paint.Color) {
+	if u == nil || p == nil || colour.Transparent() {
+		return
+	}
+	for i := range quads {
+		q := &quads[i]
+		if q.Page != page || q.Rect.Empty() {
+			continue
+		}
+		x0 := max(box.X+q.Rect.X, box.X)
+		y0 := max(box.Y+q.Rect.Y, box.Y)
+		x1 := min(box.X+q.Rect.X+q.Rect.Width, box.X+box.W)
+		y1 := min(box.Y+q.Rect.Y+q.Rect.Height, box.Y+box.H)
+		if x1 <= x0 || y1 <= y0 {
+			continue
+		}
+		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(colour), 0)
+	}
+}
 
 // ClipRect is already provided by DrawPage's outer clip; pages only clip to
 // their own viewport.
@@ -152,11 +193,15 @@ func (u *UIPainter) DrawImage(id paint.ImageID, dst paint.Rect, _ paint.ImageOpt
 }
 
 func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
-	if u.P == nil || u.Face == nil || run.Font == nil || len(run.Glyphs) == 0 ||
+	if u.P == nil || run.Font == nil || len(run.Glyphs) == 0 ||
 		run.Color.Transparent() || run.Size <= 0 {
 		return
 	}
-	upem := float32(u.Face.Upem())
+	gf := u.glyphFace(run.Font)
+	if gf == nil {
+		return
+	}
+	upem := float32(gf.face.Upem())
 	if upem <= 0 {
 		return
 	}
@@ -166,7 +211,7 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	var any bool
 	for i := range run.Glyphs {
 		g := &run.Glyphs[i]
-		segs := u.outline(g.ID)
+		segs := gf.outline(g.ID)
 		if len(segs) == 0 {
 			continue
 		}
@@ -201,12 +246,26 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	}
 }
 
-func (u *UIPainter) outline(gid uint32) []font.Segment {
-	if segs, ok := u.outlines[gid]; ok {
+// glyphFace parses the face a run names, once per font.
+func (u *UIPainter) glyphFace(f *paint.Font) *glyphFace {
+	if gf, ok := u.faces[f]; ok {
+		return gf
+	}
+	face := faceOf(f.Data, f.Index)
+	if face == nil {
+		return nil
+	}
+	gf := &glyphFace{face: face, outlines: make(map[uint32][]font.Segment)}
+	u.faces[f] = gf
+	return gf
+}
+
+func (gf *glyphFace) outline(gid uint32) []font.Segment {
+	if segs, ok := gf.outlines[gid]; ok {
 		return segs
 	}
-	out, _ := u.Face.GlyphDataOutline(font.GID(gid))
-	u.outlines[gid] = out.Segments
+	out, _ := gf.face.GlyphDataOutline(font.GID(gid))
+	gf.outlines[gid] = out.Segments
 	return out.Segments
 }
 

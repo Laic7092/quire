@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
 	"golang.org/x/net/html"
 )
 
@@ -30,13 +29,13 @@ const (
 )
 
 func documentStyles(base float32) []render.Style {
-	ink := paint.Color{R: 0x1a, G: 0x1a, B: 0x1a, A: 0xff}
 	styles := make([]render.Style, int(styleStrong)+1)
+	// No colour, family or leading here: the body inherits the layout's
+	// typography, so a host can turn the page to another paper, another face or
+	// another leading without rewriting the document. Only the size is baked in,
+	// because the headings are scaled from it.
 	styles[styleBody] = render.Style{
-		FontFamily: "book",
-		FontSize:   base,
-		LineHeight: 1.6,
-		Color:      ink,
+		FontSize: base,
 	}
 	styles[styleParagraph] = render.Style{
 		FirstLineIndent: 2 * base,
