@@ -19,6 +19,7 @@ import (
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/bookmarks"
 	"github.com/laix/layx-reader/internal/library"
+	"github.com/laix/layx-reader/internal/notes"
 	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
 	"github.com/laix/layx-reader/internal/toc"
@@ -53,6 +54,7 @@ type App struct {
 	Shelf     library.Panel
 	Toc       toc.Panel
 	Bookmarks bookmarks.Panel
+	Notes     notes.Panel
 	Search    search.Panel
 
 	// Post publishes fn on the UI thread (Window.Update). When nil, background
@@ -73,6 +75,9 @@ type App struct {
 	// rebuild what it derives from them, such as the highlight rectangles it
 	// paints on the page.
 	OnHits func()
+	// OnNotes runs on the UI thread whenever the set of notes changes, so the
+	// host can rebuild the rectangles it paints their passages with.
+	OnNotes func()
 	// OnPickDir runs when the shelf asks for a library directory.
 	OnPickDir func()
 	// Cover returns a book's decoded cover for the shelf, or nil. The host
@@ -125,6 +130,14 @@ func New(st *store.Store) *App {
 	}
 	a.Bookmarks.OnRemove = func(e bookmarks.Entry) { a.RemoveBookmark(e.ID) }
 	a.Bookmarks.OnAdd = func() { a.BookmarkHere() }
+	a.Notes.Selected = -1
+	a.Notes.OnJump = func(e notes.Entry) {
+		if e.HasLoc {
+			a.jump(e.From)
+		}
+	}
+	a.Notes.OnSave = func(e notes.Entry, comment string) { a.SaveNote(e.ID, comment) }
+	a.Notes.OnRemove = func(e notes.Entry) { a.RemoveNote(e.ID) }
 	a.Search.OnSearch = a.search
 	a.Search.PageOf = func(h search.Hit) (int, bool) {
 		if a.layout == nil || a.Index == nil {
@@ -206,6 +219,7 @@ func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 		a.Toc.SelectCurrent()
 	}
 	a.rebuildBookmarks(bk)
+	a.rebuildNotes(bk)
 }
 
 // SetIndex publishes a freshly built index. The host must call it with the

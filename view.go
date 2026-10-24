@@ -245,6 +245,9 @@ func (a *app) syncMenu() {
 	if on := len(a.selQuads) > 0; on != a.menuCopyOn {
 		a.menuCopyOn = on
 		a.menuCopy.SetEnabled(on)
+		if a.menuAddNote != nil {
+			a.menuAddNote.SetEnabled(on)
+		}
 	}
 	if a.menuScroll != nil && a.menuScroll.IsChecked() != a.opts.Scroll {
 		a.menuScroll.SetChecked(a.opts.Scroll)
@@ -300,10 +303,10 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 			// page is bookmarked already, so one control turns the mark on and off
 			// as Books' own does.
 			on := a.bookmarkedAt()
-			label, tip := locales.AddBookmark(), locales.AddBookmark()
+			label, tip := locales.AddBookmark(), locales.AddBookmarkTip()
 			fill, ink := pal.Toolbar, pal.OnToolbar
 			if on {
-				label, tip = locales.RemoveBookmark(), locales.RemoveBookmark()
+				label, tip = locales.RemoveBookmark(), locales.RemoveBookmarkTip()
 				fill, ink = pal.Accent, pal.OnAccent
 			}
 			b := ui.Box(c).Width(27).Height(27).Radius(13.5).Center().
@@ -1129,6 +1132,7 @@ func (a *app) closeBook() {
 	a.scrollFrom, a.scrollGoal, a.scrollAt = 0, 0, time.Time{}
 	a.clearSelection()
 	a.hitQuads = nil
+	a.noteQuads = nil
 	if a.paint != nil {
 		a.paint.ClearImages()
 	}

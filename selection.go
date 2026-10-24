@@ -253,12 +253,13 @@ func searchLabel(text string) string {
 	return locales.SearchSelection(query)
 }
 
-// refreshMarks rebuilds the search hits' rectangles for the current layout. The
-// engine shapes each range, so this runs when a layout or a set of results
-// arrives, never while drawing.
+// refreshMarks rebuilds the search hits' and the notes' rectangles for the
+// current layout. The engine shapes each range, so this runs when a layout or a
+// set of results or notes arrives, never while drawing.
 func (a *app) refreshMarks() {
 	a.hitQuads = nil
 	if a.layout == nil || a.pan == nil || a.pan.Index == nil {
+		a.refreshNoteMarks()
 		return
 	}
 	hits := a.pan.Search.Hits
@@ -267,13 +268,15 @@ func (a *app) refreshMarks() {
 		quads = append(quads, a.layout.Selection(h.Loc, h.End))
 	}
 	a.hitQuads = quads
+	a.refreshNoteMarks()
 }
 
-// drawMarks paints the search hits and the selection over one page of the sheet.
-// It runs inside the box's Draw callback and only fills rectangles it already
-// has.
+// drawMarks paints the notes, the search hits and the selection over one page
+// of the sheet. It runs inside the box's Draw callback and only fills
+// rectangles it already has.
 func (a *app) drawMarks(p *ui.Painter, box ui.Rect, page int) {
 	pal := reader.Current()
+	a.drawNoteMarks(p, box, page)
 	on := -1
 	if a.pan != nil {
 		on = a.pan.Search.Selected
@@ -297,6 +300,9 @@ func (a *app) pageMenu(c *ui.Context, m *ui.Menu) {
 	text := a.selectedText()
 	if m.Item(locales.MenuCopy()).Shortcut(ui.Cmd, ui.KeyC).Disabled(text == "").Chosen() {
 		a.copySelection(c)
+	}
+	if m.Item(locales.AddNote()).Disabled(a.pan == nil || text == "").Chosen() {
+		a.addNoteFromSelection()
 	}
 	if label := searchLabel(text); label != "" {
 		hasIndex := a.pan != nil && a.pan.Index != nil

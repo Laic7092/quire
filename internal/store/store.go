@@ -422,6 +422,13 @@ func (s *Store) UpdateBookmark(key string, b Bookmark) bool {
 		if s.state.Bookmarks[key][i].ID != b.ID {
 			continue
 		}
+		old := s.state.Bookmarks[key][i]
+		if b.Position == (Position{}) {
+			b.Position = old.Position
+		}
+		if b.Created.IsZero() {
+			b.Created = old.Created
+		}
 		s.state.Bookmarks[key][i] = b
 		s.gen++
 		s.dirty = true

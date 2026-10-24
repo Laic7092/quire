@@ -210,6 +210,14 @@
   "@addBookmark": {
     "description": "The round control in the toolbar that bookmarks the page."
   },
+  "addBookmarkTip": "Add Bookmark (⌘D)",
+  "@addBookmarkTip": {
+    "description": "The ribbon's tooltip while the page is not bookmarked."
+  },
+  "removeBookmarkTip": "Remove Bookmark (⌘D)",
+  "@removeBookmarkTip": {
+    "description": "The ribbon's tooltip while the page is bookmarked."
+  },
   "themesSettings": "Themes & Settings",
   "settingsSmallerText": "Smaller text",
   "@settingsSmallerText": {
@@ -823,6 +831,44 @@
   "emptyNotesHint": "Notes and highlighted text in this book show up here",
   "@emptyNotesHint": {
     "description": "What the notes panel lists."
+  },
+  "noteCount": "{count, plural, one {# note} other {# notes}}",
+  "@noteCount": {
+    "description": "The notes panel's line at its head: how many notes the book has.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "6"
+      }
+    }
+  },
+  "addNote": "Add Note",
+  "@addNote": {
+    "description": "The page's context menu item that turns the selection into a note."
+  },
+  "noteComment": "Note",
+  "@noteComment": {
+    "description": "The accessible name of the field that edits a note's comment."
+  },
+  "notePlaceholder": "Write a note…",
+  "@notePlaceholder": {
+    "description": "The hint the empty comment field shows."
+  },
+  "noteSave": "Save",
+  "@noteSave": {
+    "description": "The button that saves the comment of the chosen note."
+  },
+  "deleteNote": "Delete Note",
+  "@deleteNote": {
+    "description": "The button and tooltip that delete the chosen note."
+  },
+  "noteAdded": "Note added",
+  "@noteAdded": {
+    "description": "The status line after a selection became a note."
+  },
+  "noteRemoved": "Note removed",
+  "@noteRemoved": {
+    "description": "The status line after a note was deleted."
   },
   "emptyPanel": "No panel is open",
   "@emptyPanel": {

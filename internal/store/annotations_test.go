@@ -34,14 +34,17 @@ func TestBookmarkLifecycle(t *testing.T) {
 		t.Errorf("bookmarks = %d rows, want 1", len(got))
 	}
 
-	// Renaming keeps the place and the identity.
-	b.Label = "读到这里"
-	if !s.UpdateBookmark(key, b) {
+	// Renaming keeps the place, the identity and the creation stamp, even
+	// when the caller hands in a bookmark with no position at all.
+	if !s.UpdateBookmark(key, Bookmark{ID: b.ID, Label: "读到这里"}) {
 		t.Fatal("UpdateBookmark reported the row was not there")
 	}
 	got := s.BookmarksOf(key)
 	if len(got) != 1 || got[0].Label != "读到这里" || !samePlace(got[0].Position, place(3, 7)) {
 		t.Errorf("renamed bookmark = %+v", got)
+	}
+	if !got[0].Created.Equal(b.Created) {
+		t.Errorf("renaming restamped Created: %v -> %v", b.Created, got[0].Created)
 	}
 
 	// The slice handed out is a copy: the caller cannot change the store by

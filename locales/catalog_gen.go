@@ -562,6 +562,34 @@ func (msgs Messages) AddBookmark() string {
 	return Catalog.Format(msgs.locale, "addBookmark", nil)
 }
 
+// AddBookmarkTip says "Add Bookmark (⌘D)"
+// in the language the app shows.
+//
+// The ribbon's tooltip while the page is not bookmarked.
+func AddBookmarkTip() string { return In(i18n.Locale()).AddBookmarkTip() }
+
+// AddBookmarkTip says "Add Bookmark (⌘D)"
+// in the language of msgs.
+//
+// The ribbon's tooltip while the page is not bookmarked.
+func (msgs Messages) AddBookmarkTip() string {
+	return Catalog.Format(msgs.locale, "addBookmarkTip", nil)
+}
+
+// RemoveBookmarkTip says "Remove Bookmark (⌘D)"
+// in the language the app shows.
+//
+// The ribbon's tooltip while the page is bookmarked.
+func RemoveBookmarkTip() string { return In(i18n.Locale()).RemoveBookmarkTip() }
+
+// RemoveBookmarkTip says "Remove Bookmark (⌘D)"
+// in the language of msgs.
+//
+// The ribbon's tooltip while the page is bookmarked.
+func (msgs Messages) RemoveBookmarkTip() string {
+	return Catalog.Format(msgs.locale, "removeBookmarkTip", nil)
+}
+
 // ThemesSettings says "Themes & Settings"
 // in the language the app shows.
 //
@@ -2126,6 +2154,118 @@ func EmptyNotesHint() string { return In(i18n.Locale()).EmptyNotesHint() }
 // What the notes panel lists.
 func (msgs Messages) EmptyNotesHint() string {
 	return Catalog.Format(msgs.locale, "emptyNotesHint", nil)
+}
+
+// NoteCount says "{count, plural, one {# note} other {# notes}}"
+// in the language the app shows.
+//
+// The notes panel's line at its head: how many notes the book has.
+func NoteCount(count int) string { return In(i18n.Locale()).NoteCount(count) }
+
+// NoteCount says "{count, plural, one {# note} other {# notes}}"
+// in the language of msgs.
+//
+// The notes panel's line at its head: how many notes the book has.
+func (msgs Messages) NoteCount(count int) string {
+	return Catalog.Format(msgs.locale, "noteCount", map[string]any{"count": count})
+}
+
+// AddNote says "Add Note"
+// in the language the app shows.
+//
+// The page's context menu item that turns the selection into a note.
+func AddNote() string { return In(i18n.Locale()).AddNote() }
+
+// AddNote says "Add Note"
+// in the language of msgs.
+//
+// The page's context menu item that turns the selection into a note.
+func (msgs Messages) AddNote() string {
+	return Catalog.Format(msgs.locale, "addNote", nil)
+}
+
+// NoteComment says "Note"
+// in the language the app shows.
+//
+// The accessible name of the field that edits a note's comment.
+func NoteComment() string { return In(i18n.Locale()).NoteComment() }
+
+// NoteComment says "Note"
+// in the language of msgs.
+//
+// The accessible name of the field that edits a note's comment.
+func (msgs Messages) NoteComment() string {
+	return Catalog.Format(msgs.locale, "noteComment", nil)
+}
+
+// NotePlaceholder says "Write a note…"
+// in the language the app shows.
+//
+// The hint the empty comment field shows.
+func NotePlaceholder() string { return In(i18n.Locale()).NotePlaceholder() }
+
+// NotePlaceholder says "Write a note…"
+// in the language of msgs.
+//
+// The hint the empty comment field shows.
+func (msgs Messages) NotePlaceholder() string {
+	return Catalog.Format(msgs.locale, "notePlaceholder", nil)
+}
+
+// NoteSave says "Save"
+// in the language the app shows.
+//
+// The button that saves the comment of the chosen note.
+func NoteSave() string { return In(i18n.Locale()).NoteSave() }
+
+// NoteSave says "Save"
+// in the language of msgs.
+//
+// The button that saves the comment of the chosen note.
+func (msgs Messages) NoteSave() string {
+	return Catalog.Format(msgs.locale, "noteSave", nil)
+}
+
+// DeleteNote says "Delete Note"
+// in the language the app shows.
+//
+// The button and tooltip that delete the chosen note.
+func DeleteNote() string { return In(i18n.Locale()).DeleteNote() }
+
+// DeleteNote says "Delete Note"
+// in the language of msgs.
+//
+// The button and tooltip that delete the chosen note.
+func (msgs Messages) DeleteNote() string {
+	return Catalog.Format(msgs.locale, "deleteNote", nil)
+}
+
+// NoteAdded says "Note added"
+// in the language the app shows.
+//
+// The status line after a selection became a note.
+func NoteAdded() string { return In(i18n.Locale()).NoteAdded() }
+
+// NoteAdded says "Note added"
+// in the language of msgs.
+//
+// The status line after a selection became a note.
+func (msgs Messages) NoteAdded() string {
+	return Catalog.Format(msgs.locale, "noteAdded", nil)
+}
+
+// NoteRemoved says "Note removed"
+// in the language the app shows.
+//
+// The status line after a note was deleted.
+func NoteRemoved() string { return In(i18n.Locale()).NoteRemoved() }
+
+// NoteRemoved says "Note removed"
+// in the language of msgs.
+//
+// The status line after a note was deleted.
+func (msgs Messages) NoteRemoved() string {
+	return Catalog.Format(msgs.locale, "noteRemoved", nil)
 }
 
 // EmptyPanel says "No panel is open"

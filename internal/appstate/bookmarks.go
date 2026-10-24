@@ -37,8 +37,8 @@ func (a *App) rebuildBookmarks(bk *book.Book) {
 				chapter = loc.Chapter
 			}
 		}
-		e.Title = bookmarkTitle(bk, b, chapter)
-		e.Detail = a.bookmarkDetail(b.Position, e.HasLoc)
+		e.Title = annotationTitle(bk, b.Label, chapter)
+		e.Detail = a.annotationDetail(b.Position, e.HasLoc)
 		if e.HasLoc && a.hasLoc {
 			e.Current = samePlace(a.layout, e.Loc, a.loc)
 		}
@@ -53,10 +53,10 @@ func (a *App) rebuildBookmarks(bk *book.Book) {
 	}
 }
 
-// bookmarkTitle is what names a row: the reader's own label when there is one,
+// annotationTitle is what names a row: the reader's own label when there is one,
 // otherwise the chapter's title, otherwise its number.
-func bookmarkTitle(bk *book.Book, b store.Bookmark, chapter int) string {
-	if label := strings.TrimSpace(b.Label); label != "" {
+func annotationTitle(bk *book.Book, label string, chapter int) string {
+	if label = strings.TrimSpace(label); label != "" {
 		return label
 	}
 	if bk != nil && chapter >= 0 && chapter < len(bk.Chapters) {
@@ -67,10 +67,10 @@ func bookmarkTitle(bk *book.Book, b store.Bookmark, chapter int) string {
 	return locales.ChapterNumber(max(chapter, 0) + 1)
 }
 
-// bookmarkDetail is where a row points, in the words of the layout on screen:
+// annotationDetail is where a row points, in the words of the layout on screen:
 // a page on paper, a percentage in a column that has no pages. It is empty
 // when the layout cannot say.
-func (a *App) bookmarkDetail(p store.Position, resolved bool) string {
+func (a *App) annotationDetail(p store.Position, resolved bool) string {
 	if a.layout == nil || !resolved {
 		return ""
 	}

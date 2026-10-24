@@ -91,6 +91,8 @@ func newWindow(t *testing.T) *app {
 	a.layout, a.layW, a.layH = layout, w, h
 	a.page = 4
 	pan.Refresh(bk, layout, a.page)
+	pan.Reading = a.currentLoc
+	pan.OnNotes = a.refreshMarks
 	return a
 }
 
@@ -299,6 +301,38 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 				pan.RefreshAt(bk, col, loc)
 			}
 			pan.Show(appstate.SidebarNone)
+		}},
+		// A note at the reading place: the marked passage is veiled on the page
+		// and the panel lists it with the editor for its comment. It is the
+		// last shot, so its rectangles cannot outlive their layout.
+		{name: "note", want: func(*app) string { return locales.NoteCount(1) }, render: func(t *testing.T) {
+			a.opts.Scroll, a.opts.Spread = false, false
+			one, err := reader.BuildLayout(context.Background(), doc, a.fonts, paperW, paperH,
+				singleOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.book, a.layout, a.page = bk, one, 4
+			a.layScroll, a.showCover = false, false
+			a.clearSelection()
+			pan.Refresh(bk, one, a.page)
+			a.refreshMarks()
+			pg := one.Page(a.page)
+			if pg == nil {
+				t.Fatal("no page to take a passage from")
+			}
+			from, ok := pg.HitTest(paint.Point{X: 90, Y: 70})
+			if !ok {
+				t.Fatal("no location at the first lines")
+			}
+			to, ok := pg.HitTest(paint.Point{X: 420, Y: 140})
+			if !ok {
+				t.Fatal("no location a few lines down")
+			}
+			if _, ok := pan.AddNote(from, to, "阿Q便全疤通红的发起怒来，估量了对手，口讷的他便骂，气力小的他便打。"); !ok {
+				t.Fatal("AddNote stored nothing")
+			}
+			pan.Show(appstate.SidebarNotes)
 		}},
 	}
 

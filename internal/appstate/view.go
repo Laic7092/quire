@@ -40,6 +40,8 @@ func (a *App) Show(side string) {
 		a.Toc.ScrollToCurrent()
 	case SidebarBookmarks:
 		a.Bookmarks.ScrollToCurrent()
+	case SidebarNotes:
+		a.Notes.ScrollToCurrent()
 	}
 }
 
@@ -73,7 +75,7 @@ func (a *App) View(c *ui.Context) ui.Element {
 		case SidebarBookmarks:
 			a.Bookmarks.View(c)
 		case SidebarNotes:
-			widgets.Empty(c, locales.EmptyNotes(), locales.EmptyNotesHint())
+			a.Notes.View(c)
 		default:
 			widgets.Empty(c, locales.EmptyPanel(), "")
 		}

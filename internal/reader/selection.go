@@ -45,6 +45,20 @@ func (s *Selection) Clear() {
 // Focus returns the location the drag last reached.
 func (s *Selection) Focus() render.Location { return s.focus }
 
+// Anchor returns the location the press began at, which is one end of the
+// selection; Focus is the other.
+func (s *Selection) Anchor() render.Location { return s.anchor }
+
+// Ends returns both ends of the selection: the anchor the drag began at and
+// the focus it reached, in gesture order. Either order works for Layout and
+// quads; a host that stores the passage keeps them as they are.
+func (s *Selection) Ends() (anchor, focus render.Location) {
+	if s == nil {
+		return render.Location{}, render.Location{}
+	}
+	return s.anchor, s.focus
+}
+
 // Quads returns the rectangles covering the selection, page by page. It is
 // Layout.Selection underneath, which orders the endpoints itself, so a
 // backwards drag paints the same rectangle it would forwards.

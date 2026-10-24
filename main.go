@@ -48,8 +48,9 @@ type app struct {
 	// menuCopy is the Edit menu's page-copy item, and menuCopyOn the enabled
 	// state it was last given: the view only touches the native menu when the
 	// selection changes.
-	menuCopy   *mygo.MenuItem
-	menuCopyOn bool
+	menuCopy    *mygo.MenuItem
+	menuAddNote *mygo.MenuItem
+	menuCopyOn  bool
 	// menuScroll is the View menu's scrolling item, kept so the menu follows a
 	// change made in the display settings.
 	menuScroll *mygo.MenuItem
@@ -111,6 +112,9 @@ type app struct {
 	// hitQuads holds the rectangles of each search hit, by hit index, for the
 	// match veils: empty until a search has results on this layout.
 	hitQuads [][]render.SelectionQuad
+	// noteQuads holds the rectangles of every note's passage on this layout,
+	// flattened: the draw callback fills them and never computes them.
+	noteQuads []render.SelectionQuad
 
 	// pan is the side panels and the persisted state; it is nil only in tests
 	// that build the reader alone. st is the same store, for the close flush.
@@ -751,6 +755,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		a.turning = nil
 		a.clearSelection()
 		a.hitQuads = nil
+		a.noteQuads = nil
 		a.file = path
 		a.status = locales.OpenedBook(b.Title)
 		a.pendingResume = true
@@ -878,6 +883,13 @@ func (a *app) menuBar() *mygo.Menu {
 	}
 	a.menuCopy = copySelection
 	a.menuCopyOn = len(a.selQuads) > 0
+	addNote := &mygo.MenuItem{
+		ID:       "addNote",
+		Label:    locales.AddNote(),
+		Disabled: len(a.selQuads) == 0,
+		Click:    func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.addNoteFromSelection) },
+	}
+	a.menuAddNote = addNote
 	scroll := &mygo.MenuItem{
 		Label:   locales.MenuScrollReading(),
 		Type:    mygo.MenuItemCheckbox,
@@ -917,6 +929,7 @@ func (a *app) menuBar() *mygo.Menu {
 			{Role: mygo.RoleSelectAll},
 			mygo.Separator(),
 			copySelection,
+			addNote,
 		}},
 		{Label: locales.MenuView(), Submenu: []*mygo.MenuItem{
 			{Label: locales.MenuSidebar(), Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
@@ -926,6 +939,8 @@ func (a *app) menuBar() *mygo.Menu {
 			scroll,
 			{Label: locales.MenuContents(), Accelerator: "CmdOrCtrl+T", Click: show(appstate.SidebarToc)},
 			{Label: locales.MenuSearch(), Accelerator: "CmdOrCtrl+F", Click: show(appstate.SidebarSearch)},
+			{Label: locales.PanelBookmarks(), Accelerator: "CmdOrCtrl+Shift+B", Click: show(appstate.SidebarBookmarks)},
+			{Label: locales.PanelNotes(), Accelerator: "CmdOrCtrl+Shift+N", Click: show(appstate.SidebarNotes)},
 			{Label: locales.MenuDisplaySettings(), Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.menuAction(func() { a.aaOpen = true })
 			}},
@@ -1019,6 +1034,7 @@ func main() {
 	a.pan.Open = a.openPath
 	a.pan.Jump = a.gotoLoc
 	a.pan.OnHits = a.refreshMarks
+	a.pan.OnNotes = a.refreshMarks
 	a.pan.Post = func(fn func()) {
 		if win := a.winShared.Load(); win != nil {
 			win.Update(func() {
