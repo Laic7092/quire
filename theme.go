@@ -6,6 +6,18 @@ import (
 	"github.com/laix/layx/render/paint"
 )
 
+// pagePaper is what a layout's pages are painted with: the sheet, the ink and
+// the colour of links. They are baked into the page display lists, so a change
+// repaints the pages — a paint-only relayout — instead of rebuilding the book.
+type pagePaper struct {
+	paper, ink, link paint.Color
+}
+
+// paperOf is the colours the pages of a palette are printed in.
+func paperOf(p reader.Palette) pagePaper {
+	return pagePaper{paper: p.Paper, ink: p.Ink, link: p.Link}
+}
+
 // skinKey is what a built skin depends on: the paper, and the system bits the
 // theme starts from (its appearance, accent and text size). Keeping the last one
 // means the window's look is built once per change, not once per frame.
@@ -52,12 +64,11 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		a.skinKey = key
 	}
 	c.SetTheme(&a.skin)
-	// The page's ink and paper are baked into the document, so a change of paper
-	// costs a rebuild: the app asks for one on the next frame.
+	// The page's ink and paper are baked into the page display lists, so a
+	// change of paper costs a paint-only relayout: ensureLayout sees the new
+	// palette on this frame and the pages on screen are drawn again.
 	if reader.Current().Theme != paper {
 		reader.SetPalette(reader.ForTheme(paper))
-		a.doc = nil
-		a.layW, a.layH = 0, 0
 	}
 	return &a.skin
 }

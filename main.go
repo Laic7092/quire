@@ -70,6 +70,10 @@ type app struct {
 	opts    reader.Options
 	optsAt  time.Time
 	layOpts reader.Options
+	// layPaper is the sheet, ink and link colour the published layout's pages
+	// were drawn with. They live in the page display lists, so a new paper costs
+	// a repaint — a paint-only relayout — and never a rebuild of the book.
+	layPaper pagePaper
 	// theme is the paper being read on; "" follows the system's appearance
 	// until the reader picks one.
 	theme     reader.Theme
@@ -445,16 +449,15 @@ func (a *app) savePrefs() {
 	a.st.SaveSoon(0)
 }
 
-// setTheme turns the page to another paper. The ink and the sheet are baked into
-// the document, so the next layout rebuilds it; the chrome follows at once.
+// setTheme turns the page to another paper. Only the page's colours change: the
+// layout keeps its line boxes and pages, so the next frame repaints the pages on
+// screen and the chrome with it, whatever the book's size.
 func (a *app) setTheme(t reader.Theme) {
 	if t == a.theme {
 		return
 	}
 	a.theme = t
 	a.themeSys = false
-	a.doc = nil
-	a.layW, a.layH = 0, 0
 	a.savePrefs()
 }
 
@@ -470,6 +473,7 @@ func (a *app) ensureLayout(w, h float32) {
 	}
 	opts := a.opts
 	sw, sh := a.sheetSize(w, h, opts)
+	paper := paperOf(reader.Current())
 	// The page keeps its margins whatever the window does: below three of them
 	// there is no line to lay out, so say so instead of failing the job.
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
@@ -484,23 +488,28 @@ func (a *app) ensureLayout(w, h float32) {
 	if a.failed && w == a.failW && h == a.failH && opts.FontSize == a.failSize {
 		return
 	}
-	if a.loading && sw == a.layW && sh == a.layH && opts.Same(a.layOpts) {
+	if a.loading && sw == a.layW && sh == a.layH && opts.Same(a.layOpts) && paper == a.layPaper {
 		return
 	}
 	if !a.loading && a.layout != nil && sw == a.layW && sh == a.layH &&
-		a.docAt == opts.FontSize && opts.Same(a.layOpts) {
+		a.docAt == opts.FontSize && opts.Same(a.layOpts) && paper == a.layPaper {
 		return
 	}
 
 	a.job++
 	job := a.job
+	// A job that only changes the paper keeps the same page geometry, so it can
+	// leave the reader's place, its selection and the panels alone.
+	repaint := a.layout != nil && a.doc != nil && a.layout.Document() == a.doc &&
+		sw == a.layW && sh == a.layH && opts.Same(a.layOpts)
 	a.loading = true
 	a.layW, a.layH = sw, sh
 	a.layOpts = opts
+	a.layPaper = paper
 	a.failed = false
 
 	bookPtr, fonts, win := a.book, a.fonts, a.win
-	linkColor := reader.Current().Link
+	prev := a.layout
 	doc, docAt := a.doc, a.docAt
 	size := opts.FontSize
 	ctx := context.Background()
@@ -516,7 +525,10 @@ func (a *app) ensureLayout(w, h float32) {
 		index := prevIndex
 		rebuilt := false
 		if doc == nil || docAt != size {
-			d, imgs, err := bookPtr.BuildWith(size, book.Options{LinkColor: linkColor})
+			// The reader paints links itself (ThemeLinks), so the paper's link
+			// colour stays out of the document and a theme change never rebuilds
+			// it.
+			d, imgs, err := bookPtr.BuildWith(size, book.Options{ThemeLinks: true})
 			if err != nil {
 				win.Update(func() {
 					defer a.refresh(win)
@@ -540,7 +552,16 @@ func (a *app) ensureLayout(w, h float32) {
 				index = nil
 			}
 		}
-		layout, err := reader.BuildLayout(ctx, doc, fonts, sw, sh, opts)
+		// The same document can be laid out again by reusing what the previous
+		// layout already shaped: a theme change only repaints, and a settings
+		// change reuses the line boxes it can.
+		var layout *render.Layout
+		var err error
+		if doc != nil && prev != nil && prev.Document() == doc {
+			layout, err = reader.Relayout(ctx, prev, fonts, sw, sh, opts)
+		} else {
+			layout, err = reader.BuildLayout(ctx, doc, fonts, sw, sh, opts)
+		}
 		win.Update(func() {
 			defer a.refresh(win)
 			if job != a.job {
@@ -561,6 +582,12 @@ func (a *app) ensureLayout(w, h float32) {
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
 			a.layScroll = opts.Scroll
+			if repaint {
+				// Same pages, same anchors, another paper: the job rebuilt the
+				// display lists and nothing else, so there is nothing to
+				// re-anchor and no mark to recompute.
+				return
+			}
 			if a.jumpAt {
 				a.jumpAt = false
 				if a.layScroll {

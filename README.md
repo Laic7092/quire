@@ -146,9 +146,10 @@ macOS 上额外做了这些：
   或在命令行加 `-sign`；只想出 app 可以加 `-skip-dmg`。`go run .` 也能得到同样的
   隐藏标题栏（macOS 上还有菜单栏），但 Finder 的文件关联只在打包后注册。
 
-纸与墨来自 `reader.Palette`（几套纸见 `internal/reader/theme.go`）。纸和墨是排版时写进
-文档样式的，所以换纸要重排一次；其余颜色（桌面、顶栏、面板、强调色）由同一份 palette
-现算，换纸时立刻变。书库不跟纸走：没有打开书时用系统外观（白 / 石墨 + 系统蓝）。
+纸与墨来自 `reader.Palette`（几套纸见 `internal/reader/theme.go`）。纸、墨和链接色只写进
+页面的显示列表，所以换纸走一次 `Layout.Relayout`（PaintKey 变、BreakKey/PageKey 不变）：
+文档、断行和分页都留着，只重画屏幕上的那几页，和书多大无关；其余颜色（桌面、顶栏、面板、
+强调色）由同一份 palette 现算，换纸时立刻变。书库不跟纸走：没有打开书时用系统外观（白 / 石墨 + 系统蓝）。
 正文的衬线是随仓库分发的 XCharter（`internal/reader/fonts/`），窗口文字是 Inter；两者都
 只覆盖西文，CJK 由系统 CJK 字体在同一 family 里 fallback，所以一半西文衬线、一半中文
 黑体也能排出来。
@@ -243,9 +244,10 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 变成动作：书内目标经 `epub.Book.ResolveLink` 变成 chapter + `AnchorID`，再
 `Layout.Locate` 落在页或滚动位置；外部 URL 交给 `ui.SafeToOpen` 过滤后用
 `Services.OpenURL` 打开，`javascript:` 之类不会执行。点击落在链接上时不再翻页。
-链接文字是主题里的蓝色（`reader.Palette.Link`，深色纸上是浅蓝）带下划线，颜色在
-`book.BuildWith` 时烘进文档，所以换主题会和墨色一起重排；指针移到链接上时整张书页
-的鼠标变成手形，移开变回箭头。
+链接文字是主题里的蓝色（`reader.Palette.Link`，深色纸上是浅蓝）带下划线。书用
+`book.Options{ThemeLinks: true}` 构建，`<a>` 只写下划线、不写颜色，链接色由
+`render.Typography.LinkColor` 在画的时候给，所以换主题和墨色一起重绘、不重建文档；作者
+CSS 自己写了链接色的仍然以作者为准。指针移到链接上时整张书页的鼠标变成手形，移开变回箭头。
 
 ## 封面与图片
 
@@ -286,9 +288,10 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 - 位置记忆依赖 node 号在本仓库里跨 `Build` 稳定这一事实；换书源/更新 EPUB 后旧位置会
   静默偏移。分页模式依赖 `PageFor` 的反向映射（单页文档拿不到，因此不记位置），滚动模式
   走 `store.Locate` / `store.PositionAt`，不依赖页。
-- 改字号/行距/字面/页边距、换纸都要整本书重排一次（开关悬浮面板不会）：纸和墨是 `Layout`
-  时写进样式里的（`reader.Palette`，见摩擦点 11），字号也是文档构建时的常量。拖动
-  Aa 里的滑块会等 160ms 再排，所以不是每个像素都排一次，但一次滑动仍会排一两次。
+- 换纸不重排：纸、墨和链接色只进页面的显示列表，`Layout.Relayout` 复用全部断行和分页
+  （5MB 的书约 4ms），所以内容区和外壳一起变色。行距/页边距/对齐也走 `Relayout`：行距只
+  重分页，复用断行缓存。换字号要重建 `Document`（字号是文档构建时的常量）并从零排版；换
+  字面不重建文档，但断行 key 变了，照样要重排一次。开关悬浮面板不影响排版。
 - 大开本两页是宿主摆的：排一份半宽的 `Layout`，在一张纸上画两页；安静时两页之间没有
   书脊线（Books 26 的纸是一整张），只在翻页时由宿主画边缘影子。窗口窄于约 702 DIP 时
   `双页显示` 会被忽略。

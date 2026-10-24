@@ -119,16 +119,46 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 	if doc == nil {
 		return nil, fmt.Errorf("reader: nil document")
 	}
-	if fonts == nil || fonts.Set == nil {
-		return nil, fmt.Errorf("reader: nil fonts")
-	}
-	opts = opts.Normalized()
-	if width < 3*opts.Margin || height < 3*opts.Margin {
-		return nil, fmt.Errorf("reader: viewport %.0fx%.0f is too small", width, height)
+	lo, err := layoutOptions(fonts, width, height, opts)
+	if err != nil {
+		return nil, err
 	}
 	eng, err := render.New(render.Options{})
 	if err != nil {
 		return nil, err
+	}
+	return eng.Layout(ctx, doc, lo)
+}
+
+// Relayout lays prev's document out again for the current palette and reading
+// options. The paper, the ink and the link colour are paint-only, so a theme
+// change reuses the line boxes and the page maps and only the pages on screen
+// are drawn again: the reader changes paper without re-shaping the book, however
+// long it is.
+//
+// A settings change reuses what it can too — a new line height keeps the line
+// boxes and only re-paginates — so this is the path every rebuild takes while
+// the document itself stays the same.
+func Relayout(ctx context.Context, prev *render.Layout, fonts *Fonts, width, height float32, opts Options) (*render.Layout, error) {
+	if prev == nil || prev.Document() == nil {
+		return nil, fmt.Errorf("reader: nil layout")
+	}
+	lo, err := layoutOptions(fonts, width, height, opts)
+	if err != nil {
+		return nil, err
+	}
+	return prev.Relayout(ctx, lo)
+}
+
+// layoutOptions is the render request for the reading options and the palette in
+// use, so a build and a relayout ask for exactly the same thing.
+func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.LayoutOptions, error) {
+	if fonts == nil || fonts.Set == nil {
+		return render.LayoutOptions{}, fmt.Errorf("reader: nil fonts")
+	}
+	opts = opts.Normalized()
+	if width < 3*opts.Margin || height < 3*opts.Margin {
+		return render.LayoutOptions{}, fmt.Errorf("reader: viewport %.0fx%.0f is too small", width, height)
 	}
 	palette := Current()
 	align := render.AlignLeft
@@ -142,7 +172,7 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 	if opts.Scroll {
 		mode, tileHeight = render.ModeScroll, height
 	}
-	return eng.Layout(ctx, doc, render.LayoutOptions{
+	return render.LayoutOptions{
 		Viewport: render.Viewport{Width: width, Height: height},
 		Typography: render.Typography{
 			FontFamily: fonts.Family(opts.Font),
@@ -151,12 +181,13 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 			TextAlign:  align,
 			Color:      palette.Ink,
 			Background: palette.Paper,
+			LinkColor:  palette.Link,
 		},
 		Fonts:      fonts.Set,
 		Margins:    opts.Margins(),
 		Mode:       mode,
 		TileHeight: tileHeight,
-	})
+	}, nil
 }
 
 func clamp(v, lo, hi float32) float32 {

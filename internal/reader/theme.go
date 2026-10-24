@@ -42,9 +42,9 @@ func (t Theme) Dark() bool { return t == ThemeQuiet || t == ThemeBold }
 // sheet, the ink on it, the veils drawn over that ink, and the desk and bars
 // the sheet lies on.
 //
-// Paper and Ink are baked into a document's styles when it is built, so a host
-// that changes them must rebuild the document — that is also why switching
-// between paper themes costs a layout. The rest are painted by the host, so
+// Paper, Ink and Link are baked into a layout's page display lists, so a host
+// that changes them asks for a paint-only relayout (Relayout): the document, its
+// line boxes and its page maps all stand. The rest are painted by the host, so
 // they cost nothing.
 type Palette struct {
 	Theme Theme
@@ -61,8 +61,9 @@ type Palette struct {
 	// marked passage sits on the page until it is removed.
 	Note paint.Color
 	// Link paints link text and the rule under it. It travels with the paper
-	// rather than the ink, so a link stays recognisable in every theme; it is
-	// baked into the document, so a theme change rebuilds it with the rest.
+	// rather than the ink, so a link stays recognisable in every theme; the
+	// reader paints it (the document underlines links but names no colour), so a
+	// theme change repaints it with the rest.
 	Link paint.Color
 
 	// Desk is the space around the page, Chrome the bars, Side the library's own
