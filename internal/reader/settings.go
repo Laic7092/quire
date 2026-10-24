@@ -150,6 +150,19 @@ func Relayout(ctx context.Context, prev *render.Layout, fonts *Fonts, width, hei
 	return prev.Relayout(ctx, lo)
 }
 
+// Recolor prints prev's pages on the paper in use. The paper, the ink and the
+// link colour are paint-only, so nothing is shaped and no page moves: the layout
+// keeps its lines, its pages and its place, and only the pages drawn afterwards
+// are painted again. It is the theme switch — a copy of the layout, not a pass
+// over the book.
+func Recolor(prev *render.Layout) *render.Layout {
+	if prev == nil {
+		return nil
+	}
+	palette := Current()
+	return prev.WithColors(palette.Ink, palette.Paper, palette.Link)
+}
+
 // layoutOptions is the render request for the reading options and the palette in
 // use, so a build and a relayout ask for exactly the same thing.
 func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.LayoutOptions, error) {

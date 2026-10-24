@@ -482,7 +482,7 @@ func (a *app) ensureLayout(w, h float32) {
 		a.status = locales.LayoutTooNarrow()
 		return
 	}
-	if a.win == nil || a.book == nil || a.fonts == nil {
+	if a.book == nil || a.fonts == nil {
 		return
 	}
 	if a.failed && w == a.failW && h == a.failH && opts.FontSize == a.failSize {
@@ -496,12 +496,15 @@ func (a *app) ensureLayout(w, h float32) {
 		return
 	}
 
+	if a.repaper(sw, sh, opts) {
+		return
+	}
+	if a.win == nil {
+		return
+	}
+
 	a.job++
 	job := a.job
-	// A job that only changes the paper keeps the same page geometry, so it can
-	// leave the reader's place, its selection and the panels alone.
-	repaint := a.layout != nil && a.doc != nil && a.layout.Document() == a.doc &&
-		sw == a.layW && sh == a.layH && opts.Same(a.layOpts)
 	a.loading = true
 	a.layW, a.layH = sw, sh
 	a.layOpts = opts
@@ -582,12 +585,6 @@ func (a *app) ensureLayout(w, h float32) {
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
 			a.layScroll = opts.Scroll
-			if repaint {
-				// Same pages, same anchors, another paper: the job rebuilt the
-				// display lists and nothing else, so there is nothing to
-				// re-anchor and no mark to recompute.
-				return
-			}
 			if a.jumpAt {
 				a.jumpAt = false
 				if a.layScroll {
@@ -659,6 +656,25 @@ func (a *app) ensureLayout(w, h float32) {
 			a.refreshMarks()
 		})
 	}()
+}
+
+// repaper prints the book on another paper when nothing but the paper changed,
+// on the calling thread. The layout keeps every line and every page, so this
+// costs a copy of the layout rather than a pass over the book, and the pages
+// drawn later in this frame already wear the new colours: the page and the chrome
+// turn over together, whatever the book's size. Nothing derived from the pages
+// moves — the reader's place, its selection and the panels stand.
+//
+// It reports whether it repainted; anything else, a paper change included when
+// the geometry moved with it, goes through the background job.
+func (a *app) repaper(sw, sh float32, opts reader.Options) bool {
+	if a.loading || a.layout == nil || a.doc == nil || a.layout.Document() != a.doc ||
+		sw != a.layW || sh != a.layH || !opts.Same(a.layOpts) {
+		return false
+	}
+	a.layout = reader.Recolor(a.layout)
+	a.layPaper = paperOf(reader.Current())
+	return true
 }
 
 // chooseFile shows the open dialog. It runs on the UI thread and hands the
