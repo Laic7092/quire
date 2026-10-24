@@ -9,7 +9,7 @@ import (
 // ribbon and ⌘D call toggleBookmark, which also removes a bookmark already on
 // the page.
 func (a *app) bookmarkHere() {
-	if a.pan == nil {
+	if a.pan == nil || a.showCover {
 		return
 	}
 	if !a.pan.BookmarkHere() {
@@ -21,7 +21,7 @@ func (a *app) bookmarkHere() {
 // toggleBookmark is the round ribbon in the title bar and ⌘D: it bookmarks the
 // reading position, or drops the bookmark that is already there.
 func (a *app) toggleBookmark() {
-	if a.pan == nil {
+	if a.pan == nil || a.showCover {
 		return
 	}
 	loc, ok := a.currentLoc()
@@ -39,7 +39,7 @@ func (a *app) toggleBookmark() {
 // what lights the toolbar's ribbon. It reads the rows the panel already
 // resolved, so it is cheap enough for every frame.
 func (a *app) bookmarkedAt() bool {
-	if a.pan == nil || a.layout == nil {
+	if a.pan == nil || a.layout == nil || a.showCover {
 		return false
 	}
 	loc, ok := a.currentLoc()
