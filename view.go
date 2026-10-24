@@ -192,6 +192,9 @@ func (a *app) keys(c *ui.Context) {
 	if a.book == nil {
 		return
 	}
+	if c.Shortcut(ui.Cmd, ui.KeyD) {
+		a.toggleBookmark()
+	}
 	if c.Shortcut(ui.Cmd, ui.KeyC) {
 		// The selection stays after a copy, as in every other reader.
 		a.copySelection(c)
@@ -293,11 +296,21 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 				})
 			})
 			ui.Box(c).Width(13)
+			// The ribbon: bookmarks the page, and fills with the accent when the
+			// page is bookmarked already, so one control turns the mark on and off
+			// as Books' own does.
+			on := a.bookmarkedAt()
+			label, tip := locales.AddBookmark(), locales.AddBookmark()
+			fill, ink := pal.Toolbar, pal.OnToolbar
+			if on {
+				label, tip = locales.RemoveBookmark(), locales.RemoveBookmark()
+				fill, ink = pal.Accent, pal.OnAccent
+			}
 			b := ui.Box(c).Width(27).Height(27).Radius(13.5).Center().
-				Background(reader.UIColor(pal.Toolbar)).Cursor(ui.CursorPointer).
-				Label(locales.AddBookmark()).Tooltip(locales.AddBookmark())
+				Background(reader.UIColor(fill)).Cursor(ui.CursorPointer).
+				Label(label).Tooltip(tip).OnClick(a.toggleBookmark)
 			b.Children(func() {
-				ui.Icon(c, icons.Bookmark).Size(15, 15).TextColor(reader.UIColor(pal.OnToolbar))
+				ui.Icon(c, icons.Bookmark).Size(15, 15).TextColor(reader.UIColor(ink))
 			})
 		})
 }

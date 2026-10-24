@@ -1988,6 +1988,118 @@ func (msgs Messages) EmptyBookmarksHint() string {
 	return Catalog.Format(msgs.locale, "emptyBookmarksHint", nil)
 }
 
+// BookmarkCount says "{count, plural, one {# bookmark} other {# bookmarks}}"
+// in the language the app shows.
+//
+// The bookmarks panel's line at its head: how many bookmarks the book has.
+func BookmarkCount(count int) string { return In(i18n.Locale()).BookmarkCount(count) }
+
+// BookmarkCount says "{count, plural, one {# bookmark} other {# bookmarks}}"
+// in the language of msgs.
+//
+// The bookmarks panel's line at its head: how many bookmarks the book has.
+func (msgs Messages) BookmarkCount(count int) string {
+	return Catalog.Format(msgs.locale, "bookmarkCount", map[string]any{"count": count})
+}
+
+// BookmarkPage says "Page {page}"
+// in the language the app shows.
+//
+// Where a bookmark points: the page it was made on.
+func BookmarkPage(page int) string { return In(i18n.Locale()).BookmarkPage(page) }
+
+// BookmarkPage says "Page {page}"
+// in the language of msgs.
+//
+// Where a bookmark points: the page it was made on.
+func (msgs Messages) BookmarkPage(page int) string {
+	return Catalog.Format(msgs.locale, "bookmarkPage", map[string]any{"page": page})
+}
+
+// BookmarkProgress says "{percent}% of the book"
+// in the language the app shows.
+//
+// Where a bookmark points in a scrolling column, which has no pages.
+func BookmarkProgress(percent int) string { return In(i18n.Locale()).BookmarkProgress(percent) }
+
+// BookmarkProgress says "{percent}% of the book"
+// in the language of msgs.
+//
+// Where a bookmark points in a scrolling column, which has no pages.
+func (msgs Messages) BookmarkProgress(percent int) string {
+	return Catalog.Format(msgs.locale, "bookmarkProgress", map[string]any{"percent": percent})
+}
+
+// BookmarkAdded says "Bookmark added"
+// in the language the app shows.
+//
+// The status line after the reader bookmarked the page.
+func BookmarkAdded() string { return In(i18n.Locale()).BookmarkAdded() }
+
+// BookmarkAdded says "Bookmark added"
+// in the language of msgs.
+//
+// The status line after the reader bookmarked the page.
+func (msgs Messages) BookmarkAdded() string {
+	return Catalog.Format(msgs.locale, "bookmarkAdded", nil)
+}
+
+// BookmarkRemoved says "Bookmark removed"
+// in the language the app shows.
+//
+// The status line after the reader removed a bookmark.
+func BookmarkRemoved() string { return In(i18n.Locale()).BookmarkRemoved() }
+
+// BookmarkRemoved says "Bookmark removed"
+// in the language of msgs.
+//
+// The status line after the reader removed a bookmark.
+func (msgs Messages) BookmarkRemoved() string {
+	return Catalog.Format(msgs.locale, "bookmarkRemoved", nil)
+}
+
+// RemoveBookmark says "Remove Bookmark"
+// in the language the app shows.
+//
+// The toolbar ribbon that removes the bookmark of the page being read.
+func RemoveBookmark() string { return In(i18n.Locale()).RemoveBookmark() }
+
+// RemoveBookmark says "Remove Bookmark"
+// in the language of msgs.
+//
+// The toolbar ribbon that removes the bookmark of the page being read.
+func (msgs Messages) RemoveBookmark() string {
+	return Catalog.Format(msgs.locale, "removeBookmark", nil)
+}
+
+// DeleteBookmark says "Delete Bookmark"
+// in the language the app shows.
+//
+// The row control and tooltip that delete a bookmark from the list.
+func DeleteBookmark() string { return In(i18n.Locale()).DeleteBookmark() }
+
+// DeleteBookmark says "Delete Bookmark"
+// in the language of msgs.
+//
+// The row control and tooltip that delete a bookmark from the list.
+func (msgs Messages) DeleteBookmark() string {
+	return Catalog.Format(msgs.locale, "deleteBookmark", nil)
+}
+
+// ChapterNumber says "Chapter {number}"
+// in the language the app shows.
+//
+// The chapter of a bookmark or a note for a book that names it not.
+func ChapterNumber(number int) string { return In(i18n.Locale()).ChapterNumber(number) }
+
+// ChapterNumber says "Chapter {number}"
+// in the language of msgs.
+//
+// The chapter of a bookmark or a note for a book that names it not.
+func (msgs Messages) ChapterNumber(number int) string {
+	return Catalog.Format(msgs.locale, "chapterNumber", map[string]any{"number": number})
+}
+
 // EmptyNotes says "No notes yet"
 // in the language the app shows.
 //

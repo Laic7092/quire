@@ -760,6 +760,62 @@
   "@emptyBookmarksHint": {
     "description": "What the bookmarks panel lists."
   },
+  "bookmarkCount": "{count, plural, one {# bookmark} other {# bookmarks}}",
+  "@bookmarkCount": {
+    "description": "The bookmarks panel's line at its head: how many bookmarks the book has.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "4"
+      }
+    }
+  },
+  "bookmarkPage": "Page {page}",
+  "@bookmarkPage": {
+    "description": "Where a bookmark points: the page it was made on.",
+    "placeholders": {
+      "page": {
+        "type": "int",
+        "example": "132"
+      }
+    }
+  },
+  "bookmarkProgress": "{percent}% of the book",
+  "@bookmarkProgress": {
+    "description": "Where a bookmark points in a scrolling column, which has no pages.",
+    "placeholders": {
+      "percent": {
+        "type": "int",
+        "example": "43"
+      }
+    }
+  },
+  "bookmarkAdded": "Bookmark added",
+  "@bookmarkAdded": {
+    "description": "The status line after the reader bookmarked the page."
+  },
+  "bookmarkRemoved": "Bookmark removed",
+  "@bookmarkRemoved": {
+    "description": "The status line after the reader removed a bookmark."
+  },
+  "removeBookmark": "Remove Bookmark",
+  "@removeBookmark": {
+    "description": "The toolbar ribbon that removes the bookmark of the page being read."
+  },
+  "deleteBookmark": "Delete Bookmark",
+  "@deleteBookmark": {
+    "description": "The row control and tooltip that delete a bookmark from the list."
+  },
+  "chapterNumber": "Chapter {number}",
+  "@chapterNumber": {
+    "description": "The chapter of a bookmark or a note for a book that names it not.",
+    "placeholders": {
+      "number": {
+        "type": "int",
+        "example": "7"
+      }
+    }
+  },
   "emptyNotes": "No notes yet",
   "@emptyNotes": {
     "description": "The notes panel's message while the book has none."

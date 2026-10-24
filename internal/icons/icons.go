@@ -84,4 +84,6 @@ var (
 	// Sliders tunes a card's own settings, as the reading goals card's
 	// controls icon does.
 	Sliders = stroke(`<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="8" cy="17" r="2.2"/>`)
+	// Trash removes a bookmark or a note from its row.
+	Trash = stroke(`<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>`)
 )

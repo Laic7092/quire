@@ -35,8 +35,11 @@ func (a *App) Show(side string) {
 		a.Sidebar = SidebarNone
 	}
 	a.persistSidebar()
-	if a.Sidebar == SidebarToc {
+	switch a.Sidebar {
+	case SidebarToc:
 		a.Toc.ScrollToCurrent()
+	case SidebarBookmarks:
+		a.Bookmarks.ScrollToCurrent()
 	}
 }
 
@@ -68,7 +71,7 @@ func (a *App) View(c *ui.Context) ui.Element {
 		case SidebarSearch:
 			a.Search.View(c)
 		case SidebarBookmarks:
-			widgets.Empty(c, locales.EmptyBookmarks(), locales.EmptyBookmarksHint())
+			a.Bookmarks.View(c)
 		case SidebarNotes:
 			widgets.Empty(c, locales.EmptyNotes(), locales.EmptyNotesHint())
 		default:

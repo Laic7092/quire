@@ -17,6 +17,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/book"
+	"github.com/laix/layx-reader/internal/bookmarks"
 	"github.com/laix/layx-reader/internal/library"
 	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
@@ -49,9 +50,10 @@ type App struct {
 	// publishes one after a build.
 	Index *search.Index
 
-	Shelf  library.Panel
-	Toc    toc.Panel
-	Search search.Panel
+	Shelf     library.Panel
+	Toc       toc.Panel
+	Bookmarks bookmarks.Panel
+	Search    search.Panel
 
 	// Post publishes fn on the UI thread (Window.Update). When nil, background
 	// work runs inline, which is what the tests want.
@@ -62,6 +64,11 @@ type App struct {
 	// search hit. The host turns it into a page or a scroll offset, whichever
 	// the layout's mode uses.
 	Jump func(loc render.Location)
+	// Reading returns the place the host is reading now, which is the place a
+	// bookmark is made at. A scrolling column passes its viewport's top, so the
+	// bookmark lands where the reader is rather than at the last panel refresh;
+	// without the hook the last refreshed location is used.
+	Reading func() (render.Location, bool)
 	// OnHits runs on the UI thread whenever Search.Hits changes, so the host can
 	// rebuild what it derives from them, such as the highlight rectangles it
 	// paints on the page.
@@ -75,6 +82,14 @@ type App struct {
 	layout   *render.Layout
 	page     int
 	searchID int
+	// book is the book the panels were last refreshed for, nil when none is
+	// open; the bookmark rows take their chapter names from it.
+	book *book.Book
+	// loc is the place the panels were last refreshed for, and hasLoc whether
+	// that refresh had a layout to read one from. The bookmarks panel marks the
+	// row standing there.
+	loc    render.Location
+	hasLoc bool
 }
 
 // New builds an App over st. st may be nil, in which case nothing is persisted
@@ -102,6 +117,14 @@ func New(st *store.Store) *App {
 
 	a.Toc.OnJump = a.jumpEntry
 	a.Search.OnJump = a.jump
+	a.Bookmarks.Selected = -1
+	a.Bookmarks.OnJump = func(e bookmarks.Entry) {
+		if e.HasLoc {
+			a.jump(e.Loc)
+		}
+	}
+	a.Bookmarks.OnRemove = func(e bookmarks.Entry) { a.RemoveBookmark(e.ID) }
+	a.Bookmarks.OnAdd = func() { a.BookmarkHere() }
 	a.Search.OnSearch = a.search
 	a.Search.PageOf = func(h search.Hit) (int, bool) {
 		if a.layout == nil || a.Index == nil {
@@ -176,10 +199,13 @@ func (a *App) RefreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 // refreshAt rebuilds the panels from the layout and the place read to.
 func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Location, page int) {
 	a.layout, a.page = layout, page
+	a.book = bk
+	a.loc, a.hasLoc = loc, layout != nil
 	a.Toc.Entries = toc.BuildAt(bk, layout, loc)
 	if len(a.Toc.Entries) > 0 {
 		a.Toc.SelectCurrent()
 	}
+	a.rebuildBookmarks(bk)
 }
 
 // SetIndex publishes a freshly built index. The host must call it with the

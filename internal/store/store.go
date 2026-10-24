@@ -18,6 +18,7 @@ package store
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -66,6 +67,35 @@ type Position struct {
 	Updated  time.Time `json:"updated"`
 }
 
+// Bookmark is a place in a book that the reader kept. Position carries the
+// reflow-stable place; Label is the reader's own name for it, empty when the
+// reader never renamed it and the host should show the chapter instead.
+//
+// Created is when the bookmark was made; Position.Updated is not meaningful
+// here and is written as the same instant.
+type Bookmark struct {
+	ID       string    `json:"id"`
+	Position Position  `json:"position"`
+	Label    string    `json:"label"`
+	Created  time.Time `json:"created"`
+}
+
+// Note is a passage the reader marked, with the comment they wrote about it.
+// From and To are the two ends of the passage as it was selected (either order
+// works); Text is the passage itself, kept so the note can be recognised after
+// a relayout or a new revision of the book.
+//
+// Comment may be empty: a bare highlight is a note without one.
+type Note struct {
+	ID       string    `json:"id"`
+	From     Position  `json:"from"`
+	To       Position  `json:"to"`
+	Text     string    `json:"text"`
+	Comment  string    `json:"comment"`
+	Created  time.Time `json:"created"`
+	Modified time.Time `json:"modified"`
+}
+
 // Prefs are the reading preferences worth restoring on launch.
 type Prefs struct {
 	FontSize float32 `json:"fontSize"`
@@ -101,11 +131,13 @@ type Prefs struct {
 
 // State is the whole persisted document.
 type State struct {
-	Version   int                 `json:"version"`
-	Books     []Book              `json:"books"`
-	Positions map[string]Position `json:"positions"` // Book.Key -> Position
-	Prefs     Prefs               `json:"prefs"`
-	LastOpen  string              `json:"lastOpen"` // Book.Key
+	Version   int                   `json:"version"`
+	Books     []Book                `json:"books"`
+	Positions map[string]Position   `json:"positions"` // Book.Key -> Position
+	Bookmarks map[string][]Bookmark `json:"bookmarks"` // Book.Key -> bookmarks
+	Notes     map[string][]Note     `json:"notes"`     // Book.Key -> notes
+	Prefs     Prefs                 `json:"prefs"`
+	LastOpen  string                `json:"lastOpen"` // Book.Key
 }
 
 // ErrClosed is returned by Save and Flush after Close.
@@ -343,6 +375,191 @@ func (s *Store) Position(key string) (Position, bool) {
 	return p, ok
 }
 
+// BookmarksOf returns key's bookmarks in the order the reader made them.
+func (s *Store) BookmarksOf(key string) []Bookmark {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Bookmark(nil), s.state.Bookmarks[key]...)
+}
+
+// AddBookmark stores b under key and returns it with its ID and Created
+// stamped. A bookmark at the very place b names is not stored twice: the
+// existing one is returned instead, so pressing add twice cannot pile rows on
+// one page.
+func (s *Store) AddBookmark(key string, b Bookmark) Bookmark {
+	now := time.Now()
+	if b.ID == "" {
+		b.ID = newID()
+	}
+	if b.Created.IsZero() {
+		b.Created = now
+	}
+	b.Position.Updated = b.Created
+	var out Bookmark
+	s.Update(func(st *State) {
+		for _, old := range st.Bookmarks[key] {
+			if samePlace(old.Position, b.Position) {
+				out = old
+				return
+			}
+		}
+		st.Bookmarks[key] = append(st.Bookmarks[key], b)
+		out = b
+	})
+	return out
+}
+
+// UpdateBookmark replaces the bookmark with b's ID under key. It reports
+// whether such a bookmark existed; Position is kept as stored when b leaves it
+// zero, so renaming a row does not lose where it points.
+func (s *Store) UpdateBookmark(key string, b Bookmark) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	for i := range s.state.Bookmarks[key] {
+		if s.state.Bookmarks[key][i].ID != b.ID {
+			continue
+		}
+		s.state.Bookmarks[key][i] = b
+		s.gen++
+		s.dirty = true
+		return true
+	}
+	return false
+}
+
+// RemoveBookmark drops the bookmark with id under key, reporting whether it
+// was there.
+func (s *Store) RemoveBookmark(key, id string) bool {
+	removed := false
+	s.Update(func(st *State) {
+		rows := st.Bookmarks[key]
+		for i := range rows {
+			if rows[i].ID != id {
+				continue
+			}
+			rows = append(rows[:i], rows[i+1:]...)
+			removed = true
+			break
+		}
+		if !removed {
+			return
+		}
+		if len(rows) == 0 {
+			delete(st.Bookmarks, key)
+			return
+		}
+		st.Bookmarks[key] = rows
+	})
+	return removed
+}
+
+// NotesOf returns key's notes in the order the reader made them.
+func (s *Store) NotesOf(key string) []Note {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Note(nil), s.state.Notes[key]...)
+}
+
+// AddNote stores n under key and returns it with its ID, Created and Modified
+// stamped. A note covering the same passage is not stored twice.
+func (s *Store) AddNote(key string, n Note) Note {
+	now := time.Now()
+	if n.ID == "" {
+		n.ID = newID()
+	}
+	if n.Created.IsZero() {
+		n.Created = now
+	}
+	n.Modified = n.Created
+	var out Note
+	s.Update(func(st *State) {
+		for _, old := range st.Notes[key] {
+			if samePlace(old.From, n.From) && samePlace(old.To, n.To) {
+				out = old
+				return
+			}
+		}
+		st.Notes[key] = append(st.Notes[key], n)
+		out = n
+	})
+	return out
+}
+
+// UpdateNote replaces the note with n's ID under key, stamping Modified. It
+// reports whether such a note existed.
+func (s *Store) UpdateNote(key string, n Note) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	for i := range s.state.Notes[key] {
+		if s.state.Notes[key][i].ID != n.ID {
+			continue
+		}
+		n.Created = s.state.Notes[key][i].Created
+		n.Modified = time.Now()
+		s.state.Notes[key][i] = n
+		s.gen++
+		s.dirty = true
+		return true
+	}
+	return false
+}
+
+// RemoveNote drops the note with id under key, reporting whether it was there.
+func (s *Store) RemoveNote(key, id string) bool {
+	removed := false
+	s.Update(func(st *State) {
+		rows := st.Notes[key]
+		for i := range rows {
+			if rows[i].ID != id {
+				continue
+			}
+			rows = append(rows[:i], rows[i+1:]...)
+			removed = true
+			break
+		}
+		if !removed {
+			return
+		}
+		if len(rows) == 0 {
+			delete(st.Notes, key)
+			return
+		}
+		st.Notes[key] = rows
+	})
+	return removed
+}
+
+// samePlace reports whether two positions name the same point of a book. The
+// node and offset are exact and the anchor survives a rebuild, so either one
+// matching means the same place.
+func samePlace(a, b Position) bool {
+	if a.Chapter != b.Chapter {
+		return false
+	}
+	if a.Node != 0 && a.Node == b.Node && a.Offset == b.Offset {
+		return true
+	}
+	return a.Anchor != 0 && a.Anchor == b.Anchor && a.Offset == b.Offset
+}
+
+// newID returns a random bookmark or note identity: stable in the file, never
+// reused, and short enough to read in a bug report.
+func newID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// The reader is lost without its shelf anyway; fall back to the clock so
+		// a broken entropy source cannot stop a bookmark from being saved.
+		return fmt.Sprintf("%016x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // SetPosition stores p for key, stamping Updated when it is zero.
 func (s *Store) SetPosition(key string, p Position) {
 	if key == "" {
@@ -423,7 +640,12 @@ func (s *Store) writeCount() int64 {
 }
 
 func emptyState() State {
-	return State{Version: Version, Positions: map[string]Position{}}
+	return State{
+		Version:   Version,
+		Positions: map[string]Position{},
+		Bookmarks: map[string][]Bookmark{},
+		Notes:     map[string][]Note{},
+	}
 }
 
 func normalize(st *State) {
@@ -433,6 +655,12 @@ func normalize(st *State) {
 	if st.Positions == nil {
 		st.Positions = map[string]Position{}
 	}
+	if st.Bookmarks == nil {
+		st.Bookmarks = map[string][]Bookmark{}
+	}
+	if st.Notes == nil {
+		st.Notes = map[string][]Note{}
+	}
 }
 
 func cloneState(st State) State {
@@ -441,12 +669,20 @@ func cloneState(st State) State {
 		Prefs:     st.Prefs,
 		LastOpen:  st.LastOpen,
 		Positions: make(map[string]Position, len(st.Positions)),
+		Bookmarks: make(map[string][]Bookmark, len(st.Bookmarks)),
+		Notes:     make(map[string][]Note, len(st.Notes)),
 	}
 	if len(st.Books) > 0 {
 		out.Books = append([]Book(nil), st.Books...)
 	}
 	for k, v := range st.Positions {
 		out.Positions[k] = v
+	}
+	for k, rows := range st.Bookmarks {
+		out.Bookmarks[k] = append([]Bookmark(nil), rows...)
+	}
+	for k, rows := range st.Notes {
+		out.Notes[k] = append([]Note(nil), rows...)
 	}
 	return out
 }

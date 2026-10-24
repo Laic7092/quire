@@ -1014,6 +1014,7 @@ func main() {
 		}
 	}
 	a.pan.OnPickDir = a.chooseDir
+	a.pan.Reading = a.currentLoc
 	a.pan.Cover = a.coverBitmap
 	a.pan.Open = a.openPath
 	a.pan.Jump = a.gotoLoc

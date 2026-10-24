@@ -60,6 +60,7 @@ func newWindow(t *testing.T) *app {
 	pan := appstate.New(st)
 	pan.Library = lib
 	pan.Shelf.Lib = lib
+	pan.Opened(bk, "internal/book/testdata/samples/aq-zhuan.epub")
 
 	a := &app{
 		fonts:   fonts,
@@ -130,6 +131,15 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			pan.Show(appstate.SidebarToc)
 		}},
 		{name: "bookmarks", want: func(*app) string { return locales.EmptyBookmarks() }, render: func(*testing.T) {
+			pan.Show(appstate.SidebarBookmarks)
+		}},
+		// One bookmark, added at the page being read: the ribbon in the bar is
+		// lit, and the panel lists the row it made.
+		{name: "bookmark", want: func(*app) string { return locales.BookmarkCount(1) }, render: func(t *testing.T) {
+			pan.Reading = a.currentLoc
+			if !pan.BookmarkHere() {
+				t.Fatal("BookmarkHere added no bookmark")
+			}
 			pan.Show(appstate.SidebarBookmarks)
 		}},
 		{name: "notes", want: func(*app) string { return locales.EmptyNotes() }, render: func(*testing.T) {
