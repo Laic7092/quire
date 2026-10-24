@@ -2,6 +2,7 @@ package appstate
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,7 +24,8 @@ func newStore(t *testing.T) *store.Store {
 }
 
 // The shelf lists the sample books and reports a click to the host, all through
-// the App, without a window.
+// the App, without a window. The library page shows it; the reader floats its
+// own panels, so the shelf is drawn on its own here.
 func TestShelfPanelOpensABook(t *testing.T) {
 	st := newStore(t)
 	a := New(st)
@@ -34,9 +36,8 @@ func TestShelfPanelOpensABook(t *testing.T) {
 
 	var opened string
 	a.Open = func(path string) { opened = path }
-	a.Show(SidebarShelf)
 
-	tt := ui.NewTester(func(c *ui.Context) { a.View(c) }, 360, 600)
+	tt := ui.NewTester(func(c *ui.Context) { a.Shelf.View(c) }, 360, 600)
 	if !tt.HasText("书架") || !tt.HasText("阿Ｑ正傳") {
 		t.Fatalf("shelf did not build: %q", tt.Texts())
 	}
@@ -191,7 +192,7 @@ func TestTocAndSearchJump(t *testing.T) {
 
 	a.Show(SidebarToc)
 	tt := ui.NewTester(func(c *ui.Context) { a.View(c) }, 320, 500)
-	if !tt.HasText("目录") || !tt.HasText(bk.Chapters[0].Title) {
+	if !tt.HasText(fmt.Sprintf("%d 章", len(bk.Chapters))) || !tt.HasText(bk.Chapters[0].Title) {
 		t.Fatalf("toc did not build: %q", tt.Texts())
 	}
 	if jumped != 0 {
@@ -226,9 +227,9 @@ func TestBackgroundWorkAppliesOnTheUIThread(t *testing.T) {
 	}
 }
 
-// Drawing the switcher does not choose a panel by itself: it reports only a
-// click, so a frame cannot overwrite what the user chose.
-func TestSwitcherOnlyReportsClicks(t *testing.T) {
+// Drawing a panel never chooses another one: the toolbar's buttons do that, so
+// a frame cannot overwrite what the reader chose.
+func TestPanelViewDrawsTheChosenPanel(t *testing.T) {
 	st := newStore(t)
 	a := New(st)
 	a.Show(SidebarToc)
@@ -236,18 +237,39 @@ func TestSwitcherOnlyReportsClicks(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 	if a.Sidebar != SidebarToc {
-		t.Fatalf("sidebar %q after two frames without a click", a.Sidebar)
+		t.Fatalf("panel %q after two frames without a click", a.Sidebar)
 	}
-	if err := tt.Click("搜索"); err != nil {
-		t.Fatalf("segment: %v (%q)", err, tt.Texts())
+	if !tt.HasText("章") {
+		t.Errorf("the contents did not build: %q", tt.Texts())
 	}
-	if a.Sidebar != SidebarSearch {
-		t.Errorf("sidebar %q after clicking the search segment", a.Sidebar)
+	a.Show(SidebarSearch)
+	tt.Frame()
+	if !tt.HasText("全文搜索") || a.Sidebar != SidebarSearch {
+		t.Errorf("panel %q after showing search: %q", a.Sidebar, tt.Texts())
 	}
 	if err := st.Flush(); err != nil {
 		t.Fatal(err)
 	}
 	if prefs := st.State().Prefs; !prefs.SidebarOpen || prefs.Sidebar != SidebarSearch {
-		t.Errorf("prefs %+v after choosing the search panel", prefs)
+		t.Errorf("prefs %+v after showing the search panel", prefs)
+	}
+}
+
+// Bookmarks and notes are panels of their own until their data layer lands:
+// they say what will fill them rather than showing an empty frame.
+func TestBookmarksAndNotesPanels(t *testing.T) {
+	a := New(nil)
+	for _, tc := range []struct{ side, title, empty string }{
+		{SidebarBookmarks, "书签", "还没有书签"},
+		{SidebarNotes, "笔记", "还没有笔记"},
+	} {
+		a.Show(tc.side)
+		if got := a.Title(); got != tc.title {
+			t.Errorf("title of %q = %q, want %q", tc.side, got, tc.title)
+		}
+		tt := ui.NewTester(func(c *ui.Context) { a.View(c) }, 300, 500)
+		if !tt.HasText(tc.empty) {
+			t.Errorf("%s panel: %q", tc.side, tt.Texts())
+		}
 	}
 }

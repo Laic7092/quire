@@ -8,7 +8,7 @@ import (
 	"github.com/laix/layx-reader/internal/widgets"
 )
 
-// Panel is the search sidebar. It owns only plain Go state and rebuilds its
+// Panel is the reader's search panel. It owns only plain Go state and rebuilds its
 // view every frame from it; callbacks are invoked on the UI thread and the host
 // starts goroutines for indexing and searching.
 type Panel struct {

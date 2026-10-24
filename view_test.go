@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"image/png"
 	"os"
 	"strings"
@@ -62,17 +63,16 @@ func newWindow(t *testing.T) *app {
 	pan.Shelf.Lib = lib
 
 	a := &app{
-		fonts:    fonts,
-		paint:    paint,
-		book:     bk,
-		doc:      doc,
-		docAt:    reader.DefaultFontSize,
-		opts:     reader.DefaultOptions(),
-		theme:    reader.ThemeQuiet,
-		pan:      pan,
-		st:       st,
-		sidebarW: defaultSidebarWidth,
-		instant:  true,
+		fonts:   fonts,
+		paint:   paint,
+		book:    bk,
+		doc:     doc,
+		docAt:   reader.DefaultFontSize,
+		opts:    reader.DefaultOptions(),
+		theme:   reader.ThemeQuiet,
+		pan:     pan,
+		st:      st,
+		instant: true,
 	}
 	a.syncSettingsFields()
 	pan.Jump = a.gotoPage
@@ -95,7 +95,7 @@ func newWindow(t *testing.T) *app {
 }
 
 // The whole window renders in every state its chrome can be in: the page, each
-// sidebar panel, the cover, the home screen, and the night paper. Rendered
+// floating panel, the cover, the home screen, and the night paper. Rendered
 // frames are written to PNG when SNAP=1, which is how the layout was checked by
 // eye.
 func TestWindowRendersEveryScreen(t *testing.T) {
@@ -128,8 +128,11 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 		{name: "toc", want: bk.Chapters[0].Title, render: func(*testing.T) {
 			pan.Show(appstate.SidebarToc)
 		}},
-		{name: "shelf", want: bk.Title, render: func(*testing.T) {
-			pan.Show(appstate.SidebarShelf)
+		{name: "bookmarks", want: "还没有书签", render: func(*testing.T) {
+			pan.Show(appstate.SidebarBookmarks)
+		}},
+		{name: "notes", want: "还没有笔记", render: func(*testing.T) {
+			pan.Show(appstate.SidebarNotes)
 		}},
 		{name: "search", want: "条结果", render: func(t *testing.T) {
 			pan.Show(appstate.SidebarSearch)
@@ -222,21 +225,18 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			pan.Refresh(bk, two, 4)
 			pan.Show(appstate.SidebarNone)
 		}},
-		// A window near the minimum size, with a panel open, still lays the
-		// page out or says why it cannot.
+		// A window near the minimum size, with a panel floating over it, still
+		// lays the page out at the whole window's measure and says where it is.
 		{name: "narrow", w: 700, h: 520, want: "5 of ", render: func(t *testing.T) {
-			// The pane the page gets beside an open panel at this window size,
-			// so the shot shows the layout the reader really builds.
-			pw := float32(700 - defaultSidebarWidth - 2*pagePadding - 2)
+			w := float32(700 - 2*pagePadding)
 			ph := float32(520 - headerHeight - footerHeight - 2*pagePadding)
-			narrow, err := reader.BuildLayout(context.Background(), doc, a.fonts, pw, ph, reader.Options{FontSize: reader.DefaultFontSize})
+			narrow, err := reader.BuildLayout(context.Background(), doc, a.fonts, w, ph, reader.Options{FontSize: reader.DefaultFontSize})
 			if err != nil {
 				t.Fatal(err)
 			}
 			a.book, a.layout, a.page = bk, narrow, 4
 			a.showCover = false
 			a.clearSelection()
-			a.sidebarW = defaultSidebarWidth
 			pan.Show(appstate.SidebarToc)
 			pan.Refresh(bk, narrow, 4)
 		}},
@@ -355,7 +355,8 @@ func TestDragSelectsTextAndCopiesIt(t *testing.T) {
 		t.Error("the copy was not reported to the footer")
 	}
 
-	// A click is a zero-length selection: it clears what the drag selected.
+	// A click is a zero-length selection: it clears what the drag selected,
+	// and, as every click on the sheet does, turns the page.
 	tt.ClickAt(box.X+90, box.Y+80)
 	tt.Frame()
 	if len(a.selQuads) != 0 {
@@ -722,7 +723,7 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 	a := newWindow(t)
 	tt := ui.NewTester(a.view, 1180, 800)
 	tt.SetTitleBar(bar)
-	btn, ok := tt.Find("侧栏")
+	btn, ok := tt.Find("目录")
 	if !ok {
 		t.Fatalf("the reader's bar is missing: %q", tt.Texts())
 	}
@@ -743,8 +744,9 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 
 	// Windows and some Linux desktops put the buttons at the right instead:
 	// the reader's settings and the library's toolbar keep out of their way
-	// there too.
-	right := ui.TitleBar{Height: 32, Right: 138}
+	// there too. The buttons fill the header's height, as windowOptions asks,
+	// and the toolbar's controls centre on that same line.
+	right := ui.TitleBar{Height: headerHeight, Right: 138}
 
 	rt := ui.NewTester(a.view, 1180, 800)
 	rt.SetTitleBar(right)
@@ -754,6 +756,9 @@ func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
 	}
 	if aa.X+aa.W > 1180-right.Right {
 		t.Errorf("the reader's bar ends at x=%g, under the caption buttons (right %g)", aa.X+aa.W, right.Right)
+	}
+	if mid, want := aa.Y+aa.H/2, float32(headerHeight)/2; mid != want {
+		t.Errorf("the reader's settings sit at y=%g, off the caption buttons' line y=%g", mid, want)
 	}
 
 	rlt := ui.NewTester(lib.view, 900, 700)
@@ -779,5 +784,164 @@ func TestNoTitleBarKeepsTheViewMargins(t *testing.T) {
 	want := float32(9) // cluster padding + header padding
 	if got.X != want {
 		t.Errorf("the reader's bar starts at x=%g, want %g", got.X, want)
+	}
+}
+
+// The reading bar's first cluster is the three panels, as Books has them:
+// contents, bookmarks and notes. A click opens the panel over the page and a
+// second click on the same button puts it away.
+func TestReadingBarOpensThePanels(t *testing.T) {
+	a := newWindow(t)
+	tt := ui.NewTester(a.view, 1180, 800)
+	for _, label := range []string{"目录", "书签", "笔记"} {
+		if _, ok := tt.Find(label); !ok {
+			t.Fatalf("no %s button in the reading bar: %q", label, tt.Texts())
+		}
+	}
+
+	if err := tt.Click("书签"); err != nil {
+		t.Fatalf("bookmarks button: %v (%q)", err, tt.Texts())
+	}
+	if a.pan.Sidebar != appstate.SidebarBookmarks {
+		t.Fatalf("panel %q after clicking 书签", a.pan.Sidebar)
+	}
+	if !tt.HasText("还没有书签") {
+		t.Errorf("the bookmarks panel is not drawn: %q", tt.Texts())
+	}
+	if err := tt.Click("书签"); err != nil {
+		t.Fatalf("bookmarks button again: %v (%q)", err, tt.Texts())
+	}
+	if a.pan.Showing() {
+		t.Errorf("panel %q after a second click on 书签", a.pan.Sidebar)
+	}
+
+	if err := tt.Click("笔记"); err != nil {
+		t.Fatalf("notes button: %v (%q)", err, tt.Texts())
+	}
+	if a.pan.Sidebar != appstate.SidebarNotes || !tt.HasText("还没有笔记") {
+		t.Errorf("panel %q, texts %q after clicking 笔记", a.pan.Sidebar, tt.Texts())
+	}
+}
+
+// A panel floats over the page rather than narrowing it: the sheet keeps its
+// geometry while one is open, and the panel is drawn in the page's left margin.
+func TestPanelsFloatOverThePage(t *testing.T) {
+	a := newWindow(t)
+	tt := ui.NewTester(a.view, 1180, 800)
+	a.pan.Show(appstate.SidebarNone)
+	// The sheet takes a few frames to settle on its final measure, as the
+	// area's width is only known after the first one.
+	for range 4 {
+		tt.Frame()
+	}
+	before, ok := tt.Find("书页")
+	if !ok {
+		t.Fatalf("no page to measure: %q", tt.Texts())
+	}
+	if err := tt.Click("目录"); err != nil {
+		t.Fatalf("contents button: %v (%q)", err, tt.Texts())
+	}
+	after, ok := tt.Find("书页")
+	if !ok {
+		t.Fatalf("the page is gone while the panel is open: %q", tt.Texts())
+	}
+	if after != before {
+		t.Errorf("the page moved when the panel opened: %+v -> %+v", before, after)
+	}
+	// The panel's own header says how many chapters it lists; it is the one
+	// text that is only in the card, not in the window's bar.
+	count, ok := tt.Find(fmt.Sprintf("%d 章", len(a.pan.Toc.Entries)))
+	if !ok {
+		t.Fatalf("the contents did not build: %q", tt.Texts())
+	}
+	if count.X < panelMargin || count.X > before.X+panelWidth {
+		t.Errorf("the contents card starts at x=%g, not left of the page at x=%g", count.X, before.X)
+	}
+}
+
+// The page's left edge, and only the left, carries the way back to the library.
+// The chevron shows while the pointer rests over the margin, and it floats, so
+// nothing about the page moves as it appears.
+func TestTheLeftEdgeGoesBackToTheLibrary(t *testing.T) {
+	a := newWindow(t)
+	tt := ui.NewTester(a.view, 1180, 800)
+	for range 4 {
+		tt.Frame()
+	}
+	if _, ok := tt.Find("返回书库"); !ok {
+		t.Fatalf("no way back at the page's left edge: %q", tt.Texts())
+	}
+	if _, ok := tt.Find("下一页"); ok {
+		t.Errorf("the right edge still turns pages: %q", tt.Texts())
+	}
+	if _, ok := tt.Find("上一页"); ok {
+		t.Errorf("the left edge still turns pages: %q", tt.Texts())
+	}
+
+	before, ok := tt.Find("书页")
+	if !ok {
+		t.Fatalf("no page to measure: %q", tt.Texts())
+	}
+	tt.Move(8, 400)
+	tt.Frame()
+	after, ok := tt.Find("书页")
+	if !ok || after != before {
+		t.Errorf("the page moved when the chevron showed: %+v -> %+v", before, after)
+	}
+
+	tt.ClickAt(8, 400)
+	if a.book != nil {
+		t.Errorf("the book is still open after the left edge click")
+	}
+	if !tt.HasText("首页") {
+		t.Errorf("no library after the left edge click: %q", tt.Texts())
+	}
+}
+
+// A click on the sheet turns it, and a press that moves selects text instead:
+// the gesture is decided on release, so neither one has to claim a strip of the
+// text. The left half goes back and the right half on.
+func TestClickTurnsAndDragSelects(t *testing.T) {
+	a := newWindow(t)
+	tt := ui.NewTester(a.view, 1180, 800)
+	for range 4 {
+		tt.Frame()
+	}
+	body, ok := tt.Find("书页")
+	if !ok || a.layout.PageCount() < 3 {
+		t.Fatalf("no page to turn: %q", tt.Texts())
+	}
+
+	before := a.page
+	tt.ClickAt(body.X+body.W*3/4, body.Y+body.H/2)
+	if a.page <= before {
+		t.Errorf("a click on the right half left the page at %d, from %d", a.page, before)
+	}
+
+	on := a.page
+	tt.ClickAt(body.X+body.W/4, body.Y+body.H/2)
+	if a.page >= on {
+		t.Errorf("a click on the left half left the page at %d, from %d", a.page, on)
+	}
+
+	// A drag is a selection, not a turn, wherever it starts.
+	on = a.page
+	tt.Press(body.X+body.W*3/4, body.Y+80)
+	tt.Move(body.X+body.W*3/4, body.Y+160)
+	tt.Release(body.X+body.W*3/4, body.Y+160)
+	if a.page != on {
+		t.Errorf("a drag turned the page from %d to %d", on, a.page)
+	}
+	if len(a.selQuads) == 0 {
+		t.Error("the drag selected nothing")
+	}
+
+	// A hand may wobble during a click without meaning to select.
+	on = a.page
+	tt.Press(body.X+body.W*3/4, body.Y+220)
+	tt.Move(body.X+body.W*3/4+2, body.Y+220+2)
+	tt.Release(body.X+body.W*3/4+2, body.Y+220+2)
+	if a.page == on {
+		t.Errorf("a click with a 2 DIP wobble did not turn the page at %d", on)
 	}
 }

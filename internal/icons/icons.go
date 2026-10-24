@@ -69,10 +69,14 @@ var (
 	// ListBullet is the contents: a bulleted list, as Books draws its table
 	// of contents at the head of the reading bar.
 	ListBullet = stroke(`<circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/><path d="M8.5 6h11"/><path d="M8.5 12h11"/><path d="M8.5 18h11"/>`)
-	// BookMarkSquare is a book with a ribbon: Books' way back to the library.
-	BookMarkSquare = stroke(`<rect x="3" y="4" width="18" height="17" rx="4"/><path d="M14 4v6l2.5-1.6L19 10V4"/>`)
+	// BookMarkSquare is a book with a ribbon: the bookmarks panel at the head of
+	// the reading bar, as Books draws a bookmark hanging from the card's edge.
+	BookMarkSquare = stroke(`<rect x="3" y="4" width="18" height="17" rx="4"/><path d="M14 4v6.6l2.5-1.7 2.5 1.7V4z" fill="currentColor" stroke="none"/>`)
 	// ListSquare is a page of lines: the sidebar's outline of what is open.
 	ListSquare = stroke(`<rect x="3" y="4" width="18" height="17" rx="4"/><path d="M7 9h10"/><path d="M7 13h10"/><path d="M7 17h6"/>`)
+	// NoteCard is the notes: a card with a filled head above the lines the
+	// reader wrote, as Books draws the notes panel at the head of the bar.
+	NoteCard = stroke(`<rect x="3" y="4" width="18" height="17" rx="4"/><path d="M3 8V7.9A3.9 3.9 0 0 1 6.9 4h10.2A3.9 3.9 0 0 1 21 7.9V8z" fill="currentColor" stroke="none"/><path d="M7.5 12h9"/><path d="M7.5 15.5h9"/><path d="M7.5 19h5"/>`)
 	// Bookmark is the ribbon that marks a page.
 	Bookmark = stroke(`<path d="M6 4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17l-6-4-6 4z"/>`)
 	// SunHorizon is the appearance control in the display settings.

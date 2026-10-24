@@ -25,6 +25,7 @@ func TestIconsParse(t *testing.T) {
 		"Plus":         Plus,
 		"Close":        Close,
 		"Type":         Type,
+		"NoteCard":     NoteCard,
 	}
 	for name, icon := range all {
 		if icon == nil {

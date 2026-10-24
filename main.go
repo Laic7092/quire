@@ -91,13 +91,18 @@ type app struct {
 	area ui.Handle
 
 	// sel is the text the reader dragged over, and selQuads its rectangles for
-	// the current layout; selDragging marks a press that still selects, and
-	// selCopied how many runes the last copy took (0 for none). Only the UI
-	// thread touches them, and only the draw callback reads the rectangles.
+	// the current layout; selDragging marks a press that is still down,
+	// selMoved that it left its press far enough to select, and selCopied how
+	// many runes the last copy took (0 for none). pressX and pressY are where
+	// that press began, which a released click turns the page from. Only the
+	// UI thread touches them, and only the draw callback reads the rectangles.
 	sel         reader.Selection
 	selQuads    []render.SelectionQuad
 	selDragging bool
+	selMoved    bool
 	selCopied   int
+	pressX      float32
+	pressY      float32
 	// hitQuads holds the rectangles of each search hit, by hit index, for the
 	// match veils: empty until a search has results on this layout.
 	hitQuads [][]render.SelectionQuad
@@ -121,8 +126,6 @@ type app struct {
 	// the reading theme with a book open, the system's own with nothing open.
 	chrome reader.Palette
 
-	// sidebarW is the width of the open panel; the user may drag it.
-	sidebarW float32
 	// areaW is the width of the page area and boxW the width of the sheet as
 	// the last frame laid them out: how many pages fit on the sheet, and so how
 	// far a turn goes, follow them.
@@ -376,7 +379,7 @@ func (a *app) ensureLayout(w, h float32) {
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
 		a.loading = false
 		a.failed, a.failW, a.failH, a.failSize = true, w, h, opts.FontSize
-		a.status = "窗口太窄：关掉侧栏或把窗口拉宽一些"
+		a.status = "窗口太窄：把窗口拉宽一些"
 		return
 	}
 	if a.win == nil || a.book == nil || a.fonts == nil {
@@ -641,6 +644,10 @@ func windowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		MinHeight:     420,
 		StateKey:      "main",
 		TitleBarStyle: mygo.TitleBarHidden,
+		// The window controls fill the reader's own bar, so that their
+		// glyphs centre on the toolbar's: Windows centres them in this
+		// height, and Linux's GTK buttons do too.
+		TitleBarHeight: headerHeight,
 		// The desk the first frame lands on, so the window does not flash
 		// white before the view paints (the system palette's two desks).
 		BackgroundColor: "light-dark(#f1f1f1, #4a4a4d)",
@@ -747,7 +754,7 @@ func (a *app) menuBar() *mygo.Menu {
 			copySelection,
 		}},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
-			{Label: "侧栏", Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
+			{Label: "书库侧栏", Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
 			{Label: "按书名排序", Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.menuAction(func() { a.sortByTitle = !a.sortByTitle })
 			}},
@@ -853,13 +860,11 @@ func main() {
 		}
 	}
 	a.syncSettingsFields()
-	if a.pan.SidebarWidth > 0 {
-		a.sidebarW = a.pan.SidebarWidth
-	}
-	// A remembered table of contents or search panel has nothing to show
-	// before a book is open: start on the shelf instead.
-	if a.startPath == "" && a.pan.Showing() && a.pan.Sidebar != appstate.SidebarShelf {
-		a.pan.Show(appstate.SidebarShelf)
+	// The reader floats its panels over the page, so a panel remembered from
+	// the previous session waits for the book that would show it; the library
+	// has its own source list and never floats one.
+	if a.startPath == "" && a.pan.Showing() {
+		a.pan.Show(appstate.SidebarNone)
 	}
 	if *shelfFlag != "" {
 		a.pan.SetLibraryDir(*shelfFlag)

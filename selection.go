@@ -11,10 +11,14 @@ import (
 	"github.com/laix/layx/render/paint"
 )
 
-// handlePageInput turns a press and drag across the sheet into a text
-// selection. The page box takes the pointer when it is pressed, so its moves
-// and its release come here wherever the pointer goes; a drag past the edge of
-// the sheet clamps to the page being shown, which is all the reader can mark.
+// handlePageInput turns presses on the sheet into the reader's two pointer
+// gestures: a click turns the page, and a press that moves selects text. The
+// gesture is decided on release, by whether the pointer left its press, so the
+// turn does not have to claim a strip of the text where a drag may begin.
+//
+// The page box takes the pointer when it is pressed, so its moves and its
+// release come here wherever the pointer goes; a drag past the edge of the
+// sheet clamps to the page being shown, which is all the reader can mark.
 //
 // It runs on the UI thread, between frames, so it recomputes the selection's
 // rectangles here and the draw callback only fills what it is given.
@@ -33,11 +37,16 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.sel.Start(loc)
 		a.selQuads = a.sel.Quads(a.layout)
 		a.selCopied = 0
+		a.pressX, a.pressY = ev.X, ev.Y
+		a.selMoved = false
 		a.selDragging = true
 		return true
 	case ui.InputPointerMove:
 		if !a.selDragging || a.layout == nil {
 			return false
+		}
+		if dx, dy := ev.X-a.pressX, ev.Y-a.pressY; dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
+			a.selMoved = true
 		}
 		loc, ok := a.pageLocation(ev.X, ev.Y)
 		if !ok || loc == a.sel.Focus() {
@@ -52,9 +61,33 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return false
 		}
 		a.selDragging = false
+		// A release that did not leave its press is a click, and a click turns
+		// the page: inside the window a pointer may wobble a little without
+		// meaning to select anything.
+		if !a.selMoved {
+			a.turn(a.turnAt(a.pressX))
+		}
 		return true
 	}
 	return false
+}
+
+// clickSlop is how far a pointer may wobble during a click, in DIPs, before the
+// press counts as a drag that selects.
+const clickSlop = 4
+
+// turnAt maps a click at x, in the sheet's own coordinates, to a page turn: the
+// left half of the sheet goes back and the right half on, as clicking the two
+// pages of an open book does. A click reads no text, so it may anywhere on the
+// sheet; dragging is what keeps the text for a selection.
+func (a *app) turnAt(x float32) int {
+	switch {
+	case a.boxW <= 0:
+		return 0
+	case x < a.boxW/2:
+		return -1
+	}
+	return 1
 }
 
 // pageLocation maps a point in the sheet's own coordinates, as the draw callback
@@ -86,6 +119,7 @@ func (a *app) clearSelection() {
 	a.sel.Clear()
 	a.selQuads = nil
 	a.selDragging = false
+	a.selMoved = false
 	a.selCopied = 0
 }
 

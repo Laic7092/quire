@@ -11,7 +11,7 @@ import (
 // indent is how far one level indents a row, in DIPs.
 const indent = 14
 
-// Panel draws the table of contents as a sidebar: one row per chapter, indented
+// Panel draws the table of contents: one row per chapter, indented
 // by level, with the page the chapter starts on and the chapter being read
 // marked.
 //

@@ -90,15 +90,11 @@ func TestViewShowsALaidOutPage(t *testing.T) {
 	}
 
 	if layout.PageCount() > 1 {
-		if err := tt.Click("下一页"); err != nil {
-			t.Fatal(err)
-		}
+		tt.Key(0, ui.KeyRight)
 		if !tt.HasText("2 of " + pages) {
 			t.Errorf("page did not turn: %q", tt.Texts())
 		}
-		if err := tt.Click("上一页"); err != nil {
-			t.Fatal(err)
-		}
+		tt.Key(0, ui.KeyLeft)
 		if !tt.HasText("1 of " + pages) {
 			t.Errorf("page did not turn back: %q", tt.Texts())
 		}
@@ -180,13 +176,14 @@ func TestSidePanelsBuildAndJump(t *testing.T) {
 	a.pan.Refresh(bk, layout, 0)
 
 	tt := ui.NewTester(a.view, 1200, 800)
-	if err := tt.Click("侧栏"); err != nil {
-		t.Fatalf("sidebar button: %v (%q)", err, tt.Texts())
+	if err := tt.Click("目录"); err != nil {
+		t.Fatalf("contents button: %v (%q)", err, tt.Texts())
 	}
 	if a.pan.Sidebar != appstate.SidebarToc {
-		t.Fatalf("sidebar %q after clicking 侧栏", a.pan.Sidebar)
+		t.Fatalf("panel %q after clicking 目录", a.pan.Sidebar)
 	}
-	// The reader still draws its page next to the panel.
+	// The reader still draws its page, which the floating panel lies over
+	// rather than sharing the width with.
 	if !tt.HasText(a.chapterLabel()) {
 		t.Errorf("chapter label missing: %q", tt.Texts())
 	}
@@ -233,7 +230,7 @@ func TestMenuBarCommands(t *testing.T) {
 	if open == nil || open.Accelerator != "CmdOrCtrl+O" {
 		t.Fatalf("no Open command in the File menu: %+v", files.Submenu)
 	}
-	for _, label := range []string{"侧栏", "目录", "搜索", "显示设置…"} {
+	for _, label := range []string{"书库侧栏", "目录", "搜索", "显示设置…"} {
 		if findMenuItem(views.Submenu, label) == nil {
 			t.Errorf("the View menu has no %s", label)
 		}
@@ -262,6 +259,16 @@ func TestWindowHidesTheSystemTitleBarEverywhere(t *testing.T) {
 	o := windowOptions(func(*ui.Context) {})
 	if o.TitleBarStyle != mygo.TitleBarHidden {
 		t.Errorf("TitleBarStyle = %v, want TitleBarHidden on every platform", o.TitleBarStyle)
+	}
+}
+
+// The system's window buttons share the reader's bar, so that their glyphs sit
+// on the same line as the toolbar's: Windows and Linux centre them in
+// TitleBarHeight, and a 32 DIP one would ride above the 46 DIP header.
+func TestWindowControlsCentreOnTheHeader(t *testing.T) {
+	o := windowOptions(func(*ui.Context) {})
+	if o.TitleBarHeight != headerHeight {
+		t.Errorf("TitleBarHeight = %d, want the header's %d", o.TitleBarHeight, headerHeight)
 	}
 }
 

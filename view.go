@@ -32,7 +32,12 @@ const (
 	toolbarHeight = 26
 	toolbarCell   = 27
 
-	defaultSidebarWidth = 260
+	// The reading panels float over the page in a card at the left, as Books
+	// floats its table of contents: they take their width from the page's
+	// margin, never from the text, so opening one does not reflow the book.
+	panelWidth  = 300
+	panelMargin = 12
+	panelTop    = 8
 
 	// The library's rows are a Mac source list's, so they keep their size
 	// whatever the window: a 26 DIP pitch, a 24 DIP pill and a 13 DIP label.
@@ -129,23 +134,13 @@ func (a *app) view(c *ui.Context) {
 			return
 		}
 		a.header(c, t)
-		if a.pan != nil && a.pan.Showing() {
-			// A split needs a width before its first frame; 0 would give the
-			// panel no room to lay out in.
-			if a.sidebarW <= 0 {
-				a.sidebarW = defaultSidebarWidth
-			}
-			split := ui.Split(c, &a.sidebarW, func() {
-				a.pan.View(c)
-			}, func() {
-				a.reader(c, t)
-			}).Grow(1).FillWidth()
-			if split.Changed() {
-				a.pan.SaveSidebarWidth(a.sidebarW)
-			}
-			return
-		}
-		a.reader(c, t)
+		// The page and the floating panels share one box: the panels are
+		// absolute, so they lie over the reading area instead of taking room
+		// from it, and the book keeps its measure while one is open.
+		ui.Box(c).Grow(1).MinWidth(0).FillWidth().Children(func() {
+			a.reader(c, t)
+			a.panels(c)
+		})
 	})
 }
 
@@ -240,11 +235,9 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 		Padding(0, 8+bar.Right, 0, 8+bar.Left).AlignItems(ui.Center).DragWindow().
 		Children(func() {
 			a.toolbarCluster(c, func() {
-				a.toolbarButton(c, icons.ListBullet, "目录", "目录 (⌘T)", func() {
-					a.pan.Show(appstate.SidebarToc)
-				})
-				a.toolbarButton(c, icons.BookMarkSquare, "书库", "回到书库 (Esc)", a.closeBook)
-				a.toolbarButton(c, icons.ListSquare, "侧栏", "侧栏 (⌘B)", a.toggleSidebar)
+				a.panelButton(c, appstate.SidebarToc, icons.ListBullet, "目录", "查看目录 (⌘T)")
+				a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, "书签", "查看书签")
+				a.panelButton(c, appstate.SidebarNotes, icons.NoteCard, "笔记", "查看笔记")
 			})
 
 			// The book's name is centred in the window itself, not in the room
@@ -268,17 +261,35 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 				}
 				a.settingsPanel(c, aa)
 				a.toolbarButton(c, icons.Search, "搜索", "在书里搜索 (⌘F)", func() {
-					a.pan.Show(appstate.SidebarSearch)
+					a.togglePanel(appstate.SidebarSearch)
 				})
 			})
 			ui.Box(c).Width(13)
 			b := ui.Box(c).Width(27).Height(27).Radius(13.5).Center().
 				Background(reader.UIColor(pal.Toolbar)).Cursor(ui.CursorPointer).
-				Label("书签").Tooltip("添加书签")
+				Label("添加书签").Tooltip("添加书签")
 			b.Children(func() {
 				ui.Icon(c, icons.Bookmark).Size(15, 15).TextColor(reader.UIColor(pal.OnToolbar))
 			})
 		})
+}
+
+// panels floats the open reading panel over the page at the left, in a card
+// inset from the page's edges, as Books floats its table of contents. It is
+// absolute in the page's box, so the page keeps every DIP of its measure while
+// the panel is open: opening one never reflows the book.
+func (a *app) panels(c *ui.Context) {
+	if a.pan == nil || !a.pan.Showing() {
+		return
+	}
+	pal := a.chrome
+	card := ui.Box(c).Absolute().Left(panelMargin).Top(panelTop).Bottom(panelMargin).
+		Width(panelWidth).Radius(14).Background(reader.UIColor(pal.Popover)).
+		Border(1, reader.UIColor(pal.Line)).Clip().
+		Shadow(0, 12, 32, 0, ui.RGBA(0, 0, 0, 0.24)).Label(a.pan.Title())
+	card.Children(func() {
+		a.pan.View(c)
+	})
 }
 
 // toolbarCluster is the capsule that groups the title bar's glyphs, as Books
@@ -291,7 +302,7 @@ func (a *app) toolbarCluster(c *ui.Context, build func()) {
 
 // toolbarButton is one glyph cell inside a cluster: 16 DIPs of ink with a soft
 // wash under the pointer.
-func (a *app) toolbarButton(c *ui.Context, icon *ui.SVG, label, tip string, onClick func()) {
+func (a *app) toolbarButton(c *ui.Context, icon *ui.SVG, label, tip string, onClick func()) ui.Element {
 	pal := a.chrome
 	b := ui.Box(c).Width(toolbarCell).Height(toolbarHeight - 2).Radius(7).Center().
 		Cursor(ui.CursorPointer).Label(label).KeepFocus().Tooltip(tip)
@@ -304,6 +315,19 @@ func (a *app) toolbarButton(c *ui.Context, icon *ui.SVG, label, tip string, onCl
 	b.Children(func() {
 		ui.Icon(c, icon).Size(16, 16).TextColor(reader.UIColor(pal.OnToolbar))
 	})
+	return b
+}
+
+// panelButton is one of the three panel controls at the head of the reading
+// bar: a glyph that floats its panel over the page, and closes it again when
+// the panel is already the open one. The chosen cell keeps a wash, so the panel
+// on screen is the one that reads as pressed.
+func (a *app) panelButton(c *ui.Context, side string, icon *ui.SVG, label, tip string) {
+	b := a.toolbarButton(c, icon, label, tip, nil)
+	b.OnClick(func() { a.togglePanel(side) })
+	if a.pan != nil && a.pan.Sidebar == side {
+		b.Background(reader.UIColor(a.chrome.Pressed))
+	}
 }
 
 // toolbarTextButton is toolbarButton for a control that is its own label, as
@@ -861,12 +885,7 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Grow(1).MinWidth(0).FillHeight().Background(paper()).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
-			if a.canTurn(-1) {
-				a.edge(c, t, -1)
-			}
-			if a.canTurn(1) {
-				a.edge(c, t, 1)
-			}
+			a.backEdge(c, t)
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
 			box := ui.Box(c).FillWidth().MaxWidth(wide).FillHeight().
 				Bind(&a.body).Label("书页").Focusable().
@@ -1011,28 +1030,23 @@ func (a *app) chapterPagesLeft() string {
 	return fmt.Sprintf("%d pages left in chapter", left)
 }
 
-// edge is the strip at the side of the page that turns it: a chevron that shows
-// while the pointer rests there.
-func (a *app) edge(c *ui.Context, t *ui.Theme, delta int) {
-	box := ui.Box(c).Absolute().Top(0).Bottom(0).Width(edgeWidth).Center().
-		Radius(6).Cursor(ui.CursorPointer)
-	switch {
-	case box.Hovered():
-		box.Background(t.SurfaceHover)
-	}
-	icon := icons.ChevronRight
-	label := "下一页"
-	if delta < 0 {
-		box.Left(9)
-		icon = icons.ChevronLeft
-		label = "上一页"
-	} else {
-		box.Right(-9)
-	}
-	box.Label(label)
-	box.OnClick(func() { a.turn(delta) })
-	box.Children(func() {
-		ui.Icon(c, icon).Size(15, 15).TextColor(t.TextMuted)
+// backEdge is the way back to the library at the page's left edge: a chevron
+// that appears while the pointer rests over the margin, as Books shows its page
+// arrows, and floats over the page so the book keeps its measure. It is the only
+// edge control: turning on is the keyboard's and the folio's job.
+func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
+	strip := ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(edgeWidth).Center().
+		Cursor(ui.CursorPointer).Label("返回书库").Tooltip("回到书库 (Esc)")
+	strip.OnClick(a.closeBook)
+	strip.Children(func() {
+		if !strip.Hovered() {
+			return
+		}
+		button := ui.Box(c).Width(26).Height(26).Radius(13).Center().
+			Background(t.SurfaceHover)
+		button.Children(func() {
+			ui.Icon(c, icons.ChevronLeft).Size(15, 15).TextColor(t.TextMuted)
+		})
 	})
 }
 
@@ -1070,19 +1084,23 @@ func (a *app) closeBook() {
 	}
 }
 
-// toggleSidebar closes the open panel, or shows the one the window has to offer
-// with what is in front of it.
+// toggleSidebar hides or shows the library's source list. The reader floats its
+// panels over the page instead of narrowing it, so it has no sidebar to toggle.
 func (a *app) toggleSidebar() {
 	if a.book == nil {
 		a.libSideOff = !a.libSideOff
-		return
 	}
+}
+
+// togglePanel opens side over the page, or closes it when it is already the
+// open panel, so a second click on the same toolbar button puts the panel away.
+func (a *app) togglePanel(side string) {
 	if a.pan == nil {
 		return
 	}
-	if a.pan.Showing() {
+	if a.pan.Sidebar == side {
 		a.pan.Show(appstate.SidebarNone)
 		return
 	}
-	a.pan.Show(appstate.SidebarToc)
+	a.pan.Show(side)
 }

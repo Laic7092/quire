@@ -1,5 +1,6 @@
-// Package appstate wires the reader's side panels — shelf, table of contents
-// and full-text search — to the persisted state, so main.go stays a thin shell:
+// Package appstate wires the reader's floating panels — table of contents,
+// bookmarks, notes and full-text search — to the persisted state, so main.go
+// stays a thin shell:
 // it owns the window, the render document and the painter, and calls Refresh
 // whenever one of those changes.
 //
@@ -25,12 +26,13 @@ import (
 )
 
 // Sidebar identifiers, also what Prefs.Sidebar stores. SidebarNone closes the
-// panel.
+// panel. The reader floats the open one over the page; it never narrows it.
 const (
-	SidebarNone   = ""
-	SidebarShelf  = "shelf"
-	SidebarToc    = "toc"
-	SidebarSearch = "search"
+	SidebarNone      = ""
+	SidebarToc       = "toc"
+	SidebarBookmarks = "bookmarks"
+	SidebarNotes     = "notes"
+	SidebarSearch    = "search"
 )
 
 // App is the panel layer's state. Build it with New, then let the host fill the
@@ -68,11 +70,6 @@ type App struct {
 	// caches the bitmaps; the panel never decodes one per frame.
 	Cover func(entry library.Entry) *ui.Bitmap
 
-	// SidebarWidth is the width the user dragged the sidebar to, in DIPs.
-	// The host keeps it in a ui.Split and calls SaveSidebarWidth when it
-	// changes.
-	SidebarWidth float32
-
 	layout   *render.Layout
 	page     int
 	searchID int
@@ -87,7 +84,6 @@ func New(st *store.Store) *App {
 
 	if st != nil {
 		prefs := st.State().Prefs
-		a.SidebarWidth = prefs.SidebarWidth
 		if prefs.SidebarOpen {
 			a.Sidebar = normalizeSidebar(prefs.Sidebar)
 		}
@@ -147,19 +143,6 @@ func (a *App) ReloadShelf() {
 			a.Shelf.Status = fmt.Sprintf("%d 本", len(entries))
 		}
 	})
-}
-
-// SaveSidebarWidth remembers the width the user dragged the sidebar to.
-func (a *App) SaveSidebarWidth(w float32) {
-	if w <= 0 || w == a.SidebarWidth {
-		return
-	}
-	a.SidebarWidth = w
-	if a.Store == nil {
-		return
-	}
-	a.Store.Update(func(s *store.State) { s.Prefs.SidebarWidth = w })
-	a.Store.SaveSoon(0)
 }
 
 // Refresh republishes the panels for a new layout, book or page. Hosts call it
@@ -338,10 +321,11 @@ func (a *App) async(work func() func()) {
 }
 
 // normalizeSidebar drops an unknown stored value, so a hand-edited state file
-// cannot leave the window with an unnamed panel.
+// cannot leave the window with an unnamed panel. "shelf" was the library panel
+// of an older version, which the reader no longer floats.
 func normalizeSidebar(side string) string {
 	switch side {
-	case SidebarShelf, SidebarToc, SidebarSearch:
+	case SidebarToc, SidebarBookmarks, SidebarNotes, SidebarSearch:
 		return side
 	}
 	return SidebarNone
