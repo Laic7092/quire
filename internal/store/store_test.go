@@ -423,6 +423,42 @@ func TestTouchBookAndRecent(t *testing.T) {
 	}
 }
 
+// A book whose file changed has a new key but the same path: it keeps one row
+// and its reading state follows, so a re-download does not strand a position or
+// leave a ghost book on the shelf.
+func TestTouchBookFollowsAReplacedFile(t *testing.T) {
+	s, _ := openTemp(t)
+	s.TouchBook(Book{Key: "old", Path: "/books/a.epub", Title: "A"})
+	s.SetPosition("old", Position{Chapter: 3, Progress: 0.4})
+	s.AddBookmark("old", Bookmark{Label: "here"})
+	s.AddNote("old", Note{Text: "passage", Comment: "note"})
+
+	s.TouchBook(Book{Key: "new", Path: "/books/a.epub", Title: "A, second edition"})
+
+	books := s.State().Books
+	if len(books) != 1 {
+		t.Fatalf("books = %d, want the replaced file to keep one row", len(books))
+	}
+	if books[0].Key != "new" || books[0].Title != "A, second edition" {
+		t.Errorf("row = %+v, want the new revision", books[0])
+	}
+	if _, ok := s.Position("old"); ok {
+		t.Error("the old key still holds a position")
+	}
+	if _, ok := s.Position("new"); !ok {
+		t.Error("the position did not follow the file")
+	}
+	if got := s.BookmarksOf("new"); len(got) != 1 || got[0].Label != "here" {
+		t.Errorf("bookmarks = %+v, want them under the new key", got)
+	}
+	if got := s.NotesOf("new"); len(got) != 1 || got[0].Comment != "note" {
+		t.Errorf("notes = %+v, want them under the new key", got)
+	}
+	if got := s.State().LastOpen; got != "new" {
+		t.Errorf("LastOpen = %q, want new", got)
+	}
+}
+
 func TestPositionGetSet(t *testing.T) {
 	s, _ := openTemp(t)
 	if _, ok := s.Position("missing"); ok {

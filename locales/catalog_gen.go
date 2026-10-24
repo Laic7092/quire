@@ -260,16 +260,16 @@ func (msgs Messages) OpenFailed(error string) string {
 	return Catalog.Format(msgs.locale, "openFailed", map[string]any{"error": error})
 }
 
-// ChooseFolderTitle says "Choose Library Folder"
+// ChooseFolderTitle says "Import a Folder of Books"
 // in the language the app shows.
 //
-// The title of the dialog that picks the folder of books.
+// The title of the dialog that picks a folder of books to import.
 func ChooseFolderTitle() string { return In(i18n.Locale()).ChooseFolderTitle() }
 
-// ChooseFolderTitle says "Choose Library Folder"
+// ChooseFolderTitle says "Import a Folder of Books"
 // in the language of msgs.
 //
-// The title of the dialog that picks the folder of books.
+// The title of the dialog that picks a folder of books to import.
 func (msgs Messages) ChooseFolderTitle() string {
 	return Catalog.Format(msgs.locale, "chooseFolderTitle", nil)
 }
@@ -956,16 +956,16 @@ func (msgs Messages) SidebarHome() string {
 	return Catalog.Format(msgs.locale, "sidebarHome", nil)
 }
 
-// SidebarShelfFolder says "Shelf Folder"
+// SidebarShelfFolder says "Import Folder"
 // in the language the app shows.
 //
-// The source list row that picks the folder of books.
+// The source list row that imports a folder of books onto the shelf.
 func SidebarShelfFolder() string { return In(i18n.Locale()).SidebarShelfFolder() }
 
-// SidebarShelfFolder says "Shelf Folder"
+// SidebarShelfFolder says "Import Folder"
 // in the language of msgs.
 //
-// The source list row that picks the folder of books.
+// The source list row that imports a folder of books onto the shelf.
 func (msgs Messages) SidebarShelfFolder() string {
 	return Catalog.Format(msgs.locale, "sidebarShelfFolder", nil)
 }
@@ -1186,13 +1186,13 @@ func (msgs Messages) HomeEmptyTitle() string {
 	return Catalog.Format(msgs.locale, "homeEmptyTitle", nil)
 }
 
-// HomeEmptyHint says "Put EPUB or TXT files in the shelf folder, or open one."
+// HomeEmptyHint says "Open an EPUB or TXT book: it lands on your shelf."
 // in the language the app shows.
 //
 // What to do when the home page has no books.
 func HomeEmptyHint() string { return In(i18n.Locale()).HomeEmptyHint() }
 
-// HomeEmptyHint says "Put EPUB or TXT files in the shelf folder, or open one."
+// HomeEmptyHint says "Open an EPUB or TXT book: it lands on your shelf."
 // in the language of msgs.
 //
 // What to do when the home page has no books.
@@ -1200,16 +1200,16 @@ func (msgs Messages) HomeEmptyHint() string {
 	return Catalog.Format(msgs.locale, "homeEmptyHint", nil)
 }
 
-// ChooseFolder says "Choose Folder"
+// ChooseFolder says "Import Folder"
 // in the language the app shows.
 //
-// The button that picks the folder of books.
+// The button that imports a folder of books onto the shelf.
 func ChooseFolder() string { return In(i18n.Locale()).ChooseFolder() }
 
-// ChooseFolder says "Choose Folder"
+// ChooseFolder says "Import Folder"
 // in the language of msgs.
 //
-// The button that picks the folder of books.
+// The button that imports a folder of books onto the shelf.
 func (msgs Messages) ChooseFolder() string {
 	return Catalog.Format(msgs.locale, "chooseFolder", nil)
 }
@@ -1528,13 +1528,13 @@ func (msgs Messages) ShareRecordText(books int, goal int, days int, goalDays int
 	return Catalog.Format(msgs.locale, "shareRecordText", map[string]any{"books": books, "goal": goal, "days": days, "goalDays": goalDays, "total": total, "streak": streak})
 }
 
-// LibraryEmptyLine says "Open an EPUB or TXT, or choose a folder of books"
+// LibraryEmptyLine says "Open an EPUB or TXT: it lands on your shelf"
 // in the language the app shows.
 //
 // The caption under the home page's title while the library holds no book.
 func LibraryEmptyLine() string { return In(i18n.Locale()).LibraryEmptyLine() }
 
-// LibraryEmptyLine says "Open an EPUB or TXT, or choose a folder of books"
+// LibraryEmptyLine says "Open an EPUB or TXT: it lands on your shelf"
 // in the language of msgs.
 //
 // The caption under the home page's title while the library holds no book.
@@ -1554,24 +1554,6 @@ func LibraryCount(count int) string { return In(i18n.Locale()).LibraryCount(coun
 // The caption under the home page's title: how many books it holds.
 func (msgs Messages) LibraryCount(count int) string {
 	return Catalog.Format(msgs.locale, "libraryCount", map[string]any{"count": count})
-}
-
-// LibraryCountDir says "{count, plural, one {# book} other {# books}} · {dir}"
-// in the language the app shows.
-//
-// The caption under the home page's title: how many books it holds, and
-// where they come from.
-func LibraryCountDir(count int, dir string) string {
-	return In(i18n.Locale()).LibraryCountDir(count, dir)
-}
-
-// LibraryCountDir says "{count, plural, one {# book} other {# books}} · {dir}"
-// in the language of msgs.
-//
-// The caption under the home page's title: how many books it holds, and
-// where they come from.
-func (msgs Messages) LibraryCountDir(count int, dir string) string {
-	return Catalog.Format(msgs.locale, "libraryCountDir", map[string]any{"count": count, "dir": dir})
 }
 
 // LayingOut says "Laying out…"
@@ -1791,99 +1773,71 @@ func (msgs Messages) ShelfSearchLabel() string {
 // ShelfRefresh says "Refresh Shelf"
 // in the language the app shows.
 //
-// The accessibility label of the shelf panel's button that rescans the
-// folder.
+// The accessibility label of the shelf panel's button that lists the shelf
+// again.
 func ShelfRefresh() string { return In(i18n.Locale()).ShelfRefresh() }
 
 // ShelfRefresh says "Refresh Shelf"
 // in the language of msgs.
 //
-// The accessibility label of the shelf panel's button that rescans the
-// folder.
+// The accessibility label of the shelf panel's button that lists the shelf
+// again.
 func (msgs Messages) ShelfRefresh() string {
 	return Catalog.Format(msgs.locale, "shelfRefresh", nil)
 }
 
-// ShelfRefreshTip says "Rescan the folder"
+// ShelfRefreshTip says "Reload the shelf"
 // in the language the app shows.
 //
-// The tooltip of the shelf panel's button that rescans the folder.
+// The tooltip of the shelf panel's button that lists the shelf again.
 func ShelfRefreshTip() string { return In(i18n.Locale()).ShelfRefreshTip() }
 
-// ShelfRefreshTip says "Rescan the folder"
+// ShelfRefreshTip says "Reload the shelf"
 // in the language of msgs.
 //
-// The tooltip of the shelf panel's button that rescans the folder.
+// The tooltip of the shelf panel's button that lists the shelf again.
 func (msgs Messages) ShelfRefreshTip() string {
 	return Catalog.Format(msgs.locale, "shelfRefreshTip", nil)
 }
 
-// ShelfChooseFolderTip says "Use another library folder"
+// ShelfChooseFolderTip says "Import a folder of books"
 // in the language the app shows.
 //
-// The tooltip of the shelf panel's button that picks another folder.
+// The tooltip of the shelf panel's button that imports a folder of books.
 func ShelfChooseFolderTip() string { return In(i18n.Locale()).ShelfChooseFolderTip() }
 
-// ShelfChooseFolderTip says "Use another library folder"
+// ShelfChooseFolderTip says "Import a folder of books"
 // in the language of msgs.
 //
-// The tooltip of the shelf panel's button that picks another folder.
+// The tooltip of the shelf panel's button that imports a folder of books.
 func (msgs Messages) ShelfChooseFolderTip() string {
 	return Catalog.Format(msgs.locale, "shelfChooseFolderTip", nil)
 }
 
-// ShelfNoFolder says "No library folder yet"
+// ShelfEmpty says "No books on the shelf yet"
 // in the language the app shows.
 //
-// The shelf panel's message while no folder is chosen.
-func ShelfNoFolder() string { return In(i18n.Locale()).ShelfNoFolder() }
-
-// ShelfNoFolder says "No library folder yet"
-// in the language of msgs.
-//
-// The shelf panel's message while no folder is chosen.
-func (msgs Messages) ShelfNoFolder() string {
-	return Catalog.Format(msgs.locale, "shelfNoFolder", nil)
-}
-
-// ShelfNoFolderHint says "Use the folder button above to pick a folder of EPUB / TXT files"
-// in the language the app shows.
-//
-// What to do when the shelf has no folder.
-func ShelfNoFolderHint() string { return In(i18n.Locale()).ShelfNoFolderHint() }
-
-// ShelfNoFolderHint says "Use the folder button above to pick a folder of EPUB / TXT files"
-// in the language of msgs.
-//
-// What to do when the shelf has no folder.
-func (msgs Messages) ShelfNoFolderHint() string {
-	return Catalog.Format(msgs.locale, "shelfNoFolderHint", nil)
-}
-
-// ShelfEmpty says "No books in this folder"
-// in the language the app shows.
-//
-// The shelf panel's message while the folder holds no book.
+// The shelf panel's message while it holds no book.
 func ShelfEmpty() string { return In(i18n.Locale()).ShelfEmpty() }
 
-// ShelfEmpty says "No books in this folder"
+// ShelfEmpty says "No books on the shelf yet"
 // in the language of msgs.
 //
-// The shelf panel's message while the folder holds no book.
+// The shelf panel's message while it holds no book.
 func (msgs Messages) ShelfEmpty() string {
 	return Catalog.Format(msgs.locale, "shelfEmpty", nil)
 }
 
-// ShelfEmptyHint says "Only .epub and .txt files in this folder are listed"
+// ShelfEmptyHint says "Open a book, or import a folder of EPUB / TXT files"
 // in the language the app shows.
 //
-// What the shelf scans when the folder holds no book.
+// What to do when the shelf holds no book.
 func ShelfEmptyHint() string { return In(i18n.Locale()).ShelfEmptyHint() }
 
-// ShelfEmptyHint says "Only .epub and .txt files in this folder are listed"
+// ShelfEmptyHint says "Open a book, or import a folder of EPUB / TXT files"
 // in the language of msgs.
 //
-// What the shelf scans when the folder holds no book.
+// What to do when the shelf holds no book.
 func (msgs Messages) ShelfEmptyHint() string {
 	return Catalog.Format(msgs.locale, "shelfEmptyHint", nil)
 }
@@ -2282,30 +2236,16 @@ func (msgs Messages) EmptyPanel() string {
 	return Catalog.Format(msgs.locale, "emptyPanel", nil)
 }
 
-// ShelfChooseFolderFirst says "Choose a library folder first"
-// in the language the app shows.
-//
-// The shelf's status line before a folder is chosen.
-func ShelfChooseFolderFirst() string { return In(i18n.Locale()).ShelfChooseFolderFirst() }
-
-// ShelfChooseFolderFirst says "Choose a library folder first"
-// in the language of msgs.
-//
-// The shelf's status line before a folder is chosen.
-func (msgs Messages) ShelfChooseFolderFirst() string {
-	return Catalog.Format(msgs.locale, "shelfChooseFolderFirst", nil)
-}
-
 // ShelfScanning says "Scanning…"
 // in the language the app shows.
 //
-// The shelf's status line while it scans the folder.
+// The shelf's status line while it lists the books.
 func ShelfScanning() string { return In(i18n.Locale()).ShelfScanning() }
 
 // ShelfScanning says "Scanning…"
 // in the language of msgs.
 //
-// The shelf's status line while it scans the folder.
+// The shelf's status line while it lists the books.
 func (msgs Messages) ShelfScanning() string {
 	return Catalog.Format(msgs.locale, "shelfScanning", nil)
 }

@@ -330,7 +330,10 @@ func Key(path string, size int64, modified time.Time) string {
 }
 
 // TouchBook upserts b by Key and stamps LastOpened (and Added on first insert).
-// It also makes b the LastOpen book.
+// It also makes b the LastOpen book. A book whose file was edited or
+// re-downloaded has a new Key but the same path, and keeps its shelf row: the
+// old revision is replaced, its Added time kept, and its position, bookmarks
+// and notes move to the new key rather than being stranded under the old one.
 func (s *Store) TouchBook(b Book) {
 	now := time.Now()
 	s.Update(func(st *State) {
@@ -349,9 +352,59 @@ func (s *Store) TouchBook(b Book) {
 			st.LastOpen = b.Key
 			return
 		}
+		if i := samePathBook(st.Books, b.Path); i >= 0 {
+			old := st.Books[i]
+			if !old.Added.IsZero() {
+				b.Added = old.Added
+			}
+			st.Books[i] = b
+			moveReading(st, old.Key, b.Key)
+			st.LastOpen = b.Key
+			return
+		}
 		st.Books = append(st.Books, b)
 		st.LastOpen = b.Key
 	})
+}
+
+// samePathBook returns the index of the book that names path, or -1. Paths are
+// compared cleaned and absolute, so the same file opened through two spellings
+// is one book.
+func samePathBook(books []Book, path string) int {
+	want := cleanPath(path)
+	for i := range books {
+		if cleanPath(books[i].Path) == want {
+			return i
+		}
+	}
+	return -1
+}
+
+func cleanPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
+}
+
+// moveReading carries what the reader recorded about one revision of a file to
+// the next one. It runs inside Update, with the store lock already held.
+func moveReading(st *State, from, to string) {
+	if from == "" || to == "" || from == to {
+		return
+	}
+	if p, ok := st.Positions[from]; ok {
+		st.Positions[to] = p
+		delete(st.Positions, from)
+	}
+	if rows, ok := st.Bookmarks[from]; ok {
+		st.Bookmarks[to] = rows
+		delete(st.Bookmarks, from)
+	}
+	if rows, ok := st.Notes[from]; ok {
+		st.Notes[to] = rows
+		delete(st.Notes, from)
+	}
 }
 
 // Recent returns the shelf ordered by LastOpened, newest first. n <= 0 returns

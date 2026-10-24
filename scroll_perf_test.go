@@ -41,8 +41,9 @@ func benchScrollApp(b testing.TB) *app {
 	reader.SetPalette(reader.Quiet)
 	b.Cleanup(func() { reader.SetPalette(reader.Quiet) })
 
-	lib := &library.Library{Dir: "internal/book/testdata/samples"}
-	if err := lib.Reload(); err != nil {
+	lib := &library.Library{}
+	lib.Entries, err = library.Scan("internal/book/testdata/samples")
+	if err != nil {
 		b.Fatal(err)
 	}
 	up := reader.NewUIPainter(nil, fonts)

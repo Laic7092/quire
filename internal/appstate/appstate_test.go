@@ -2,6 +2,7 @@ package appstate
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func newStore(t *testing.T) *store.Store {
 func TestShelfPanelOpensABook(t *testing.T) {
 	st := newStore(t)
 	a := New(st)
-	a.SetLibraryDir(filepath.Join("..", "book", "testdata", "samples"))
+	a.ImportDir(filepath.Join("..", "book", "testdata", "samples"))
 	if len(a.Library.Entries) != 3 {
 		t.Fatalf("shelf lists %d books, want the 3 samples", len(a.Library.Entries))
 	}
@@ -51,6 +52,76 @@ func TestShelfPanelOpensABook(t *testing.T) {
 	// The click also put the book in the store, before the host opened it.
 	if recent := st.Recent(1); len(recent) != 1 || recent[0].Path != opened {
 		t.Errorf("recent = %+v", recent)
+	}
+}
+
+// The shelf is the store's list of books, not a folder: a book opened once is
+// still there after a restart, with no folder to scan and nothing to import
+// again.
+func TestShelfRemembersAnOpenedBookAcrossARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	sample := filepath.Join("..", "book", "testdata", "samples", "aq-zhuan.epub")
+	a := New(st)
+	// Opening from the file dialog is the panel's own path: it remembers the
+	// book and puts it on the shelf, and the host then parses it.
+	a.open(sample)
+	if len(a.Library.Entries) != 1 {
+		t.Fatalf("opening put %d books on the shelf, want 1", len(a.Library.Entries))
+	}
+	if err := st.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = again.Close() })
+	restarted := New(again)
+	restarted.ReloadShelf()
+	if len(restarted.Library.Entries) != 1 {
+		t.Fatalf("after the restart the shelf lists %d books, want 1", len(restarted.Library.Entries))
+	}
+	if got := restarted.Library.Entries[0]; !samePath(got.Path, sample) || got.Title != "阿Ｑ正傳" {
+		t.Errorf("shelf row %+v, want the sample under its own title", got)
+	}
+}
+
+// A book whose file went away keeps its row under the name the store remembers,
+// so a moved file or an unmounted disk does not empty the shelf silently.
+func TestShelfListsABookWhoseFileIsGone(t *testing.T) {
+	st := newStore(t)
+	// A copy in a temporary folder, so removing the file does not touch the
+	// samples the other packages read while this test runs.
+	sample := filepath.Join(t.TempDir(), "aq-zhuan.epub")
+	data, err := os.ReadFile(filepath.Join("..", "book", "testdata", "samples", "aq-zhuan.epub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sample, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+	a.open(sample)
+	if err := os.Remove(sample); err != nil {
+		t.Fatal(err)
+	}
+
+	a.ReloadShelf()
+	if len(a.Library.Entries) != 1 {
+		t.Fatalf("the shelf lists %d rows, want the missing book's row", len(a.Library.Entries))
+	}
+	if got := a.Library.Entries[0]; !samePath(got.Path, sample) || got.Title != "aq-zhuan" {
+		t.Errorf("row %+v, want the remembered book under its store title", got)
 	}
 }
 
@@ -205,23 +276,24 @@ func TestTocAndSearchJump(t *testing.T) {
 // that the host runs on the UI thread through Window.Update.
 func TestBackgroundWorkAppliesOnTheUIThread(t *testing.T) {
 	posts := make(chan func(), 4)
-	a := New(nil)
+	a := New(newStore(t))
 	a.Post = func(fn func()) { posts <- fn }
 
-	a.SetLibraryDir(filepath.Join("..", "book", "testdata", "samples"))
+	a.ImportDir(filepath.Join("..", "book", "testdata", "samples"))
 	if len(a.Shelf.Lib.Entries) != 0 {
 		t.Fatalf("the scan wrote the entries before the UI thread ran it")
 	}
 
 	var apply func()
-	select {
-	case apply = <-posts:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the scan published nothing")
-	}
-	apply()
-	if len(a.Shelf.Lib.Entries) == 0 {
-		t.Errorf("no entries after applying the published update")
+	// The import remembers the books and then lists the shelf from the store,
+	// which is a second publication: apply them until the shelf is filled.
+	for len(a.Shelf.Lib.Entries) == 0 {
+		select {
+		case apply = <-posts:
+			apply()
+		case <-time.After(5 * time.Second):
+			t.Fatal("the import published nothing")
+		}
 	}
 	if a.Shelf.Status != locales.ShelfCount(3) {
 		t.Errorf("status %q after the scan", a.Shelf.Status)

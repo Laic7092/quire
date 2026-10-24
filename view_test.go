@@ -48,8 +48,9 @@ func newWindow(t *testing.T) *app {
 	reader.SetPalette(reader.Quiet)
 	t.Cleanup(func() { reader.SetPalette(reader.Quiet) })
 
-	lib := &library.Library{Dir: "internal/book/testdata/samples"}
-	if err := lib.Reload(); err != nil {
+	lib := &library.Library{}
+	lib.Entries, err = library.Scan("internal/book/testdata/samples")
+	if err != nil {
 		t.Fatal(err)
 	}
 

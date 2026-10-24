@@ -11,12 +11,12 @@ import (
 )
 
 // Panel draws the shelf as a sidebar: a field that filters the books, the
-// buttons that rescan and change the directory, and one row per book with its
-// cover, title and details.
+// buttons that list the shelf again and import a folder, and one row per book
+// with its cover, title and details.
 //
 // Its state is plain data owned by the caller, and View never touches the disk:
-// scanning happens when the caller reloads the Library, typically from
-// OnReload. The panel keeps only its own ListState between frames and rebuilds
+// the caller decides what the shelf lists and describes each file off the UI
+// thread. The panel keeps only its own ListState between frames and rebuilds
 // every element from the model on each pass.
 type Panel struct {
 	Lib      *Library
@@ -30,10 +30,10 @@ type Panel struct {
 	Cover func(entry Entry) *ui.Bitmap
 	// OnOpen runs with the path of the book the user clicked.
 	OnOpen func(path string)
-	// OnReload runs when the user clicks the refresh button. Start the scan
-	// elsewhere (a goroutine) and set Status when it fails.
+	// OnReload runs when the user clicks the refresh button. List the shelf
+	// again elsewhere (a goroutine) and set Status when it fails.
 	OnReload func()
-	// OnPickDir runs when the user asks for another library directory.
+	// OnPickDir runs when the user asks to import another folder of books.
 	OnPickDir func()
 
 	list ui.ListState
@@ -84,9 +84,7 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 		ui.Divider(c)
 
 		switch {
-		case p.Lib == nil:
-			widgets.Empty(c, locales.ShelfNoFolder(), locales.ShelfNoFolderHint())
-		case len(p.Lib.Entries) == 0:
+		case p.total() == 0:
 			widgets.Empty(c, locales.ShelfEmpty(), locales.ShelfEmptyHint())
 		case len(rows) == 0:
 			widgets.Empty(c, locales.ShelfNoMatch(strings.TrimSpace(p.Query)), locales.ShelfNoMatchHint())
@@ -109,13 +107,22 @@ func (p *Panel) filtered() []Entry {
 }
 
 func (p *Panel) countLabel(matched int) string {
-	if p.Lib == nil {
+	total := p.total()
+	if total == 0 {
 		return ""
 	}
 	if strings.TrimSpace(p.Query) == "" {
 		return locales.ShelfCount(matched)
 	}
-	return locales.ShelfCountFiltered(matched, len(p.Lib.Entries))
+	return locales.ShelfCountFiltered(matched, total)
+}
+
+// total is how many books the shelf holds; a nil Library holds none.
+func (p *Panel) total() int {
+	if p.Lib == nil {
+		return 0
+	}
+	return len(p.Lib.Entries)
 }
 
 // row draws one book: its cover or a placeholder, its title and a line of

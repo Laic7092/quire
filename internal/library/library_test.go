@@ -223,24 +223,24 @@ func TestScanZipWithoutPackage(t *testing.T) {
 	}
 }
 
-func TestLibraryReloadAndFilter(t *testing.T) {
+func TestLibraryScanAndFilter(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "阿Q.txt", "x", time.Now())
-	lib := &Library{Dir: dir}
-	if err := lib.Reload(); err != nil {
+	entries, err := Scan(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lib.Entries) != 1 {
-		t.Fatalf("reload found %d entries", len(lib.Entries))
+	if len(entries) != 1 {
+		t.Fatalf("scan found %d entries", len(entries))
 	}
 
-	// A failed reload keeps the previous shelf.
-	lib.Dir = filepath.Join(dir, "gone")
-	if err := lib.Reload(); err == nil || len(lib.Entries) != 1 {
-		t.Fatalf("failed reload: err %v, entries %d", err, len(lib.Entries))
+	// A directory that is gone is an error, not an empty shelf: the importer
+	// says why nothing was added.
+	if _, err := Scan(filepath.Join(dir, "gone")); err == nil {
+		t.Fatal("scanning a missing directory reported no error")
 	}
-	lib.Dir = dir
 
+	lib := &Library{}
 	lib.Entries = []Entry{
 		{Path: "/books/阿Q正传.epub", Title: "阿Ｑ正傳", Author: "Xun Lu", Format: "epub"},
 		{Path: "/books/notes.txt", Title: "Notes", Author: "Ada Lovelace", Format: "txt"},

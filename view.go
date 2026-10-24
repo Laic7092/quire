@@ -826,17 +826,13 @@ func (a *app) shareStats(c *ui.Context, st readingStats) {
 	a.goalCopied = a.clock()
 }
 
-// libraryLine is the caption under the shelf's title: how many books it holds
-// and where they come from.
+// libraryLine is the caption under the shelf's title: how many books it holds.
+// The shelf is the books the reader opened, so there is no folder to name.
 func (a *app) libraryLine() string {
 	if a.pan == nil || a.pan.Library == nil || len(a.pan.Library.Entries) == 0 {
 		return locales.LibraryEmptyLine()
 	}
-	dir := a.pan.Library.Dir
-	if dir == "" {
-		return locales.LibraryCount(len(a.pan.Library.Entries))
-	}
-	return locales.LibraryCountDir(len(a.pan.Library.Entries), dir)
+	return locales.LibraryCount(len(a.pan.Library.Entries))
 }
 
 // shelf is the whole library as the current filter and query leave it.

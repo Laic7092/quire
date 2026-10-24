@@ -30,7 +30,7 @@
    章节徽章与章号，中间「161 of 418」，右边「2 pages left in chapter」，最底下是窗口宽度
    上的页码滑块，位置按 `page/total` 算，不是画死的。书页在页脚与顶栏之间没有书脊线，
    两页是同一张纸。不带书时是首页，按 Apple Books 的 Home 摆：左边是 macOS 源列表
-   （搜索 / 首页 / 书架目录 / 打开…；书库下的全部、在读、已读完；我的收藏；底部是
+   （搜索 / 首页 / 导入文件夹 / 打开…；书库下的全部、在读、已读完；我的收藏；底部是
    账户），右边是白底内容——衬线大标题、分区标题加箭头与说明、
    可横向滑动的封面行（继续阅读、所有图书，读到一半的封面底边有一条细进度），右上角是
    本周阅读圆环，最下面是阅读目标卡：年度进度环、阅读天数 / 连续阅读 / 已读完，以及
@@ -62,7 +62,7 @@
 常用功能各有一个包，都能独立测试：
 
 - `internal/library`：书架。只读 `container.xml` → OPF 的 metadata 拿 title/creator/封面，
-  不打开整本书；首页与源列表从它取数据。
+  不打开整本书；书架上的条目由 `store` 记着的书单驱动，它负责把每本书描述成一行。
 - `internal/toc`：目录。页码只来自 `layout.PageRange`（滚动模式没有页，行只带章节），
   层级按标题里的「第N卷/部/篇/册」猜。
 - `internal/search`：全文搜索。索引走 `render.NodeText`，命中映射回 `render.Location`；
@@ -73,7 +73,7 @@
 - `internal/store`：持久化。`os.UserConfigDir()/layx-reader/state.json`（Linux 是
   `~/.config`，macOS 是 `~/Library/Application Support`），原子写 + 2s 合并写入，
   存书架、每本书的阅读位置和字号/面板偏好；`PageFor` 按 node → anchor → progress →
-  章首降级恢复位置。
+  章首降级恢复位置。书架就是这份书单：打开过的书自动记进去，重开应用不用再导入。
 - `internal/appstate`：把上面四个接起来的一层（面板切换、异步刷新、索引与文档同步）。
 - `internal/icons`、`internal/widgets`：窗口和面板共用的 SVG 图标与几件小件（图标按钮、
   空状态、行底色），保证工具栏和三个面板是同一套观感。
@@ -87,7 +87,7 @@
 ## 运行
 
 ```sh
-# [-shelf 目录] 把目录里的 EPUB/TXT 放进书架与首页；-state 换状态文件。
+# [-shelf 目录] 把目录里的 EPUB/TXT 导入书架；-state 换状态文件。
 go run . [-font /path/to/font.ttc] [-serif /path/to/serif.ttc] [-shelf ~/books] [-state /tmp/state.json] [book.epub|book.txt]
 # 或
 LAYX_FONT=/usr/share/fonts/truetype/wqy/wqy-microhei.ttc go run . book.epub
@@ -279,7 +279,9 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 - 图片没有独立的版面策略：比内容区高的插图会按栏宽缩放后被页底裁切；
   中间纯图片页不会自动整页居中。
 - 没有脚注、竖排、ruby 和分享；搜索只折叠 ASCII 大小写，不折叠简繁/全半角；
-  书架不递归子目录、不监听目录变化；目录层级靠标题猜，没用 nav 的嵌套。
+  书架是打开过的书的书单（存在 `state.json` 里），`-shelf` / 「导入文件夹」只是把目录这一层
+  加进书单，不递归子目录、不监听目录变化；文件被移走或磁盘没挂上时，那一行还在、只是打不开；
+  目录层级靠标题猜，没用 nav 的嵌套。
   TXT 没有目录，也不区分诗歌/剧本的特殊排版；Gutenberg 的页眉页脚会成为“第 1 节”。
 - 位置记忆依赖 node 号在本仓库里跨 `Build` 稳定这一事实；换书源/更新 EPUB 后旧位置会
   静默偏移。分页模式依赖 `PageFor` 的反向映射（单页文档拿不到，因此不记位置），滚动模式

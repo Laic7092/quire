@@ -666,7 +666,8 @@ func (a *app) chooseFile() {
 	}()
 }
 
-// chooseDir shows the directory dialog, as chooseFile does for a book.
+// chooseDir shows the directory dialog, as chooseFile does for a book. The
+// folder is imported: its books join the shelf, and the ones already there stay.
 func (a *app) chooseDir() {
 	win := a.showWindow()
 	if win == nil || a.pan == nil {
@@ -691,7 +692,7 @@ func (a *app) chooseDir() {
 		dir := paths[0]
 		win.Update(func() {
 			defer a.refresh(win)
-			a.pan.SetLibraryDir(dir)
+			a.pan.ImportDir(dir)
 		})
 	}()
 }
@@ -954,7 +955,7 @@ func (a *app) menuBar() *mygo.Menu {
 
 func main() {
 	fontFlag := flag.String("font", "", "path to a .ttf/.otf/.ttc font (default: $LAYX_FONT or a system CJK font)")
-	shelfFlag := flag.String("shelf", "", "directory of EPUB/TXT files to show in the shelf")
+	shelfFlag := flag.String("shelf", "", "directory of EPUB/TXT files to import into the shelf")
 	serifFlag := flag.String("serif", "", "path to the serif face (default: $LAYX_SERIF or a system serif)")
 	stateFlag := flag.String("state", "", "state file (default: the config directory)")
 	flag.Usage = func() {
@@ -1050,9 +1051,6 @@ func main() {
 	if a.startPath == "" && a.pan.Showing() {
 		a.pan.Show(appstate.SidebarNone)
 	}
-	if *shelfFlag != "" {
-		a.pan.SetLibraryDir(*shelfFlag)
-	}
 
 	if fontPath, err := reader.FindFont(*fontFlag); err != nil {
 		a.status = err.Error()
@@ -1116,6 +1114,14 @@ func main() {
 	mygo.App.WhenReady(func() {
 		a.ready = true
 		a.newWindow()
+		// The shelf is the books the store remembers: it is listed from there on
+		// every launch, so a book opened once is still there. The flag imports a
+		// folder into that list first, and the listing shows the whole of it.
+		if *shelfFlag != "" {
+			a.pan.ImportDir(*shelfFlag)
+		} else {
+			a.pan.ReloadShelf()
+		}
 		if a.pendingOpen == "" && a.startPath != "" {
 			if abs, err := filepath.Abs(a.startPath); err == nil {
 				a.startPath = abs

@@ -1,13 +1,16 @@
-// Package library finds the books of a directory and shows them in a side
-// panel.
+// Package library describes the book files a shelf lists and shows them in a
+// side panel.
 //
-// Scanning deliberately avoids opening a book: an EPUB's metadata and cover
-// come straight from the zip's container.xml, OPF package document and cover
-// image, and the chapter XHTML is never read. A shelf of a few hundred books
-// therefore costs a directory listing plus a few kilobytes per EPUB.
+// The list of books is the caller's: the reader keeps it in the store and asks
+// this package to describe each file, while Scan reads a whole directory for
+// the one action that imports books in bulk. Both deliberately avoid opening a
+// book: an EPUB's metadata and cover come straight from the zip's
+// container.xml, OPF package document and cover image, and the chapter XHTML is
+// never read. A shelf of a few hundred books therefore costs a few kilobytes
+// per EPUB and no parsing of a chapter.
 //
-// Scan reads dir itself and does not descend into subdirectories: a shelf is
-// one directory of books, not a tree.
+// Scan reads dir itself and does not descend into subdirectories: an imported
+// directory is one directory of books, not a tree.
 package library
 
 import (
@@ -58,41 +61,9 @@ func Scan(dir string) ([]Entry, error) {
 		if item.IsDir() {
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(item.Name()))
-		var format string
-		switch ext {
-		case ".epub":
-			format = "epub"
-		case ".txt":
-			format = "txt"
-		default:
-			continue
+		if entry, ok := Meta(filepath.Join(dir, item.Name())); ok {
+			entries = append(entries, entry)
 		}
-		info, err := item.Info()
-		if err != nil {
-			continue // it vanished between ReadDir and Info
-		}
-		path := filepath.Join(dir, item.Name())
-		entry := Entry{
-			Path:     path,
-			Title:    strings.TrimSuffix(item.Name(), filepath.Ext(item.Name())),
-			Format:   format,
-			Size:     info.Size(),
-			Modified: info.ModTime(),
-		}
-		if format == "epub" {
-			meta, err := readEPUBMeta(path)
-			if errors.Is(err, errNotArchive) {
-				continue // a truncated download is not a book
-			}
-			if title := strings.TrimSpace(meta.Title); title != "" {
-				entry.Title = title
-			}
-			entry.Author = strings.TrimSpace(meta.Creator)
-			entry.Language = strings.TrimSpace(meta.Language)
-			entry.Cover = meta.Cover
-		}
-		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if !entries[i].Modified.Equal(entries[j].Modified) {
@@ -103,22 +74,58 @@ func Scan(dir string) ([]Entry, error) {
 	return entries, nil
 }
 
-// Library is a shelf's state, held by the caller: the directory and the
-// entries last scanned from it.
-type Library struct {
-	Dir     string
-	Entries []Entry
+// Meta describes one book file: its size and modification time from the file
+// itself, its title and author from an EPUB's package document. It reports
+// false when path is not a book the reader can use — gone, not an EPUB or TXT,
+// or an archive that does not open — so a caller listing remembered books can
+// skip it rather than show a row that cannot open.
+func Meta(path string) (Entry, bool) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return Entry{}, false
+	}
+	format := formatOf(path)
+	if format == "" {
+		return Entry{}, false
+	}
+	entry := Entry{
+		Path:     path,
+		Title:    strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Format:   format,
+		Size:     info.Size(),
+		Modified: info.ModTime(),
+	}
+	if format == "epub" {
+		meta, err := readEPUBMeta(path)
+		if errors.Is(err, errNotArchive) {
+			return Entry{}, false // a truncated download is not a book
+		}
+		if title := strings.TrimSpace(meta.Title); title != "" {
+			entry.Title = title
+		}
+		entry.Author = strings.TrimSpace(meta.Creator)
+		entry.Language = strings.TrimSpace(meta.Language)
+		entry.Cover = meta.Cover
+	}
+	return entry, true
 }
 
-// Reload scans Dir again and replaces Entries only when the scan succeeds,
-// so a temporary error leaves the current shelf as it was.
-func (l *Library) Reload() error {
-	entries, err := Scan(l.Dir)
-	if err != nil {
-		return err
+// formatOf is "epub" or "txt" from the extension, "" for anything else.
+func formatOf(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".epub":
+		return "epub"
+	case ".txt":
+		return "txt"
 	}
-	l.Entries = entries
-	return nil
+	return ""
+}
+
+// Library is a shelf's state, held by the caller: the entries it lists. Where
+// they come from — the store's remembered books, or one import — is the
+// caller's business; the panel only draws them.
+type Library struct {
+	Entries []Entry
 }
 
 // Filter returns the entries whose title, author or path contains query,

@@ -17,10 +17,12 @@ func TestPanelDrawsAndOpens(t *testing.T) {
 	writeFile(t, dir, "Alpha.txt", "alpha", testTime())
 	writeFile(t, dir, "beta.txt", "beta", testTime())
 
-	lib := &Library{Dir: dir}
-	if err := lib.Reload(); err != nil {
+	lib := &Library{}
+	entries, err := Scan(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	lib.Entries = entries
 	opened := ""
 	reloaded := 0
 	p := &Panel{
@@ -83,14 +85,14 @@ func TestPanelDrawsAndOpens(t *testing.T) {
 func TestPanelEmptyStates(t *testing.T) {
 	p := &Panel{Selected: -1}
 	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 300, 300)
-	if !tt.HasText(locales.ShelfNoFolder()) {
-		t.Fatalf("nil library: %v", tt.Texts())
+	if !tt.HasText(locales.ShelfEmpty()) {
+		t.Fatalf("no library: %v", tt.Texts())
 	}
 
-	p.Lib = &Library{Dir: t.TempDir()}
+	p.Lib = &Library{}
 	tt.Frame()
-	if !tt.HasText(locales.ShelfEmpty()) {
-		t.Fatalf("empty directory: %v", tt.Texts())
+	if !tt.HasText(locales.ShelfEmptyHint()) {
+		t.Fatalf("empty shelf: %v", tt.Texts())
 	}
 }
 

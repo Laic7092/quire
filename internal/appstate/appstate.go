@@ -78,7 +78,7 @@ type App struct {
 	// OnNotes runs on the UI thread whenever the set of notes changes, so the
 	// host can rebuild the rectangles it paints their passages with.
 	OnNotes func()
-	// OnPickDir runs when the shelf asks for a library directory.
+	// OnPickDir runs when the shelf asks for a folder of books to import.
 	OnPickDir func()
 	// Cover returns a book's decoded cover for the shelf, or nil. The host
 	// caches the bitmaps; the panel never decodes one per frame.
@@ -87,6 +87,9 @@ type App struct {
 	layout   *render.Layout
 	page     int
 	searchID int
+	// shelfID counts shelf publications, so a reload that lost the race with a
+	// newer reload or an import does not install its older list.
+	shelfID int
 	// book is the book the panels were last refreshed for, nil when none is
 	// open; the bookmark rows take their chapter names from it.
 	book *book.Book
@@ -98,11 +101,12 @@ type App struct {
 }
 
 // New builds an App over st. st may be nil, in which case nothing is persisted
-// and the shelf has no directory until SetLibraryDir is called.
+// and the shelf stays empty until books are opened.
 func New(st *store.Store) *App {
-	a := &App{Store: st}
+	a := &App{Store: st, Library: &library.Library{}}
 	a.Shelf.Selected = -1
 	a.Toc.Selected = -1
+	a.Shelf.Lib = a.Library
 
 	if st != nil {
 		prefs := st.State().Prefs
@@ -148,39 +152,154 @@ func New(st *store.Store) *App {
 	return a
 }
 
-// SetLibraryDir points the shelf at dir and rescans it in the background.
-func (a *App) SetLibraryDir(dir string) {
+// ImportDir adds the EPUB and TXT books directly inside dir to the shelf,
+// off the UI thread. Importing adds: the shelf is the store's remembered
+// books, so a folder puts its books there and never forgets the others.
+func (a *App) ImportDir(dir string) {
+	a.initShelf()
+	a.Shelf.Status = locales.ShelfScanning()
+	a.async(func() func() {
+		entries, err := library.Scan(dir)
+		if err != nil {
+			return func() { a.Shelf.Status = locales.ShelfScanFailed(err.Error()) }
+		}
+		return func() {
+			if a.Store == nil {
+				// Without a store the shelf cannot remember anything, so it shows
+				// what this import found and nothing more.
+				a.mergeShelf(entries)
+				return
+			}
+			for _, e := range entries {
+				a.remember(e.Path, e.Title)
+			}
+			// Listing the shelf from the store rather than from the scan keeps
+			// one source of truth: the import added to it, and this shows all of it.
+			a.ReloadShelf()
+		}
+	})
+}
+
+// ReloadShelf republishes the shelf from the books the store remembers,
+// describing each file off the UI thread. It is what makes an opened book stay
+// on the shelf across a restart: the store is the list, and this reads it.
+func (a *App) ReloadShelf() {
+	a.initShelf()
+	if a.Store == nil {
+		a.Shelf.Status = ""
+		return
+	}
+	books := a.Store.Recent(0)
+	if len(books) == 0 {
+		a.Library.Entries = nil
+		a.Shelf.Status = ""
+		return
+	}
+	a.Shelf.Status = locales.ShelfScanning()
+	a.shelfID++
+	id := a.shelfID
+	// The paths this reload knows about; a row for any other book was added
+	// while it was reading and must survive it.
+	listed := make(map[string]struct{}, len(books))
+	for _, b := range books {
+		listed[pathKey(b.Path)] = struct{}{}
+	}
+	a.async(func() func() {
+		entries := make([]library.Entry, 0, len(books))
+		for _, b := range books {
+			if _, err := os.Stat(b.Path); err != nil {
+				// The file is gone — moved, deleted, or on a disk that is not
+				// mounted — so it keeps the row the store remembers under the
+				// name it had: the reader sees what is missing instead of a
+				// quietly shorter shelf, and opening it reports the error.
+				entries = append(entries, library.Entry{
+					Path:     b.Path,
+					Title:    b.Title,
+					Format:   b.Format,
+					Size:     b.Size,
+					Modified: b.Modified,
+				})
+				continue
+			}
+			if e, ok := library.Meta(b.Path); ok {
+				entries = append(entries, e)
+			}
+		}
+		return func() {
+			if id != a.shelfID {
+				return // a newer import or reload owns the shelf
+			}
+			// A book opened while this reload was reading is newer than its
+			// snapshot: keep its row instead of hiding it until the next reload.
+			for _, row := range a.Library.Entries {
+				if _, ok := listed[pathKey(row.Path)]; ok {
+					continue
+				}
+				entries = append(entries, row)
+			}
+			a.Library.Entries = entries
+			a.Shelf.Status = shelfCount(len(entries))
+		}
+	})
+}
+
+// upsertShelf puts the book at path on the shelf, describing it off the UI
+// thread. A book opened from the file dialog shows up at once instead of after
+// the next full reload.
+func (a *App) upsertShelf(path string) {
+	a.async(func() func() {
+		entry, ok := library.Meta(path)
+		if !ok {
+			return nil
+		}
+		return func() { a.mergeShelf([]library.Entry{entry}) }
+	})
+}
+
+// mergeShelf adds entries to the shelf, replacing a row that names the same
+// file. It is the UI-thread half of upsertShelf; the row is keyed by path
+// because that is what the reader recognises as one book.
+func (a *App) mergeShelf(entries []library.Entry) {
+	if len(entries) == 0 {
+		return
+	}
+	a.initShelf()
+	rows := a.Library.Entries
+	for _, entry := range entries {
+		replaced := false
+		for i := range rows {
+			if !samePath(rows[i].Path, entry.Path) {
+				continue
+			}
+			rows[i], replaced = entry, true
+			break
+		}
+		if !replaced {
+			rows = append(rows, entry)
+		}
+	}
+	a.Library.Entries = rows
+	a.Shelf.Status = shelfCount(len(rows))
+}
+
+// initShelf makes sure the shelf has a Library to list into. New always
+// makes one; this is for an App built by hand.
+func (a *App) initShelf() {
 	if a.Library == nil {
 		a.Library = &library.Library{}
 	}
-	a.Library.Dir = dir
-	a.Library.Entries = nil
-	a.Shelf.Lib = a.Library
-	a.Shelf.Status = ""
-	a.ReloadShelf()
+	if a.Shelf.Lib != a.Library {
+		a.Shelf.Lib = a.Library
+	}
 }
 
-// ReloadShelf rescans the library off the UI thread.
-func (a *App) ReloadShelf() {
-	if a.Library == nil || a.Library.Dir == "" {
-		a.Shelf.Status = locales.ShelfChooseFolderFirst()
-		return
+// shelfCount is the panel's status line: the number of books, nothing while the
+// shelf is empty and the panel already says so.
+func shelfCount(n int) string {
+	if n == 0 {
+		return ""
 	}
-	lib := a.Library
-	a.Shelf.Status = locales.ShelfScanning()
-	// Scan off the UI thread, then install the result on it: the shelf reads
-	// Entries while it draws, so the slice must not be swapped underneath.
-	a.async(func() func() {
-		entries, err := library.Scan(lib.Dir)
-		return func() {
-			if err != nil {
-				a.Shelf.Status = locales.ShelfScanFailed(err.Error())
-				return
-			}
-			lib.Entries = entries
-			a.Shelf.Status = locales.ShelfCount(len(entries))
-		}
-	})
+	return locales.ShelfCount(n)
 }
 
 // Refresh republishes the panels for a new layout, book or page. Hosts call it
@@ -240,18 +359,8 @@ func (a *App) Opened(bk *book.Book, path string) string {
 	if bk == nil {
 		return ""
 	}
-	key := store.Key(path, fileSize(path), fileModTime(path))
-	if a.Store != nil {
-		a.Store.TouchBook(store.Book{
-			Key:      key,
-			Path:     path,
-			Title:    bk.Title,
-			Format:   formatOf(path),
-			Size:     fileSize(path),
-			Modified: fileModTime(path),
-		})
-		a.Store.SaveSoon(0)
-	}
+	key := a.remember(path, bk.Title)
+	a.upsertShelf(path)
 	a.BookKey = key
 	a.Search.Query = ""
 	a.Search.Hits = nil
@@ -324,23 +433,51 @@ func (a *App) record(p store.Position) {
 	a.Store.SaveSoon(2 * time.Second)
 }
 
+// remember records path as a shelf book, asks for a debounced write and
+// returns the store key of this revision of the file. A book is on the shelf
+// because it was opened or imported, which is the only way books get there;
+// the key follows size and modification time, so a re-download is noticed.
+func (a *App) remember(path, title string) string {
+	size, modified := fileSize(path), fileModTime(path)
+	key := store.Key(path, size, modified)
+	if a.Store == nil {
+		return key
+	}
+	a.Store.TouchBook(store.Book{
+		Key:      key,
+		Path:     path,
+		Title:    title,
+		Format:   formatOf(path),
+		Size:     size,
+		Modified: modified,
+	})
+	a.Store.SaveSoon(0)
+	return key
+}
+
 // open is the shelf's callback: remember the revision and hand the path to the
 // host, which parses the whole book off the UI thread.
 func (a *App) open(path string) {
-	if a.Store != nil {
-		a.Store.TouchBook(store.Book{
-			Key:      store.Key(path, fileSize(path), fileModTime(path)),
-			Path:     path,
-			Title:    strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-			Format:   formatOf(path),
-			Size:     fileSize(path),
-			Modified: fileModTime(path),
-		})
-		a.Store.SaveSoon(0)
-	}
+	a.remember(path, strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	a.upsertShelf(path)
 	if a.Open != nil {
 		a.Open(path)
 	}
+}
+
+// samePath reports whether two paths name the same file, so a book reached
+// through a relative and an absolute path stays one shelf row.
+func samePath(a, b string) bool {
+	return pathKey(a) == pathKey(b)
+}
+
+// pathKey is what a shelf row is identified by: the path, made absolute and
+// clean so one file reached two ways is one row.
+func pathKey(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
 }
 
 func (a *App) jump(loc render.Location) {

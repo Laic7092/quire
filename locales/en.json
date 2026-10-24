@@ -82,9 +82,9 @@
       }
     }
   },
-  "chooseFolderTitle": "Choose Library Folder",
+  "chooseFolderTitle": "Import a Folder of Books",
   "@chooseFolderTitle": {
-    "description": "The title of the dialog that picks the folder of books."
+    "description": "The title of the dialog that picks a folder of books to import."
   },
   "chooseFolderFailed": "Could not open the folder: {error}",
   "@chooseFolderFailed": {
@@ -322,9 +322,9 @@
   "@sidebarHome": {
     "description": "The source list row and the title of the library's home page."
   },
-  "sidebarShelfFolder": "Shelf Folder",
+  "sidebarShelfFolder": "Import Folder",
   "@sidebarShelfFolder": {
-    "description": "The source list row that picks the folder of books."
+    "description": "The source list row that imports a folder of books onto the shelf."
   },
   "sidebarLibraryHeading": "Library",
   "@sidebarLibraryHeading": {
@@ -402,13 +402,13 @@
   "@homeEmptyTitle": {
     "description": "The home page's title while neither the folder nor an opened book gives it any."
   },
-  "homeEmptyHint": "Put EPUB or TXT files in the shelf folder, or open one.",
+  "homeEmptyHint": "Open an EPUB or TXT book: it lands on your shelf.",
   "@homeEmptyHint": {
     "description": "What to do when the home page has no books."
   },
-  "chooseFolder": "Choose Folder",
+  "chooseFolder": "Import Folder",
   "@chooseFolder": {
-    "description": "The button that picks the folder of books."
+    "description": "The button that imports a folder of books onto the shelf."
   },
   "sort": "Sort",
   "@sort": {
@@ -560,7 +560,7 @@
       }
     }
   },
-  "libraryEmptyLine": "Open an EPUB or TXT, or choose a folder of books",
+  "libraryEmptyLine": "Open an EPUB or TXT: it lands on your shelf",
   "@libraryEmptyLine": {
     "description": "The caption under the home page's title while the library holds no book."
   },
@@ -571,20 +571,6 @@
       "count": {
         "type": "int",
         "example": "42"
-      }
-    }
-  },
-  "libraryCountDir": "{count, plural, one {# book} other {# books}} · {dir}",
-  "@libraryCountDir": {
-    "description": "The caption under the home page's title: how many books it holds, and where they come from.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "42"
-      },
-      "dir": {
-        "type": "String",
-        "example": "~/Books"
       }
     }
   },
@@ -678,31 +664,23 @@
   },
   "shelfRefresh": "Refresh Shelf",
   "@shelfRefresh": {
-    "description": "The accessibility label of the shelf panel's button that rescans the folder."
+    "description": "The accessibility label of the shelf panel's button that lists the shelf again."
   },
-  "shelfRefreshTip": "Rescan the folder",
+  "shelfRefreshTip": "Reload the shelf",
   "@shelfRefreshTip": {
-    "description": "The tooltip of the shelf panel's button that rescans the folder."
+    "description": "The tooltip of the shelf panel's button that lists the shelf again."
   },
-  "shelfChooseFolderTip": "Use another library folder",
+  "shelfChooseFolderTip": "Import a folder of books",
   "@shelfChooseFolderTip": {
-    "description": "The tooltip of the shelf panel's button that picks another folder."
+    "description": "The tooltip of the shelf panel's button that imports a folder of books."
   },
-  "shelfNoFolder": "No library folder yet",
-  "@shelfNoFolder": {
-    "description": "The shelf panel's message while no folder is chosen."
-  },
-  "shelfNoFolderHint": "Use the folder button above to pick a folder of EPUB / TXT files",
-  "@shelfNoFolderHint": {
-    "description": "What to do when the shelf has no folder."
-  },
-  "shelfEmpty": "No books in this folder",
+  "shelfEmpty": "No books on the shelf yet",
   "@shelfEmpty": {
-    "description": "The shelf panel's message while the folder holds no book."
+    "description": "The shelf panel's message while it holds no book."
   },
-  "shelfEmptyHint": "Only .epub and .txt files in this folder are listed",
+  "shelfEmptyHint": "Open a book, or import a folder of EPUB / TXT files",
   "@shelfEmptyHint": {
-    "description": "What the shelf scans when the folder holds no book."
+    "description": "What to do when the shelf holds no book."
   },
   "shelfNoMatch": "No books match “{query}”",
   "@shelfNoMatch": {
@@ -874,13 +852,9 @@
   "@emptyPanel": {
     "description": "The message a panel shows when the host opened none."
   },
-  "shelfChooseFolderFirst": "Choose a library folder first",
-  "@shelfChooseFolderFirst": {
-    "description": "The shelf's status line before a folder is chosen."
-  },
   "shelfScanning": "Scanning…",
   "@shelfScanning": {
-    "description": "The shelf's status line while it scans the folder."
+    "description": "The shelf's status line while it lists the books."
   },
   "shelfScanFailed": "Scan failed: {error}",
   "@shelfScanFailed": {
