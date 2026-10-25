@@ -160,11 +160,11 @@ type app struct {
 	scrollY       float32
 	tileH         float32
 	scrollChapter int
-	// scrollFrom, scrollGoal and scrollAt describe the glide the column is on:
-	// where it started, where the wheel sent it, and when. When scrollAt is
-	// zero the column stands at scrollGoal.
-	scrollFrom, scrollGoal float32
-	scrollAt               time.Time
+	// scrollGoal is the place the scrolls so far asked for, and scrollAt the time
+	// the column last moved toward it: zero while it stands at scrollGoal. The
+	// frames between the two cover the distance at one rate, whatever asked.
+	scrollGoal float32
+	scrollAt   time.Time
 	// jumpLoc is a place to return to after a change of mode: switching between
 	// pages and scrolling keeps the reader where it was, and only the way the
 	// place is named changes. jumpAt marks it pending.
@@ -726,7 +726,7 @@ func (a *app) ensureLayout(w, h float32) {
 			}
 			// A new layout starts the column still: wherever the reader was is
 			// the place it stands at now.
-			a.scrollFrom, a.scrollGoal, a.scrollAt = a.scrollY, a.scrollY, time.Time{}
+			a.scrollGoal, a.scrollAt = a.scrollY, time.Time{}
 			if a.pan != nil {
 				if rebuilt {
 					a.pan.SetIndex(index)
@@ -910,7 +910,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		a.resumeNote = ""
 		a.layScroll = false
 		a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
-		a.scrollFrom, a.scrollGoal, a.scrollAt = 0, 0, time.Time{}
+		a.scrollGoal, a.scrollAt = 0, time.Time{}
 		if a.pan != nil {
 			a.pan.Opened(b, path)
 			a.pan.Refresh(b, nil, 0)

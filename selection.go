@@ -32,7 +32,15 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return false
 		}
 		perf.scrolled(ev.DY, ev.Precise)
-		a.scrollBy(ev.DY)
+		// A delta a device reports as it happens is the movement itself: it lands
+		// in the frame it arrives in. A notch is a distance asked for, which the
+		// column glides to — and standing still, one ask looks the same whether it
+		// came from a wheel, a key or a screenful.
+		if ev.Precise {
+			a.scrollByNow(ev.DY)
+		} else {
+			a.scrollBy(ev.DY)
+		}
 		return true
 	case ui.InputPointerDown:
 		if ev.Button != 0 || a.showCover || a.layout == nil {

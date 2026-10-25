@@ -1,6 +1,8 @@
 package main
 
 import (
+	"math"
+	"os"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -21,9 +23,23 @@ import (
 // and below it, in DIPs: the same head the paged sheet gives its first line.
 const scrollInset = reader.PageTop
 
-// scrollGlideDuration is how long the column takes to reach the place a wheel
-// notch asked for, so a mouse scrolls smoothly the way a touchpad does.
-const scrollGlideDuration = 140 * time.Millisecond
+// scrollFollow is how long the column takes to cover 63% of what a scroll asked
+// it for: the one number that sets how scrolling feels. Short enough that a key's
+// step lands while the key is still down, long enough that the column glides
+// rather than jumps, and the same for every ask.
+const scrollFollow = 30 * time.Millisecond
+
+// scrollTopSpeed is how fast the column may travel, in DIPs a second: a place far
+// away, as Home asks for, is travelled rather than whipped.
+const scrollTopSpeed = 4000
+
+// scrollLead is how many asks the column may owe at once. A burst that asks
+// faster than the column travels leaves this much to coast, not a run.
+const scrollLead = 2
+
+// scrollGapMin is the distance under which the column is at the place it was
+// sent to: half a pixel, which no reader can see it settle.
+const scrollGapMin = 0.5
 
 // scrolling reports whether the layout on screen is a scrolling column. It
 // follows the published layout, not the setting, so the frame between changing
@@ -47,9 +63,8 @@ func (a *app) maxScroll() float32 {
 	return max(0, a.layout.ContentHeight()-a.scrollViewport())
 }
 
-// scrollTo sends the column to content y, clamped to the book. The column glides
-// there over scrollGlideDuration, so repeated wheel notches stack on the target
-// rather than on the frame being drawn.
+// scrollTo sends the column to content y, clamped to the book: a place, as the
+// table of contents, Home or the store names one.
 func (a *app) scrollTo(y float32) {
 	if a.layout == nil {
 		return
@@ -58,30 +73,78 @@ func (a *app) scrollTo(y float32) {
 	// and it drops a place a pending mode switch meant to restore.
 	a.showCover = false
 	a.jumpAt = false
-	y = clampf(y, 0, a.maxScroll())
-	if y == a.scrollGoal {
+	if a.instant {
+		a.scrollNow(y)
 		return
 	}
-	// A column already on its way is sent somewhere else: the glide before this
-	// one is cut short, which is what a wheel's notch rate does to a reader.
+	// A column already on its way is sent somewhere else: the follow before this
+	// one is cut short, and the new place is travelled from where the column is.
 	if a.gliding() {
 		perf.glide()
 	}
-	a.scrollFrom, a.scrollGoal = a.scrollY, y
-	a.scrollAt = a.clock()
-	if a.instant {
-		a.scrollAt = time.Time{}
-		a.scrollY = a.scrollGoal
-	}
-	a.scrollAhead()
-	if a.instant {
-		a.afterScroll()
-	}
+	a.follow(clampf(y, 0, a.maxScroll()))
 }
 
-// scrollBy moves the column by dy DIPs, as one notch of a wheel or touchpad
-// does, on top of whatever the notches before it have still to travel.
-func (a *app) scrollBy(dy float32) { a.scrollTo(a.scrollGoal + dy) }
+// scrollNow puts the column at content y in the frame the ask arrived in.
+func (a *app) scrollNow(y float32) {
+	if a.layout == nil {
+		return
+	}
+	a.showCover = false
+	a.jumpAt = false
+	y = clampf(y, 0, a.maxScroll())
+	a.scrollAt = time.Time{}
+	a.scrollGoal, a.scrollY = y, y
+	a.scrollAhead()
+	a.afterScroll()
+}
+
+// scrollBy moves the column by dy DIPs, as every scroll asks: a wheel's notch, a
+// key's step, a screenful. The distance is the ask, whatever asked for it: the
+// asks add up in the goal, and the frames that follow cover it at one rate — so
+// one ask glides to its place while a burst of them cruises at the rate it comes
+// at, and nothing is dropped or restarted on the way.
+func (a *app) scrollBy(dy float32) {
+	if a.layout == nil || dy == 0 {
+		return
+	}
+	// Any scrolling is a turn of the page as far as the cover is concerned.
+	a.showCover = false
+	a.jumpAt = false
+	if a.instant {
+		a.scrollNow(a.scrollY + dy)
+		return
+	}
+	goal := clampf(a.scrollGoal+dy, 0, a.maxScroll())
+	// A burst may ask faster than the column travels. It then owes at most
+	// scrollLead asks, so what is left when the asking stops is a short coast and
+	// not a run, and holding a key cannot walk the column away from the text.
+	if lead := goal - a.scrollY; absf(lead) > scrollLead*absf(dy) {
+		goal = a.scrollY + scrollLead*dy
+	}
+	a.follow(goal)
+}
+
+// scrollByNow moves the column by dy DIPs at once, from where it is drawn: a
+// continuous device's deltas are the movement itself, so they land in the frame
+// they arrive in and stack from the position on screen.
+func (a *app) scrollByNow(dy float32) { a.scrollNow(a.scrollY + dy) }
+
+// follow sets the place the column owes, without touching where it is drawn: the
+// next frames cover the distance. It is the one way an ask becomes motion, so a
+// notch, a step and a screenful differ in their distance and in nothing else.
+func (a *app) follow(y float32) {
+	if y == a.scrollY {
+		a.scrollAt = time.Time{}
+		a.scrollGoal = y
+		return
+	}
+	a.scrollGoal = y
+	if a.scrollAt.IsZero() {
+		a.scrollAt = a.clock()
+		a.scrollAhead()
+	}
+}
 
 // gliding reports whether the column is on its way to a place it was sent to.
 func (a *app) gliding() bool { return !a.scrollAt.IsZero() }
@@ -95,27 +158,42 @@ func (a *app) stopScroll() {
 	}
 }
 
-// stepScroll advances the glide by the time since it started. It runs once per
-// frame, in the build pass, so the draw callback still only replays the tiles
-// the viewport now covers.
+// stepScroll advances the column toward what a scroll asked for, by the time
+// since the last frame. It runs in the build pass, so the draw callback still
+// only replays the tiles the viewport now covers.
+//
+// The column covers a share of what it owes, set by scrollFollow: a single ask
+// therefore eases into its place and stops, while asks that keep coming are
+// followed at the rate they come at, with one ask's worth of lag. That is the
+// same motion for a wheel, a key and a screenful, and it needs no knowledge of
+// which of them asked.
 func (a *app) stepScroll() {
 	if a.scrollAt.IsZero() {
 		return
 	}
-	p := float32(a.clock().Sub(a.scrollAt)) / float32(scrollGlideDuration)
-	if p >= 1 {
-		a.scrollAt = time.Time{}
-		a.scrollY = a.scrollGoal
-		a.afterScroll()
-		return
+	now := a.clock()
+	dt := now.Sub(a.scrollAt)
+	a.scrollAt = now
+	if gap := a.scrollGoal - a.scrollY; dt > 0 && absf(gap) >= scrollGapMin {
+		// The share of the distance a scrollFollow's worth of time covers, and
+		// never more than scrollTopSpeed: a place far away is travelled, not
+		// whipped.
+		move := float64(gap) * (1 - math.Exp(-float64(dt)/float64(scrollFollow)))
+		if fast := float64(scrollTopSpeed) * dt.Seconds(); math.Abs(move) > fast {
+			move = math.Copysign(fast, float64(gap))
+		}
+		a.scrollY += float32(move)
 	}
-	e := easeOut(p)
-	a.scrollY = a.scrollFrom + (a.scrollGoal-a.scrollFrom)*e
+	if absf(a.scrollGoal-a.scrollY) < scrollGapMin {
+		a.scrollY = a.scrollGoal
+		a.scrollAt = time.Time{}
+	}
 	a.scrollAhead()
 	a.afterScroll()
 }
 
-// scrollLines moves the column by lines lines of type.
+// scrollLines moves the column by lines lines of type, as one press of an arrow
+// key asks for them.
 func (a *app) scrollLines(lines float32) {
 	line := a.opts.FontSize * a.opts.LineHeight
 	a.scrollBy(lines * line)
@@ -206,7 +284,14 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	if view.H < 1 {
 		return
 	}
-	y := clampf(a.scrollY, 0, a.maxScroll())
+	// The column is placed on whole device pixels. A glyph is rasterized once
+	// per subpixel phase, and its quad is snapped to the pixel grid anyway, so an
+	// offset in between two pixels swaps every glyph in the column for a near
+	// copy of itself and moves each of them by up to half a pixel — every frame,
+	// for as long as the gesture lasts. That is the breathing this used to do:
+	// crisp in any one frame, unreadable as motion. Snapping holds one phase for
+	// the whole gesture, the way a compositor moves a layer it painted once.
+	y := snapDevices(clampf(a.scrollY, 0, a.maxScroll()), p.Scale())
 	first := max(int(y/a.tileH)-1, 0)
 	last := int((y + view.H) / a.tileH)
 	if n := a.layout.TileCount(); last >= n {
@@ -228,6 +313,24 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 		perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
 	}
 	a.drawScrollMarks(p, view, y)
+}
+
+// snapScroll, cleared by LAYX_NO_SNAP, is the switch a reader flips to feel what
+// the snapping is worth: off, the column moves in subpixel steps again.
+var snapScroll = os.Getenv("LAYX_NO_SNAP") == ""
+
+// absf is how far v is from zero.
+func absf(v float32) float32 { return float32(math.Abs(float64(v))) }
+
+// snapDevices rounds a content offset to the pixels of the screen: the column
+// travels in steps of one device pixel, which is what the compositor of a
+// browser scrolls a rasterized layer by. scale is the device ratio, so a Retina
+// column moves in half DIPs and a plain one in whole DIPs.
+func snapDevices(y, scale float32) float32 {
+	if !snapScroll || !(scale > 0) {
+		return y
+	}
+	return float32(math.Round(float64(y)*float64(scale))) / scale
 }
 
 // drawScrollMarks paints the search hits and the selection over the column. It

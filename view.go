@@ -1133,7 +1133,7 @@ func (a *app) closeBook() {
 	a.boxW, a.boxH, a.areaW = 0, 0, 0
 	a.layScroll = false
 	a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
-	a.scrollFrom, a.scrollGoal, a.scrollAt = 0, 0, time.Time{}
+	a.scrollGoal, a.scrollAt = 0, time.Time{}
 	a.clearSelection()
 	a.hitQuads = nil
 	a.noteQuads = nil

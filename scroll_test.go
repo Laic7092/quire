@@ -273,7 +273,8 @@ func TestScrollSwitchInTheDisplaySettings(t *testing.T) {
 }
 
 // A wheel's notches glide the column to their target instead of jumping: the
-// place is stepped from the clock, and the notches on the way stack.
+// distance is stepped from the clock, the notches on the way add to it, and the
+// column lands where they asked.
 func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 	a, _ := newScrollWindow(t)
 	if a.maxScroll() < 700 {
@@ -291,22 +292,162 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 	if !a.gliding() {
 		t.Fatal("the column did not start gliding")
 	}
-	at = at.Add(scrollGlideDuration / 2)
-	a.stepScroll()
-	if a.scrollY <= 0 || a.scrollY >= 200 {
-		t.Errorf("half way down the glide, scrollY = %.0f of 200", a.scrollY)
-	}
-	if !a.gliding() {
-		t.Error("the glide landed at half its time")
+	if a.scrollY != 0 {
+		t.Errorf("an ask moved the column before a frame did: %.0f", a.scrollY)
 	}
 
-	at = at.Add(scrollGlideDuration)
-	a.stepScroll()
+	// The frames cover the distance, each a share of what is left: the first the
+	// most, the last the least, and it lands.
+	const frame = 7 * time.Millisecond
+	var moves []float32
+	for i := 0; i < 40 && a.gliding(); i++ {
+		at = at.Add(frame)
+		before := a.scrollY
+		a.stepScroll()
+		moves = append(moves, a.scrollY-before)
+	}
 	if a.gliding() {
-		t.Error("the glide never landed")
+		t.Fatalf("the column never landed: it owes %.1f", a.scrollGoal-a.scrollY)
 	}
 	if a.scrollY != 200 {
-		t.Errorf("landed at %.0f, want 200", a.scrollY)
+		t.Errorf("landed at %.1f, want 200", a.scrollY)
+	}
+	if len(moves) < 3 {
+		t.Fatalf("the column covered 200 DIPs in %d frames", len(moves))
+	}
+	if moves[0] <= moves[len(moves)-1] {
+		t.Errorf("the column does not ease in: it moved %.1f then %.1f", moves[0], moves[len(moves)-1])
+	}
+	if len(moves) > 35 {
+		t.Errorf("the column took %d frames (%s) to cover 200 DIPs", len(moves), time.Duration(len(moves))*frame)
+	}
+}
+
+// A touchpad's deltas are the movement itself: they land in the frame they
+// arrive in, and stack from where the column is drawn, so the text never trails
+// the hand. A wheel's notch still glides to its target.
+func TestScrollPreciseDeltasLandAtOnce(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	r := sheetRect(t, tt)
+	x, y := r.X+r.W/2, r.Y+r.H/2
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+
+	tt.Scroll(x, y, 0, 40)
+	if a.gliding() {
+		t.Fatalf("a precise delta started a glide, to %.0f", a.scrollGoal)
+	}
+	if a.scrollY != 40 {
+		t.Fatalf("a precise delta of 40 put the column at %.2f, want 40", a.scrollY)
+	}
+	tt.Scroll(x, y, 0, 12.5)
+	if a.scrollY != 52.5 {
+		t.Fatalf("a second delta stacked to %.2f, want 52.5", a.scrollY)
+	}
+	// Nothing is on its way, so the frames after the gesture do not move it.
+	at = at.Add(50 * time.Millisecond)
+	tt.Frame()
+	if a.scrollY != 52.5 {
+		t.Errorf("the column drifted to %.2f after the gesture", a.scrollY)
+	}
+}
+
+// Whatever asks for a distance is the same ask: a key's step and a wheel's notch
+// take the same motion, and asks that keep coming are followed at the rate they
+// come at — with one ask's worth of lag, and a short coast after the last one
+// rather than a run.
+func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
+	a, _ := newScrollWindow(t)
+	step := 3 * a.opts.FontSize * a.opts.LineHeight
+	if a.maxScroll() < 200*step {
+		t.Skipf("the sample book only scrolls %.0f", a.maxScroll())
+	}
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+
+	// A hold: asks every 40 ms — a key's step and a wheel's notch by turns, which
+	// is the same ask — and frames every 7 ms, as a 144 Hz display draws them.
+	const every, frame = 40 * time.Millisecond, 7 * time.Millisecond
+	next := at.Add(every)
+	asked := 0
+	var moves []float32
+	for i := 0; i < 120; i++ {
+		at = at.Add(frame)
+		if !at.Before(next) {
+			if asked%2 == 0 {
+				a.scrollLines(3)
+			} else {
+				a.scrollBy(step)
+			}
+			asked++
+			next = next.Add(every)
+		}
+		before := a.scrollY
+		a.stepScroll()
+		moves = append(moves, a.scrollY-before)
+		if lead := a.scrollGoal - a.scrollY; lead > 2*step+0.01 {
+			t.Fatalf("ask %d left the column %.1f behind, want two steps (%.1f)", asked, lead, 2*step)
+		}
+	}
+	// The asks ask for one step every 40 ms, so the column travels that fast.
+	var sum float32
+	for _, d := range moves[len(moves)-40:] {
+		sum += d
+	}
+	got := sum / (40 * float32(frame) / float32(time.Second))
+	want := step / float32(every) * float32(time.Second)
+	if got < want*0.9 || got > want*1.1 {
+		t.Errorf("the column cruised at %.0f DIPs a second, want %.0f (one step every %s)", got, want, every)
+	}
+
+	// The asking stops: what is left is a short coast, and it lands.
+	at = at.Add(200 * time.Millisecond)
+	a.stepScroll()
+	if a.gliding() {
+		t.Errorf("the column is still gliding %s after the last ask", 200*time.Millisecond)
+	}
+}
+
+// The column is drawn on whole device pixels, so two offsets inside the same
+// pixel print the same page: a glyph keeps one subpixel phase while the reader
+// is between two of them, instead of being swapped for a near copy of itself —
+// and moved by half a pixel — on every frame of the gesture.
+func TestScrollDrawsOnWholePixels(t *testing.T) {
+	if !snapScroll {
+		t.Skip("LAYX_NO_SNAP turned the snapping off")
+	}
+	a, tt := newScrollWindow(t)
+	if a.maxScroll() < 2 {
+		t.Skipf("the sample book only scrolls %.0f", a.maxScroll())
+	}
+	r := sheetRect(t, tt)
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+	draw := func(y float32) *image.RGBA {
+		a.scrollAt = time.Time{}
+		a.scrollGoal, a.scrollY = y, y
+		tt.Frame()
+		return tt.Image()
+	}
+	mid := a.maxScroll() / 2
+	first := draw(mid + 0.2)
+	second := draw(mid + 0.35)
+	differ := 0
+	for py := int(r.Y); py < int(r.Y+r.H); py++ {
+		for px := int(r.X); px < int(r.X+r.W); px++ {
+			if !image.Pt(px, py).In(first.Bounds()) {
+				continue
+			}
+			if first.RGBAAt(px, py) != second.RGBAAt(px, py) {
+				differ++
+			}
+		}
+	}
+	if differ != 0 {
+		t.Errorf("%d pixels changed between two offsets inside one pixel", differ)
 	}
 }
 
