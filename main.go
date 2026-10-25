@@ -168,6 +168,10 @@ type app struct {
 	// up to the rate its debt implies over scrollRamp, and a frame moves what
 	// that speed covers (see (*app).step).
 	scrollVel float32
+	// scrollRate is the same speed for a key that keeps asking: the arrow keys
+	// set a rate rather than a place, so the column holds one speed while the key
+	// repeats instead of gliding once per repeat (see (*app).scrollKey).
+	scrollRate bool
 	// frameEvery is how long a frame of a glide takes on this display, learned
 	// from the frames themselves (see (*app).frameStep).
 	frameEvery time.Duration

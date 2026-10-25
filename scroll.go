@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -72,25 +75,87 @@ const scrollStarved = 100 * time.Millisecond
 
 // scrollTopSpeed is how fast the column may travel, in DIPs a second, while a
 // stream of asks is being paid. It is above what a hand asks for, so that asks
-// are never left behind: a wheel spun at 25 notches a second on this machine's
-// nine-line setting asks for 7400 DIPs a second, and at the 4000 this used to be
-// the column fell to half the speed the wheel was turned at. A place far away
-// does not come this way — it is a place, and scrollTo lands on it — so the
-// ceiling is only ever a guard against arithmetic, not a speed the reader feels.
+// are never left behind: a wheel spun at 25 notches a second asks for about
+// 1500 DIPs a second in lines of the book, and the ceiling is well above what a
+// hand asks for. A place far away does not come this way — it is a place, and
+// scrollTo lands on it — so the ceiling only ever guards arithmetic, and is not
+// a speed the reader feels.
 const scrollTopSpeed = 12000
 
-// scrollWheelStep divides what a notch of a mouse wheel asks for. The platform
-// reports a wheel in the screen's lines — three by default, nine on this machine
-// — and MyGo turns a line into 33 DIPs, so a notch arrives as 99 DIP, or 297
-// here. A browser takes the notch whole: with the same setting, Edge moves 300
-// CSS px. So does the column.
-const scrollWheelStep = 1
+// platformScrollLine is how many DIPs the toolkit gives one of the platform's
+// scroll lines: a notch of a wheel arrives as its line count times this, which
+// is three lines by default and nine on some machines.
+const platformScrollLine = 33
+
+// scrollWheelLinesMax caps what one notch may ask for, in lines of the book: a
+// nine-line platform setting would otherwise send the page fifteen lines at a
+// time, and no one reads at that.
+const scrollWheelLinesMax = 4
+
+// wheelLineOverride, set by LAYX_WHEEL_LINES, is how many lines of the book a
+// notch moves whatever the platform says: the dial for a wheel that reads too
+// fast or too slow.
+var wheelLineOverride, wheelLineSet = envNumber("LAYX_WHEEL_LINES")
+
+// wheelLines is how many lines of the book a scroll event of dy DIPs asks for.
+func (a *app) wheelLines(dy float32) float32 {
+	lines := absf(dy) / platformScrollLine
+	if wheelLineSet {
+		lines = float32(wheelLineOverride)
+	}
+	return max(1, min(lines, scrollWheelLinesMax))
+}
+
+// wheelDistance is how far a scroll event of dy DIPs asks the column to move.
+// The count of lines is the platform's; the size of a line is the book's. A
+// notch is three lines of the platform and three lines here — 60 DIPs of the
+// page's type, not the 99 the platform's own 33-DIP line would cover of it,
+// which is five lines of a book. That is what makes a wheel read as one notch
+// of a page rather than as a leap past the paragraph the reader was on.
+func (a *app) wheelDistance(dy float32) float32 {
+	line := a.opts.FontSize * a.opts.LineHeight
+	return float32(math.Copysign(float64(a.wheelLines(dy)*line), float64(dy)))
+}
+
+// envNumber reads a number from the environment, reporting whether it was one.
+func envNumber(name string) (float64, bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(name)), 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
 
 // scrollGapMin is the distance under which the column is at the place it was
 // sent to when the screen cannot say otherwise: half a device pixel, which no
 // reader can see it settle. See stepScroll, which asks the pixels rather than
 // this number when it can.
 const scrollGapMin = 0.5
+
+// scrollUniform, cleared by LAYX_SCROLL_UNIFORM=0, is how a key that keeps
+// asking moves the column: at one rate, held for as long as the asks come,
+// rather than as one glide per ask. A key that repeats is not a series of
+// asks to arrive at places — it is the reader walking down the column — so
+// what it sets is a speed, and the frames hold it.
+var scrollUniform = os.Getenv("LAYX_SCROLL_UNIFORM") != "0"
+
+// scrollDebug, set by LAYX_SCROLL_DEBUG=1, prints how far the column moved on
+// each frame of a glide: the sequence a reader feels as smooth or as not.
+var scrollDebug = os.Getenv("LAYX_SCROLL_DEBUG") != ""
+
+const (
+	// scrollKeyLines and scrollKeyOver set the rate a key moves the column at:
+	// three lines of type in a tenth of a second, which is what reading a column
+	// wants and what a browser's smooth scrolling gives.
+	scrollKeyLines = 3.0
+	scrollKeyOver  = 100 * time.Millisecond
+	// scrollKeyRamp is how long the column takes to come up to that rate, and
+	// scrollKeyTail the distance over which it gives it back when the asks stop:
+	// the debt a key leaves is at most one step, so the place it stops at is the
+	// place of its last press.
+	scrollKeyRamp = 80 * time.Millisecond
+	scrollKeyTail = 80 * time.Millisecond
+)
 
 // scrolling reports whether the layout on screen is a scrolling column. It
 // follows the published layout, not the setting, so the frame between changing
@@ -144,6 +209,7 @@ func (a *app) scrollNow(y float32) {
 	y = clampf(y, 0, a.maxScroll())
 	a.scrollAt = time.Time{}
 	a.scrollPlan = false
+	a.scrollRate = false
 	a.scrollGoal, a.scrollY = y, y
 	a.scrollVel = 0
 	a.scrollAhead()
@@ -243,6 +309,7 @@ func (a *app) plan(y float32) {
 	a.scrollStart = time.Time{}
 	a.scrollDur = glideLength(y - a.scrollY)
 	a.scrollPlan = true
+	a.scrollRate = false
 	a.scrollAt = a.clock()
 	a.scrollVel = 0
 	a.scrollAhead()
@@ -315,6 +382,7 @@ func (a *app) stopScroll() {
 	if a.gliding() {
 		a.scrollAt = time.Time{}
 		a.scrollPlan = false
+		a.scrollRate = false
 		a.scrollGoal = a.scrollY
 		a.scrollVel = 0
 	}
@@ -359,6 +427,7 @@ func (a *app) stepColumn() bool {
 		return false
 	}
 	now := a.clock()
+	from := a.scrollY
 	raw := now.Sub(a.scrollAt)
 	a.scrollAt = now
 	if raw > scrollStarved {
@@ -399,6 +468,9 @@ func (a *app) stepColumn() bool {
 		if pixel > 0 && absf(gap)*pixel < scrollLand {
 			a.scrollY = a.scrollGoal
 			a.scrollVel = 0
+		} else if a.scrollRate {
+			// A key is asking: one rate for the whole hold (see scrollKey).
+			a.scrollY += a.stepRate(a.scrollGoal-a.scrollY, dt, pixel)
 		} else {
 			a.scrollY += a.step(a.scrollGoal-a.scrollY, dt, pixel)
 		}
@@ -408,6 +480,12 @@ func (a *app) stepColumn() bool {
 		// concerned: the frames left would draw the same pixels again.
 		a.scrollY = a.scrollGoal
 		a.scrollAt = time.Time{}
+		a.scrollRate = false
+	}
+	if scrollDebug {
+		fmt.Printf("[scroll] dt=%5.1fms  dy=%+7.2f  y=%8.1f  gap=%+7.2f  rate=%v  vel=%6.0f\n",
+			float64(raw.Microseconds())/1000, a.scrollY-from, a.scrollY,
+			a.scrollGoal-a.scrollY, a.scrollRate, a.scrollVel)
 	}
 	a.scrollAhead()
 	return true
@@ -503,10 +581,81 @@ func (a *app) landed() bool {
 }
 
 // scrollLines moves the column by lines lines of type, as one press of an arrow
-// key asks for them.
+// key asks for them. Under scrollUniform the press sets a rate rather than a
+// glide of its own: see scrollKey.
 func (a *app) scrollLines(lines float32) {
 	line := a.opts.FontSize * a.opts.LineHeight
+	if scrollUniform {
+		a.scrollKey(lines * line)
+		return
+	}
 	a.scrollBy(lines * line)
+}
+
+// scrollKey moves the column by d DIPs, as one arrow key press asks for them.
+//
+// A key that repeats is the reader walking down the column and not a series of
+// asks to arrive at places, so what it sets here is a rate: the frames hold it
+// for as long as the presses keep coming, and one press is still a step of d.
+// The debt is kept at one step and no more, so a tap lands where it asked and a
+// key held down cannot run away from the last of its repeats.
+func (a *app) scrollKey(d float32) {
+	if a.layout == nil || d == 0 {
+		return
+	}
+	a.showCover = false
+	a.jumpAt = false
+	if a.instant {
+		a.scrollNow(a.scrollY + d)
+		return
+	}
+	step := absf(d)
+	goal := a.scrollGoal + d
+	if d > 0 {
+		goal = min(goal, a.scrollY+step)
+	} else {
+		goal = max(goal, a.scrollY-step)
+	}
+	a.scrollGoal = clampf(goal, 0, a.maxScroll())
+	a.scrollRate = true
+	a.scrollPlan = false
+	if a.scrollAt.IsZero() {
+		a.scrollAt = a.clock()
+		a.scrollVel = 0
+	}
+	a.scrollAhead()
+}
+
+// keyRate is the speed a key moves the column at, in DIPs a second: the same
+// three lines a tenth of a second whatever the reading size.
+func (a *app) keyRate() float32 {
+	line := a.opts.FontSize * a.opts.LineHeight
+	return float32(scrollKeyLines) * line / float32(scrollKeyOver.Seconds())
+}
+
+// stepRate is how far the column moves this frame while a key is asking: one
+// rate for every frame of the hold, come up to over scrollKeyRamp. There is no
+// bell and no controller here — the reader walking down a column holds one
+// speed — and the debt left when the presses stop is given back over
+// scrollKeyTail, so the stop is a settle rather than a cut.
+func (a *app) stepRate(gap float32, dt time.Duration, pixel float32) float32 {
+	secs := dt.Seconds()
+	want := float64(gap) / scrollKeyTail.Seconds()
+	if top := float64(a.keyRate()); math.Abs(want) > top {
+		want = math.Copysign(top, want)
+	}
+	a.scrollVel += float32((want - float64(a.scrollVel)) * math.Min(1, secs/scrollKeyRamp.Seconds()))
+	move := float64(a.scrollVel) * secs
+	if math.Abs(move) > math.Abs(float64(gap)) {
+		move = float64(gap)
+	}
+	if pixel > 0 && math.Abs(move)*float64(pixel) < 1 {
+		move = math.Copysign(1/float64(pixel), float64(gap))
+	}
+	if math.Abs(move) > math.Abs(float64(gap)) {
+		move = float64(gap)
+	}
+	return float32(move)
 }
 
 // scrollScreens moves the column by screens screens, keeping a slice of the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"sort"
 	"testing"
 	"time"
 
@@ -378,10 +379,9 @@ func TestScrollPreciseDeltasLandAtOnce(t *testing.T) {
 	}
 }
 
-// Whatever asks for a distance is the same ask: a key's step and a wheel's notch
-// take the same motion, and a stream of them is followed at the rate it comes at,
-// so a held key moves the column as fast as it is held and no faster — no ask is
-// dropped to slow it down, and none piles up into a sprint after the release.
+// A wheel's notch is a distance asked for, and a stream of them is followed at
+// the rate it comes at: no ask is dropped to slow it down, and none piles up
+// into a sprint after the release.
 func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
 	a, _ := newScrollWindow(t)
 	step := 3 * a.opts.FontSize * a.opts.LineHeight
@@ -401,11 +401,7 @@ func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
 	for i := 0; i < 120; i++ {
 		at = at.Add(frame)
 		if !at.Before(next) {
-			if asked%2 == 0 {
-				a.scrollLines(3)
-			} else {
-				a.scrollBy(step)
-			}
+			a.scrollBy(step)
 			asked++
 			next = next.Add(every)
 		}
@@ -439,6 +435,123 @@ func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
 	a.stepScroll()
 	if a.gliding() {
 		t.Errorf("the column is still gliding %s after the last ask", 400*time.Millisecond)
+	}
+}
+
+// A notch of the wheel asks in lines of the book, not in the platform's own
+// 33-DIP lines: three lines of a page's type, which is what the wheel's setting
+// means, rather than the five that three lines of chrome would cover.
+func TestWheelNotchAsksInBookLines(t *testing.T) {
+	a, _ := newScrollWindow(t)
+	line := a.opts.FontSize * a.opts.LineHeight
+	for _, c := range []struct {
+		dy   float32
+		want float32
+	}{
+		{99, 3 * line},                    // three lines, the platform's default
+		{33, line},                        // one
+		{-99, -3 * line},                  // and back
+		{297, scrollWheelLinesMax * line}, // nine lines is capped
+		{3, line},                         // a stray few DIPs still asks a line
+	} {
+		if got := a.wheelDistance(c.dy); absf(got-c.want) > 0.01 {
+			t.Errorf("a notch of %.0f DIPs asked for %.1f, want %.1f", c.dy, got, c.want)
+		}
+	}
+
+	// And in motion: a notch glides to its place and lands there. The tester's
+	// own scroll is a precise delta, which is the touchpad's path, so the notch
+	// is handed to the column the way the pointer handler hands it over.
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+	start := a.scrollY
+	a.scrollBy(a.wheelDistance(99))
+	if !a.gliding() {
+		t.Fatalf("a notch did not start a glide")
+	}
+	for i := 0; i < 120 && a.gliding(); i++ {
+		at = at.Add(7 * time.Millisecond)
+		a.stepScroll()
+	}
+	if d := a.scrollY - start; absf(d-3*line) > 0.5 {
+		t.Errorf("a notch moved the column %.2f DIPs, want %.2f", d, 3*line)
+	}
+}
+
+// A key that repeats is the reader walking down the column, so what it sets is
+// a speed and not a place: every frame of the hold covers what the one before it
+// did. That is the difference between one movement and a glide per repeat, which
+// the eye reads as a pulse however many frames the display gives it.
+func TestScrollKeyHoldsOneRate(t *testing.T) {
+	a, _ := newScrollWindow(t)
+	step := 3 * a.opts.FontSize * a.opts.LineHeight
+	if a.maxScroll() < 200*step {
+		t.Skipf("the sample book only scrolls %.0f", a.maxScroll())
+	}
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+
+	// A held key: Windows repeats one about every 31 ms, and a 144 Hz display
+	// draws a frame every 7.
+	const every, frame = 31 * time.Millisecond, 7 * time.Millisecond
+	next := at.Add(every)
+	var moves []float32
+	for i := 0; i < 240; i++ {
+		at = at.Add(frame)
+		if !at.Before(next) {
+			a.scrollLines(3)
+			next = next.Add(every)
+		}
+		before := a.scrollY
+		a.stepScroll()
+		moves = append(moves, a.scrollY-before)
+	}
+
+	// The frames of the hold, once it has come up to its rate: one number, not a
+	// pulse. The median stands in for the rate, and no frame may be far from it
+	// either way — a glide per repeat is a factor of six.
+	steady := moves[len(moves)-120:]
+	sorted := append([]float32(nil), steady...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	median := sorted[len(sorted)/2]
+	var sum float32
+	for _, d := range steady {
+		sum += d
+		if d < median*0.85 || d > median*1.15 {
+			t.Fatalf("a frame of the hold moved %.2f DIPs, want about %.2f: the column is pulsing, not moving", d, median)
+		}
+	}
+	got := sum / (float32(len(steady)) * float32(frame) / float32(time.Second))
+	if want := a.keyRate(); got < want*0.9 || got > want*1.1 {
+		t.Errorf("the column held %.0f DIPs a second, want %.0f (three lines a tenth of a second)", got, want)
+	}
+
+	// The asking stops: the debt left is one step, and it is given back, not cut.
+	at = at.Add(250 * time.Millisecond)
+	a.stepScroll()
+	if a.gliding() {
+		t.Errorf("the column is still gliding %s after the last press", 250*time.Millisecond)
+	}
+
+	// One press is still one step, wherever it starts from, and it lands where
+	// it asked within a couple of tenths.
+	a.scrollNow(0)
+	at = at.Add(time.Second)
+	a.scrollLines(3)
+	start := a.scrollY
+	frames := 0
+	for i := 0; i < 60 && a.gliding(); i++ {
+		at = at.Add(frame)
+		a.stepScroll()
+		frames++
+	}
+	if d := a.scrollY - start; d < step-0.5 || d > step+0.5 {
+		t.Errorf("one press moved the column %.2f DIPs, want %.2f", d, step)
+	}
+	if d := time.Duration(frames) * frame; d > 250*time.Millisecond {
+		t.Errorf("one press took %s to land, want under 250ms", d)
 	}
 }
 
