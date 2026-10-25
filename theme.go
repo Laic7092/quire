@@ -1,6 +1,9 @@
 package main
 
 import (
+	"runtime"
+
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx/render/paint"
@@ -49,9 +52,23 @@ func (a *app) paperTheme(dark bool) reader.Theme {
 // window is chrome, and it keeps the system's own light or dark appearance
 // whatever paper the last book was printed on. Opening a book turns the window
 // into the page.
+//
+// The window's own controls — the system's caption buttons over the bar, GTK's
+// title buttons — follow the same appearance, which MyGo is told once per
+// change: see syncWindowAppearance.
 func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 	base := *c.Theme()
+	follow := a.book == nil || a.themeSys || a.theme == ""
 	paper := a.paperTheme(base.Dark)
+	// The window's own controls are the system's, and they sit on this bar: let
+	// them take its appearance rather than the desktop's.
+	if a.syncWindowAppearance(windowSource(follow, paper)) && follow {
+		// The bar was drawn in the appearance the last book forced, which this
+		// frame's base theme still carries; the window follows the desktop's
+		// own from here, so the library is drawn in it on this very frame.
+		base.Dark = mygo.Theme.IsDark()
+		paper = a.paperTheme(base.Dark)
+	}
 	pal := reader.ForTheme(paper)
 	if a.book == nil {
 		pal = systemChrome(base.Dark)
@@ -71,6 +88,45 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		reader.SetPalette(reader.ForTheme(paper))
 	}
 	return &a.skin
+}
+
+// windowSource is the appearance the window's own controls are drawn in. They
+// are the system's — minimize, maximize and close over the reading bar on
+// Windows, GTK's title buttons on Linux — and the system paints them in the
+// appearance it was given, not in the palette the bar is filled with. So the
+// window takes the bar's own: the desktop's while it follows it, and the
+// paper's while a book is open, which keeps white glyphs off a white page.
+func windowSource(follow bool, paper reader.Theme) mygo.ThemeSource {
+	if follow {
+		return mygo.ThemeSystem
+	}
+	if paper.Dark() {
+		return mygo.ThemeDark
+	}
+	return mygo.ThemeLight
+}
+
+// syncWindowAppearance hands MyGo the appearance the window's controls are
+// drawn in, once per change: a new source repaints the controls, the menus and
+// the window's frame, so it costs a frame and is not a per-frame call. It
+// reports that it changed the appearance, which the caller's frame still draws
+// with the old one.
+//
+// macOS is left alone. Its traffic lights are coloured dots that read on every
+// paper, and its menus are the desktop's own, not the reader's, so forcing the
+// page's appearance on the app would darken them without a reason.
+func (a *app) syncWindowAppearance(src mygo.ThemeSource) bool {
+	if runtime.GOOS == "darwin" || src == a.winSrc {
+		return false
+	}
+	if !mygo.App.IsReady() {
+		// A test's frames run without an application, and no window controls
+		// are there to be coloured: MyGo is not running to be told.
+		return false
+	}
+	a.winSrc = src
+	mygo.Theme.SetSource(src)
+	return true
 }
 
 // systemChrome is the window with nothing open: the desktop's own light or

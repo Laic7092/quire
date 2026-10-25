@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
 )
@@ -55,5 +56,32 @@ func TestThemeSwitchKeepsTheBook(t *testing.T) {
 	}
 	if got, want := a.layout.Typography().LinkColor, reader.Current().Link; got != want {
 		t.Fatalf("links are drawn in %v, want the paper's link colour %v", got, want)
+	}
+}
+
+// TestWindowControlsFollowThePaper pins the appearance the window's controls
+// are drawn in to the bar they sit on. MyGo paints minimize, maximize and close
+// (and GTK's title buttons) in the appearance it was given, not in the window's
+// palette, so a white page on a dark desktop drew them white on white, and a
+// dark page on a light one black on black.
+func TestWindowControlsFollowThePaper(t *testing.T) {
+	cases := []struct {
+		name   string
+		follow bool
+		paper  reader.Theme
+		want   mygo.ThemeSource
+	}{
+		{"following the desktop", true, reader.ThemeFocus, mygo.ThemeSystem},
+		{"the white page", false, reader.ThemeOriginal, mygo.ThemeLight},
+		{"the cream page", false, reader.ThemeFocus, mygo.ThemeLight},
+		{"the pale page", false, reader.ThemePaper, mygo.ThemeLight},
+		{"the warm page", false, reader.ThemeCalm, mygo.ThemeLight},
+		{"the graphite page", false, reader.ThemeQuiet, mygo.ThemeDark},
+		{"the black page", false, reader.ThemeBold, mygo.ThemeDark},
+	}
+	for _, c := range cases {
+		if got := windowSource(c.follow, c.paper); got != c.want {
+			t.Errorf("%s: the controls are drawn in %q, want %q", c.name, got, c.want)
+		}
 	}
 }

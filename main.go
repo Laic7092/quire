@@ -138,6 +138,11 @@ type app struct {
 	// chrome is the palette the window's own furniture is drawn in this frame:
 	// the reading theme with a book open, the system's own with nothing open.
 	chrome reader.Palette
+	// winSrc is the appearance the window's own controls — the system's caption
+	// buttons, or GTK's title buttons — were last drawn in, as handed to MyGo:
+	// the desktop's while the window follows it, the paper's while a book is
+	// open.
+	winSrc mygo.ThemeSource
 
 	// areaW is the width of the page area and boxW the width of the sheet as
 	// the last frame laid them out: how many pages fit on the sheet, and so how
