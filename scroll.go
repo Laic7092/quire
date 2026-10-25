@@ -26,16 +26,32 @@ const scrollInset = reader.PageTop
 // scrollFollow is how long the column takes to cover 63% of what a scroll asked
 // it for: the one number that sets how scrolling feels. Short enough that a key's
 // step lands while the key is still down, long enough that the column glides
-// rather than jumps, and the same for every ask.
-const scrollFollow = 30 * time.Millisecond
+// rather than jumps, and the same for every ask. At 30ms the first frame of a
+// 60 Hz display covered 43% of the ask — half a line for a key's step, half a
+// screen for a page key — and text moving in jumps that long is what reads as
+// flicker. At 60ms the first frame covers 24%, and the column still settles in
+// under a third of a second; past this the coast after the last ask reads as
+// drift, because an ask's tail is a share of scrollFollow and not a frame count.
+const scrollFollow = 60 * time.Millisecond
 
 // scrollTopSpeed is how fast the column may travel, in DIPs a second: a place far
-// away, as Home asks for, is travelled rather than whipped.
-const scrollTopSpeed = 4000
+// away, as Home asks for, is travelled rather than whipped. A page key rides it:
+// a screenful of type then arrives in about a third of a second, and no frame of
+// it moves more than a line and a half.
+const scrollTopSpeed = 2000
 
 // scrollLead is how many asks the column may owe at once. A burst that asks
-// faster than the column travels leaves this much to coast, not a run.
-const scrollLead = 2
+// faster than the column travels leaves one step to coast, not a run: a held key
+// then feeds the column a step at a time instead of piling the hold up into a
+// sprint, which is what two steps of lead looked like at a key's repeat rate.
+const scrollLead = 1
+
+// scrollWheelStep divides what a notch of a mouse wheel asks for. The platform
+// reports a wheel in lines and MyGo turns a line into 40 DIPs, so one notch
+// arrived as two to six lines of type: more distance than the follow covers in a
+// frame or two without the text strobing. Half of it is a notch of one to three
+// lines, which is the distance a reader expects a notch to be.
+const scrollWheelStep = 0.5
 
 // scrollGapMin is the distance under which the column is at the place it was
 // sent to: half a pixel, which no reader can see it settle.

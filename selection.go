@@ -39,7 +39,10 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		if ev.Precise {
 			a.scrollByNow(ev.DY)
 		} else {
-			a.scrollBy(ev.DY)
+			// A notch comes in the platform's lines, which the toolkit has
+			// already turned into DIPs: it is scaled to the lines a notch of a
+			// wheel should ask for.
+			a.scrollBy(ev.DY * scrollWheelStep)
 		}
 		return true
 	case ui.InputPointerDown:

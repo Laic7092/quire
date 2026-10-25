@@ -274,7 +274,8 @@ func TestScrollSwitchInTheDisplaySettings(t *testing.T) {
 
 // A wheel's notches glide the column to their target instead of jumping: the
 // distance is stepped from the clock, the notches on the way add to it, and the
-// column lands where they asked.
+// column lands where they asked. A burst in one frame only owes the lead, so the
+// column is never sent a run of steps it has to sprint through.
 func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 	a, _ := newScrollWindow(t)
 	if a.maxScroll() < 700 {
@@ -286,8 +287,8 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 
 	a.scrollBy(100)
 	a.scrollBy(100)
-	if a.scrollGoal != 200 {
-		t.Fatalf("two notches sent the column to %.0f, want 200", a.scrollGoal)
+	if want := float32(100) * scrollLead; a.scrollGoal != want {
+		t.Fatalf("two notches in one frame sent the column to %.0f, want %.0f", a.scrollGoal, want)
 	}
 	if !a.gliding() {
 		t.Fatal("the column did not start gliding")
@@ -296,11 +297,12 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 		t.Errorf("an ask moved the column before a frame did: %.0f", a.scrollY)
 	}
 
-	// The frames cover the distance, each a share of what is left: the first the
-	// most, the last the least, and it lands.
+	// The frames cover the distance, a share of what is left each, until the step
+	// reaches scrollTopSpeed; then it travels at that speed and eases into the
+	// place. The first frame is the longest, the last the shortest, and it lands.
 	const frame = 7 * time.Millisecond
 	var moves []float32
-	for i := 0; i < 40 && a.gliding(); i++ {
+	for i := 0; i < 80 && a.gliding(); i++ {
 		at = at.Add(frame)
 		before := a.scrollY
 		a.stepScroll()
@@ -309,17 +311,30 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 	if a.gliding() {
 		t.Fatalf("the column never landed: it owes %.1f", a.scrollGoal-a.scrollY)
 	}
-	if a.scrollY != 200 {
-		t.Errorf("landed at %.1f, want 200", a.scrollY)
+	if a.scrollY != 100 {
+		t.Errorf("landed at %.1f, want 100", a.scrollY)
 	}
 	if len(moves) < 3 {
-		t.Fatalf("the column covered 200 DIPs in %d frames", len(moves))
+		t.Fatalf("the column covered 100 DIPs in %d frames", len(moves))
 	}
 	if moves[0] <= moves[len(moves)-1] {
 		t.Errorf("the column does not ease in: it moved %.1f then %.1f", moves[0], moves[len(moves)-1])
 	}
-	if len(moves) > 35 {
-		t.Errorf("the column took %d frames (%s) to cover 200 DIPs", len(moves), time.Duration(len(moves))*frame)
+	if len(moves) > 60 {
+		t.Errorf("the column took %d frames (%s) to cover 100 DIPs", len(moves), time.Duration(len(moves))*frame)
+	}
+
+	// A place far away is travelled at scrollTopSpeed rather than whipped there:
+	// no frame of the jump moves more than a frame's worth of that speed.
+	a.scrollTo(a.maxScroll())
+	fastest := float32(scrollTopSpeed) * float32(frame) / float32(time.Second)
+	for i := 0; i < 5 && a.gliding(); i++ {
+		at = at.Add(frame)
+		before := a.scrollY
+		a.stepScroll()
+		if moved := a.scrollY - before; moved > fastest+0.01 {
+			t.Errorf("a jump moved %.1f DIPs in %s, want at most %.1f", moved, frame, fastest)
+		}
 	}
 }
 
@@ -354,9 +369,12 @@ func TestScrollPreciseDeltasLandAtOnce(t *testing.T) {
 }
 
 // Whatever asks for a distance is the same ask: a key's step and a wheel's notch
-// take the same motion, and asks that keep coming are followed at the rate they
-// come at — with one ask's worth of lag, and a short coast after the last one
-// rather than a run.
+// take the same motion, and asks that keep coming are followed at the rate the
+// follow can carry — with one ask's worth of lag, and a short coast after the
+// last one rather than a run. A hold asks faster than that, so the column stays
+// one step behind and feeds itself a step at a time: it never piles the hold up
+// into a sprint, which is what two steps of lead looked like at a key's repeat
+// rate.
 func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
 	a, _ := newScrollWindow(t)
 	step := 3 * a.opts.FontSize * a.opts.LineHeight
@@ -387,26 +405,30 @@ func TestScrollAsksCruiseAtTheirRate(t *testing.T) {
 		before := a.scrollY
 		a.stepScroll()
 		moves = append(moves, a.scrollY-before)
-		if lead := a.scrollGoal - a.scrollY; lead > 2*step+0.01 {
-			t.Fatalf("ask %d left the column %.1f behind, want two steps (%.1f)", asked, lead, 2*step)
+		if lead := a.scrollGoal - a.scrollY; lead > scrollLead*step+0.01 {
+			t.Fatalf("ask %d left the column %.1f behind, want %d step(s) (%.1f)", asked, lead, scrollLead, scrollLead*step)
 		}
 	}
-	// The asks ask for one step every 40 ms, so the column travels that fast.
+	// The asks ask for one step every 40 ms, faster than the follow can carry:
+	// the column moves what it can, and never more than was asked for.
 	var sum float32
 	for _, d := range moves[len(moves)-40:] {
 		sum += d
 	}
 	got := sum / (40 * float32(frame) / float32(time.Second))
 	want := step / float32(every) * float32(time.Second)
-	if got < want*0.9 || got > want*1.1 {
-		t.Errorf("the column cruised at %.0f DIPs a second, want %.0f (one step every %s)", got, want, every)
+	if got > want*1.02 {
+		t.Errorf("the column ran ahead of the asks at %.0f DIPs a second, want at most %.0f (one step every %s)", got, want, every)
+	}
+	if got < want*0.4 {
+		t.Errorf("the column fell behind at %.0f DIPs a second, want more than %.0f (one step every %s)", got, want*0.4, every)
 	}
 
-	// The asking stops: what is left is a short coast, and it lands.
-	at = at.Add(200 * time.Millisecond)
+	// The asking stops: what is left is one step, and it lands.
+	at = at.Add(400 * time.Millisecond)
 	a.stepScroll()
 	if a.gliding() {
-		t.Errorf("the column is still gliding %s after the last ask", 200*time.Millisecond)
+		t.Errorf("the column is still gliding %s after the last ask", 400*time.Millisecond)
 	}
 }
 
