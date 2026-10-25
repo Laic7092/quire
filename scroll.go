@@ -23,38 +23,73 @@ import (
 // and below it, in DIPs: the same head the paged sheet gives its first line.
 const scrollInset = reader.PageTop
 
-// scrollFollow is how long the column takes to cover 63% of what a scroll asked
-// it for: the one number that sets how scrolling feels. Short enough that a key's
-// step lands while the key is still down, long enough that the column glides
-// rather than jumps, and the same for every ask. At 30ms the first frame of a
-// 60 Hz display covered 43% of the ask — half a line for a key's step, half a
-// screen for a page key — and text moving in jumps that long is what reads as
-// flicker. At 60ms the first frame covers 24%, and the column still settles in
-// under a third of a second; past this the coast after the last ask reads as
-// drift, because an ask's tail is a share of scrollFollow and not a frame count.
+// scrollGlideBase and scrollGlideEvery are the length of a glide, in
+// milliseconds of base plus milliseconds a DIP of distance. Both are measured
+// from a browser on this machine (Edge, 150% scaling, 144 Hz): one notch of the
+// wheel — 300 CSS px at this machine's setting — takes 104 ms, three notches that
+// coalesce into one glide take 202 ms, and the shape of it is one bell, up over
+// the first half and down over the second. A shorter distance does not shrink
+// below scrollGlideMin: a browser's arrow key, 40 px, still takes a tenth of a
+// second, and a step shorter than that would read as a jump.
+const (
+	scrollGlideBase  = 55 * time.Millisecond
+	scrollGlideEvery = 163 * time.Microsecond
+	scrollGlideMin   = 100 * time.Millisecond
+)
+
+// scrollFollow is how long the column would take to cover what a scroll owes at
+// the rate that debt implies: distance over time, which is the middle of a
+// glide. It shapes a stream of asks — a held key, a wheel spun hard — which glides
+// for as long as it is asked to and so cannot be a bell of a fixed length.
 const scrollFollow = 60 * time.Millisecond
 
-// scrollTopSpeed is how fast the column may travel, in DIPs a second: a place far
-// away, as Home asks for, is travelled rather than whipped. A page key rides it:
-// a screenful of type then arrives in about a third of a second, and no frame of
-// it moves more than a line and a half.
-const scrollTopSpeed = 2000
+// scrollRamp is how long the column takes to come up to a new rate. A notch
+// arrives as a distance all at once, and a column that takes it at once starts a
+// glide with a lurch — half a line in one frame at 150%, which is what a reader
+// feels as the text jumping and then catching up. Coming up to the rate over
+// three frames or so removes the lurch without making the glide feel late, and a
+// stream of asks — a held key, a wheel spun hard — joins a rate already there
+// instead of restarting from nothing.
+const scrollRamp = 30 * time.Millisecond
 
-// scrollLead is how many asks the column may owe at once. A burst that asks
-// faster than the column travels leaves one step to coast, not a run: a held key
-// then feeds the column a step at a time instead of piling the hold up into a
-// sprint, which is what two steps of lead looked like at a key's repeat rate.
-const scrollLead = 1
+// scrollLand is how close, in device pixels, the column has to be to the place it
+// was sent to before it is there: two, so that a glide ends while it is still
+// covering a pixel a frame. Finer than that and the last frames each cover a
+// share of a pixel, which the screen draws as one pixel at a time — a crawl that
+// reads as the scroll going soft at the end.
+const scrollLand = 2
+
+// scrollFrameMax is the longest gap between two frames that still teaches the
+// column how long a frame is: past it the reader was not scrolling, and a glide's
+// frame is not that long.
+const scrollFrameMax = 34 * time.Millisecond
+
+// scrollStarved is the gap past which a glide is taken to have been starved of
+// frames rather than to be running: the app was busy, or the window was in the
+// background, and the column arrives at the place it was sent to instead of
+// resuming a crawl nobody was watching.
+const scrollStarved = 100 * time.Millisecond
+
+// scrollTopSpeed is how fast the column may travel, in DIPs a second, while a
+// stream of asks is being paid. It is above what a hand asks for, so that asks
+// are never left behind: a wheel spun at 25 notches a second on this machine's
+// nine-line setting asks for 7400 DIPs a second, and at the 4000 this used to be
+// the column fell to half the speed the wheel was turned at. A place far away
+// does not come this way — it is a place, and scrollTo lands on it — so the
+// ceiling is only ever a guard against arithmetic, not a speed the reader feels.
+const scrollTopSpeed = 12000
 
 // scrollWheelStep divides what a notch of a mouse wheel asks for. The platform
-// reports a wheel in lines and MyGo turns a line into 40 DIPs, so one notch
-// arrived as two to six lines of type: more distance than the follow covers in a
-// frame or two without the text strobing. Half of it is a notch of one to three
-// lines, which is the distance a reader expects a notch to be.
-const scrollWheelStep = 0.5
+// reports a wheel in the screen's lines — three by default, nine on this machine
+// — and MyGo turns a line into 33 DIPs, so a notch arrives as 99 DIP, or 297
+// here. A browser takes the notch whole: with the same setting, Edge moves 300
+// CSS px. So does the column.
+const scrollWheelStep = 1
 
 // scrollGapMin is the distance under which the column is at the place it was
-// sent to: half a pixel, which no reader can see it settle.
+// sent to when the screen cannot say otherwise: half a device pixel, which no
+// reader can see it settle. See stepScroll, which asks the pixels rather than
+// this number when it can.
 const scrollGapMin = 0.5
 
 // scrolling reports whether the layout on screen is a scrolling column. It
@@ -80,25 +115,18 @@ func (a *app) maxScroll() float32 {
 }
 
 // scrollTo sends the column to content y, clamped to the book: a place, as the
-// table of contents, Home or the store names one.
+// table of contents, a search hit, Home or the store names one. A place is
+// arrived at rather than travelled: the column lands in the frame the ask
+// arrived in, however far away it is. It is the asks for a distance — a wheel's
+// notch, a key's step, a screenful — that glide.
 func (a *app) scrollTo(y float32) {
 	if a.layout == nil {
 		return
 	}
-	// Any scrolling is a turn of the page as far as the cover is concerned,
-	// and it drops a place a pending mode switch meant to restore.
-	a.showCover = false
-	a.jumpAt = false
-	if a.instant {
-		a.scrollNow(y)
-		return
-	}
-	// A column already on its way is sent somewhere else: the follow before this
-	// one is cut short, and the new place is travelled from where the column is.
-	if a.gliding() {
-		perf.glide()
-	}
-	a.follow(clampf(y, 0, a.maxScroll()))
+	// A glide already on its way ends here rather than being followed, and it
+	// drops a place a pending mode switch meant to restore: the reader named
+	// where to go, and that place is on the sheet now.
+	a.scrollNow(clampf(y, 0, a.maxScroll()))
 }
 
 // scrollNow puts the column at content y in the frame the ask arrived in.
@@ -108,9 +136,16 @@ func (a *app) scrollNow(y float32) {
 	}
 	a.showCover = false
 	a.jumpAt = false
+	// A glide still on its way is cut short here, and the log counts it: the
+	// column was moved by something other than the ask it was following.
+	if a.gliding() {
+		perf.glide()
+	}
 	y = clampf(y, 0, a.maxScroll())
 	a.scrollAt = time.Time{}
+	a.scrollPlan = false
 	a.scrollGoal, a.scrollY = y, y
+	a.scrollVel = 0
 	a.scrollAhead()
 	a.afterScroll()
 }
@@ -118,8 +153,15 @@ func (a *app) scrollNow(y float32) {
 // scrollBy moves the column by dy DIPs, as every scroll asks: a wheel's notch, a
 // key's step, a screenful. The distance is the ask, whatever asked for it: the
 // asks add up in the goal, and the frames that follow cover it at one rate — so
-// one ask glides to its place while a burst of them cruises at the rate it comes
+// one ask glides to its place while a burst of them is paid at the rate it comes
 // at, and nothing is dropped or restarted on the way.
+//
+// Nothing is dropped: a burst used to be cut back to one ask's worth of debt,
+// which did keep a held key from sprinting, but it also threw away distance a
+// wheel had asked for — a spin of ten notches delivered three or four, and the
+// column could not be made to move faster however hard the wheel was turned. The
+// follow and scrollTopSpeed shape the motion now, and both are above what a hand
+// asks for, so what is asked for is what is delivered.
 func (a *app) scrollBy(dy float32) {
 	if a.layout == nil || dy == 0 {
 		return
@@ -131,14 +173,18 @@ func (a *app) scrollBy(dy float32) {
 		a.scrollNow(a.scrollY + dy)
 		return
 	}
-	goal := clampf(a.scrollGoal+dy, 0, a.maxScroll())
-	// A burst may ask faster than the column travels. It then owes at most
-	// scrollLead asks, so what is left when the asking stops is a short coast and
-	// not a run, and holding a key cannot walk the column away from the text.
-	if lead := goal - a.scrollY; absf(lead) > scrollLead*absf(dy) {
-		goal = a.scrollY + scrollLead*dy
+	// Every ask is owed in full and joins the same debt, so a wheel spun hard
+	// travels as far as it was spun instead of as far as the follow kept up.
+	y := clampf(a.scrollGoal+dy, 0, a.maxScroll())
+	resting := !a.gliding()
+	a.follow(y)
+	if resting && a.gliding() && !a.scrollPlan {
+		// One ask, from a column standing still: a glide of its own, and a glide of
+		// its own is a bell — up over the first half, down over the second, and a
+		// stop at the end. That is what a browser gives a notch of a wheel, and it
+		// is why one notch does not share the shape of a held key.
+		a.plan(y)
 	}
-	a.follow(goal)
 }
 
 // scrollByNow moves the column by dy DIPs at once, from where it is drawn: a
@@ -153,13 +199,111 @@ func (a *app) follow(y float32) {
 	if y == a.scrollY {
 		a.scrollAt = time.Time{}
 		a.scrollGoal = y
+		a.scrollVel = 0
+		return
+	}
+	if a.scrollPlan {
+		// The reader asked again while the bell was still on its way: what was one
+		// ask's bell becomes a stream, which the frames pay at the rate the asking
+		// comes at. The hand-over keeps the speed the bell had reached, so a held
+		// key accelerates out of its first step instead of starting over.
+		a.scrollPlan = false
+		a.scrollVel = a.planSpeed()
+		a.scrollAt = a.clock()
+		a.scrollGoal = y
+		a.scrollAhead()
 		return
 	}
 	a.scrollGoal = y
 	if a.scrollAt.IsZero() {
+		// A column standing still starts from no speed: the ramp is what keeps a
+		// notch from lurching on its first frame.
 		a.scrollAt = a.clock()
+		a.scrollVel = 0
 		a.scrollAhead()
 	}
+}
+
+// plan starts a glide of its own: the column covers the distance to y over a
+// length the distance sets, following a bell. Nothing is integrated — the place
+// is a function of the clock — so a late frame or a stutter does not stretch the
+// glide: it arrives when it said it would, and stops dead there, which is what
+// makes one notch feel like a notch rather than like a slide.
+func (a *app) plan(y float32) {
+	if y == a.scrollY {
+		return
+	}
+	a.scrollFrom = a.scrollY
+	// The bell's clock starts on the frame that first draws it, not on the ask:
+	// the app is idle when an ask arrives and its next frame is a tick of the idle
+	// cadence away, which on this machine is 17 ms — a sixth of the whole glide
+	// spent before the reader sees anything. Played in the frames it gets, the bell
+	// always shows its own start: a share of a pixel, then half a line, then the
+	// middle of the glide.
+	a.scrollStart = time.Time{}
+	a.scrollDur = glideLength(y - a.scrollY)
+	a.scrollPlan = true
+	a.scrollAt = a.clock()
+	a.scrollVel = 0
+	a.scrollAhead()
+}
+
+// planSpeed is how fast the planned glide is moving now, in DIPs a second: the
+// bell's slope at the phase it has reached.
+func (a *app) planSpeed() float32 {
+	if !a.scrollPlan || a.scrollDur <= 0 || a.scrollStart.IsZero() {
+		return a.scrollVel
+	}
+	u := float32(a.clock().Sub(a.scrollStart)) / float32(a.scrollDur)
+	return (a.scrollGoal - a.scrollFrom) / float32(a.scrollDur.Seconds()) * bellSlope(u)
+}
+
+// stepPlan draws the column where the bell says it is, and reports whether the
+// bell has finished.
+func (a *app) stepPlan(now time.Time) bool {
+	if a.scrollStart.IsZero() {
+		a.scrollStart = now
+	}
+	u := float32(now.Sub(a.scrollStart)) / float32(a.scrollDur)
+	if u >= 1 {
+		a.scrollY = a.scrollGoal
+		a.scrollPlan = false
+		a.scrollVel = 0
+		return true
+	}
+	a.scrollY = a.scrollFrom + (a.scrollGoal-a.scrollFrom)*bell(u)
+	return false
+}
+
+// glideLength is how long a glide over d DIPs takes: measured from a browser, a
+// base length that grows with the distance and a floor under it.
+func glideLength(d float32) time.Duration {
+	n := scrollGlideBase + time.Duration(absf(d)*float32(scrollGlideEvery))
+	if n < scrollGlideMin {
+		return scrollGlideMin
+	}
+	return n
+}
+
+// bell is the shape of a glide: nothing, everything, and a stop at each end,
+// 6u⁵-15u⁴+10u³. Its slope peaks at 1.875 in the middle, so the column is
+// fastest halfway and comes to rest at the place it was sent to.
+func bell(u float32) float32 {
+	if u <= 0 {
+		return 0
+	}
+	if u >= 1 {
+		return 1
+	}
+	return u * u * u * (u*(u*6-15) + 10)
+}
+
+// bellSlope is the slope of bell at u, in units of the bell's average rate.
+func bellSlope(u float32) float32 {
+	if u <= 0 || u >= 1 {
+		return 0
+	}
+	return 30 * u * u * (1 - u) * (1 - u)
 }
 
 // gliding reports whether the column is on its way to a place it was sent to.
@@ -170,7 +314,9 @@ func (a *app) gliding() bool { return !a.scrollAt.IsZero() }
 func (a *app) stopScroll() {
 	if a.gliding() {
 		a.scrollAt = time.Time{}
+		a.scrollPlan = false
 		a.scrollGoal = a.scrollY
+		a.scrollVel = 0
 	}
 }
 
@@ -183,29 +329,160 @@ func (a *app) stopScroll() {
 // followed at the rate they come at, with one ask's worth of lag. That is the
 // same motion for a wheel, a key and a screenful, and it needs no knowledge of
 // which of them asked.
+//
+// A glide is counted in device pixels, because that is what a screen has: a
+// share of the distance smaller than a pixel is drawn as the picture the frame
+// before it drew, and the reader sees the type stop dead and then hop. So the
+// last frame of a glide takes the last pixel whole, and no frame that is still
+// on its way takes less than one.
 func (a *app) stepScroll() {
 	if a.scrollAt.IsZero() {
 		return
 	}
 	now := a.clock()
-	dt := now.Sub(a.scrollAt)
+	raw := now.Sub(a.scrollAt)
 	a.scrollAt = now
-	if gap := a.scrollGoal - a.scrollY; dt > 0 && absf(gap) >= scrollGapMin {
-		// The share of the distance a scrollFollow's worth of time covers, and
-		// never more than scrollTopSpeed: a place far away is travelled, not
-		// whipped.
-		move := float64(gap) * (1 - math.Exp(-float64(dt)/float64(scrollFollow)))
-		if fast := float64(scrollTopSpeed) * dt.Seconds(); math.Abs(move) > fast {
-			move = math.Copysign(fast, float64(gap))
-		}
-		a.scrollY += float32(move)
+	if raw > scrollStarved {
+		// The glide got no frames for longer than a stutter: the app was busy or
+		// the window was not on screen. It arrives rather than resuming a crawl
+		// the reader has long stopped watching.
+		a.scrollY = a.scrollGoal
+		a.scrollVel = 0
+		a.scrollAt = time.Time{}
+		a.scrollAhead()
+		a.afterScroll()
+		return
 	}
-	if absf(a.scrollGoal-a.scrollY) < scrollGapMin {
+	if a.scrollPlan {
+		// A planned glide is a place on a clock, not a debt paid down: it needs no
+		// share of a frame and no pixels counted, and it arrives on time however
+		// the frames fell.
+		a.stepPlan(now)
+		if a.landed() {
+			// The last share of the bell is under a device pixel: the picture is
+			// the one the place asked for draws, so the column stands there — and
+			// the reading position is that place, not a share short of it.
+			a.scrollY = a.scrollGoal
+			a.scrollPlan = false
+			a.scrollVel = 0
+			a.scrollAt = time.Time{}
+		}
+		a.scrollAhead()
+		a.afterScroll()
+		return
+	}
+	dt := a.frameStep(raw)
+	gap := a.scrollGoal - a.scrollY
+	pixel := a.pixel() // 0 where the column is not drawn on the grid
+	if dt > 0 && gap != 0 {
+		// Under a couple of pixels to go: the place asked for is on the screen
+		// already, so the glide takes it now rather than spending frames on a
+		// share of it that the screen would draw as one pixel at a time. A glide
+		// always ends: every frame below moves the picture or lands.
+		if pixel > 0 && absf(gap)*pixel < scrollLand {
+			a.scrollY = a.scrollGoal
+			a.scrollVel = 0
+		} else {
+			a.scrollY += a.step(a.scrollGoal-a.scrollY, dt, pixel)
+		}
+	}
+	if a.landed() {
+		// The column stands where it was sent to as far as the screen is
+		// concerned: the frames left would draw the same pixels again.
 		a.scrollY = a.scrollGoal
 		a.scrollAt = time.Time{}
 	}
 	a.scrollAhead()
 	a.afterScroll()
+}
+
+// frameStep is the time this frame integrates, and it is never much more than a
+// frame. A glide that is standing still draws no frames, so the frame that starts
+// one is a whole idle gap after the last — 17 ms on a display that turns over
+// every 7 — and delivering that in one step is a lurch twice the size of any
+// other frame's. What the display did not give us is not motion: the debt is paid
+// over the frames the glide does get, and the glide is a frame longer for it.
+//
+// raw is also what the display's own interval is learned from, so that the limit
+// follows the screen: only a gap short enough to be one frame teaches it.
+func (a *app) frameStep(raw time.Duration) time.Duration {
+	if raw > 0 && raw <= scrollFrameMax {
+		if a.frameEvery <= 0 {
+			a.frameEvery = raw
+		} else {
+			a.frameEvery = (a.frameEvery*7 + raw) / 8
+		}
+	}
+	// One frame, exactly: a step never carries two frames' worth, so the picture
+	// moves by one frame's share on every frame it gets and the glide is a frame
+	// longer instead of a frame faster.
+	if limit := a.frameGap(); raw > limit {
+		return limit
+	}
+	return raw
+}
+
+// frameGap is how long a frame takes on this display, as the glides have seen it.
+func (a *app) frameGap() time.Duration {
+	if a.frameEvery <= 0 {
+		return time.Second / 60
+	}
+	return a.frameEvery
+}
+
+// step is how far the column moves this frame, in DIPs, toward the gap it owes.
+//
+// The speed is the one the gap implies — the debt covered over scrollFollow —
+// and never more than scrollTopSpeed, so a place far away is travelled rather
+// than whipped. That speed is not taken up at once: it is come up to over
+// scrollRamp, which is what a notch needs, because one arrives as a whole
+// distance in a single frame and a column that takes it at once covers a share of
+// it in the frame, which is the lurch a reader sees before the glide settles. A
+// stream of asks keeps the speed it had, so holding a key accelerates to the
+// rate the key repeats at and cruises there, and a wheel joins whatever it had.
+//
+// Every frame moves the picture: a share of the debt smaller than a pixel is
+// drawn as the frame before it, so the step is at least one pixel while the debt
+// is at least one pixel, and the caller lands the column rather than crawl.
+func (a *app) step(gap float32, dt time.Duration, pixel float32) float32 {
+	secs := dt.Seconds()
+	want := float64(gap) / scrollFollow.Seconds()
+	if top := float64(scrollTopSpeed); math.Abs(want) > top {
+		want = math.Copysign(top, want)
+	}
+	a.scrollVel += float32((want - float64(a.scrollVel)) * math.Min(1, secs/scrollRamp.Seconds()))
+	move := float64(a.scrollVel) * secs
+	if math.Abs(move) > math.Abs(float64(gap)) {
+		move = float64(gap)
+	}
+	if pixel > 0 && math.Abs(move)*float64(pixel) < 1 {
+		move = math.Copysign(1/float64(pixel), float64(gap))
+	}
+	if math.Abs(move) > math.Abs(float64(gap)) {
+		move = float64(gap)
+	}
+	return float32(move)
+}
+
+// pixel is how many device pixels a DIP is where the column is drawn, or 0 when
+// that is not known or the snapping is off — the two cases in which a glide has
+// no pixels to count.
+func (a *app) pixel() float32 {
+	if !snapScroll || !(a.devScale > 0) {
+		return 0
+	}
+	return a.devScale
+}
+
+// landed reports whether the column, drawn where it is, already stands at the
+// place it was sent to: the picture of the two is the same, so the frames left
+// would draw the same pixels again.
+func (a *app) landed() bool {
+	pixel := a.pixel()
+	if pixel <= 0 {
+		return absf(a.scrollGoal-a.scrollY) < scrollGapMin
+	}
+	return snapDevices(a.viewTop-a.scrollGoal, pixel) == snapDevices(a.viewTop-a.scrollY, pixel)
 }
 
 // scrollLines moves the column by lines lines of type, as one press of an arrow
@@ -307,7 +584,17 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// for as long as the gesture lasts. That is the breathing this used to do:
 	// crisp in any one frame, unreadable as motion. Snapping holds one phase for
 	// the whole gesture, the way a compositor moves a layer it painted once.
-	y := snapDevices(clampf(a.scrollY, 0, a.maxScroll()), p.Scale())
+	//
+	// Every tile has to stand at that same phase, so what is snapped is the
+	// screen position of the flow's top edge and not the content offset: tile
+	// tops are whole pixels apart (layoutSheet), so they only share one phase if
+	// the edge they hang from does.
+	y := clampf(a.scrollY, 0, a.maxScroll())
+	top := snapDevices(view.Y-y, p.Scale())
+	// Where the column is drawn, and at what ratio, is what says whether a glide
+	// has anything left to show (see landed). The viewport itself does not move,
+	// so this is a property of the window and of the screen.
+	a.viewTop, a.devScale = view.Y, p.Scale()
 	first := max(int(y/a.tileH)-1, 0)
 	last := int((y + view.H) / a.tileH)
 	if n := a.layout.TileCount(); last >= n {
@@ -323,12 +610,14 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 		if tile == nil {
 			continue
 		}
-		box := ui.Rect{X: view.X, Y: view.Y + tile.Top() - y, W: view.W, H: tile.Height()}
+		box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
 		// The performance log keeps how long each tile took: a tile built on the
 		// frame it is shown is what a scroll stutter looks like.
 		perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
 	}
-	a.drawScrollMarks(p, view, y)
+	// The marks are placed from the same top edge as the tiles, so the veils lie
+	// on the glyphs they belong to in the frame they are drawn.
+	a.drawScrollMarks(p, view, view.Y-top)
 }
 
 // snapScroll, cleared by LAYX_NO_SNAP, is the switch a reader flips to feel what
@@ -338,15 +627,25 @@ var snapScroll = os.Getenv("LAYX_NO_SNAP") == ""
 // absf is how far v is from zero.
 func absf(v float32) float32 { return float32(math.Abs(float64(v))) }
 
-// snapDevices rounds a content offset to the pixels of the screen: the column
-// travels in steps of one device pixel, which is what the compositor of a
-// browser scrolls a rasterized layer by. scale is the device ratio, so a Retina
-// column moves in half DIPs and a plain one in whole DIPs.
-func snapDevices(y, scale float32) float32 {
-	if !snapScroll || !(scale > 0) {
-		return y
+// snapDevices rounds a screen position or a length to the pixels of the screen,
+// as a compositor moves a layer it painted: the column travels in steps of one
+// device pixel. scale is the device ratio, so a Retina column moves in half DIPs
+// and a plain one in whole DIPs.
+func snapDevices(v, scale float32) float32 {
+	if !snapScroll {
+		return v
 	}
-	return float32(math.Round(float64(y)*float64(scale))) / scale
+	return roundDevices(v, scale)
+}
+
+// roundDevices rounds v to the pixels of the screen, whatever snapScroll says:
+// the grid the column is placed on and the one its tiles are cut on have to be
+// the same grid, or the tiles stand at phases of their own.
+func roundDevices(v, scale float32) float32 {
+	if !(scale > 0) {
+		return v
+	}
+	return float32(math.Round(float64(v)*float64(scale))) / scale
 }
 
 // drawScrollMarks paints the search hits and the selection over the column. It

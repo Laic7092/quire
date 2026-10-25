@@ -156,9 +156,27 @@ type app struct {
 	// scrolling column's viewport starts in the flow's content coordinates, and
 	// tileH the height of one of its tiles; scrollChapter is the chapter the
 	// panels were last rebuilt for.
-	layScroll     bool
-	scrollY       float32
-	tileH         float32
+	layScroll bool
+	scrollY   float32
+	tileH     float32
+	// viewTop and devScale are where the column's viewport was drawn and at what
+	// ratio, as of the last frame: a glide is over when the place it owes draws
+	// the same picture as the place it stands at (see (*app).landed).
+	viewTop  float32
+	devScale float32
+	// scrollVel is how fast the column is moving, in DIPs a second: a glide comes
+	// up to the rate its debt implies over scrollRamp, and a frame moves what
+	// that speed covers (see (*app).step).
+	scrollVel float32
+	// frameEvery is how long a frame of a glide takes on this display, learned
+	// from the frames themselves (see (*app).frameStep).
+	frameEvery time.Duration
+	// A planned glide: the place it started from, when, and how long it takes. One
+	// ask from a column standing still is a bell over these (see (*app).plan).
+	scrollFrom    float32
+	scrollStart   time.Time
+	scrollDur     time.Duration
+	scrollPlan    bool
 	scrollChapter int
 	// scrollGoal is the place the scrolls so far asked for, and scrollAt the time
 	// the column last moved toward it: zero while it stands at scrollGoal. The
