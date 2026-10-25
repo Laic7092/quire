@@ -308,8 +308,10 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 栅格化一次，之后每帧只是查表 + 贴图。这就是 `PageRenderer` 用的同一个光栅器——
 屏幕和 PNG 是同一批像素，字形只有一套实现，没有第二条回退路径。
 
-`Coverage` 做的是**精确面积积分**（不是超采样）：冷栅格约 3.2 µs/字形
-（17 DIP、DPR 2、CJK，一页约 3.2 ms），暖帧只查表。数据见
+`Coverage` 做的是**精确面积积分**（不是超采样）：冷栅格约 3.4 µs/字形
+（17 DIP、DPR 2、CJK），整页出图 **1.9–2.0 ms**（含纸面与墨色修正），暖帧只查表。
+同一份工作 FreeType 是 5.0 µs/字形、整页 3.3–3.6 ms，与 16×16 点采样真值的误差
+我们 0.085/255、它 0.122/255（`layx-raster/reference/freetype/`）。数据与复现步骤见
 `docs/scroll-performance.md`。
 
 墨色修正（DirectWrite 式对比度 + CoreText 式字干生长）也搬进了光栅器
