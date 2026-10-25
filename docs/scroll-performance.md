@@ -203,6 +203,45 @@ mygo 回退到**自带软件光栅**时用轮廓。理由当时是实测过的�
 不取生长**——它已经把轮廓撑粗了一圈，再叠生长会把粗体正文的字怀堵死。
 本机（软件光栅、这本正文全是 `<h5>` 的样书）实测：整页墨量 轮廓 : 图集 = 1 : 1.04。
 
+### 图集内部的光栅器：layx-raster 的 Coverage（2026-10-26）
+
+图集只负责"一次"，不负责"怎么画一个字形"。那一步现在默认交给
+[`github.com/laix/layx-raster`](https://github.com/laix/layx-raster) 的 `Coverage`：
+它把设备空间的一条路径画成 8 位覆盖率，和图集要的东西正好一样。原来的
+`golang.org/x/image/vector` 保留为 A/B 与回滚，环境变量是 `LAYX_GLYPH_RASTER=vector`。
+
+同一视口、同一条 outline、同一条 tone 处理，两条路逐像素比
+（`TestGlyphRasterizersMatch`，`benchScrollColumn` 的样本书）：
+
+| scale | 最大差(/255) | 平均差 | 差 >8 的像素 | 差 >32 的像素 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 18 | **0.280** | 0.039% | 0.000% |
+| 2 | 12 | **0.148** | 0.029% | 0.000% |
+
+没有变细、变粗或位移，差只在边缘像素的覆盖率分配上。
+
+代价在**冷栅格**：`BenchmarkGlyphRasterizer` 用同一批 CJK/拉丁字形，17 DIP、DPR 2，
+每个字形一次（不含图集查找）：
+
+| 光栅器 | 每字形 | 分配 |
+| --- | ---: | ---: |
+| `x/image/vector` | **1.62 µs** | 31 次/字形，2.0 KB |
+| layx-raster `Coverage` | **18.0 µs** | 0 次 |
+
+一个 620×700 的视口在 DPR 2 下约有 1000 个图集槽位，所以第一帧新页/新 tile 的
+冷栅格从约 1.5 ms 变成约 19 ms；图集命中后的帧完全不变（`TestGlyphAtlasScrolling`
+里滑动中的 `rasters=3.9/frame`）。这是一笔落在**翻页/新 tile 第一帧**上的成本，
+不是每帧成本；默认选 layx-raster 是为了屏幕和离屏共用一套光栅器，回退开关保持
+`vector`，基准与 A/B 测试都留在仓库里。
+
+复现：
+
+```sh
+go test -run TestGlyphRasterizersMatch -v ./internal/reader/
+go test -run XXX -bench BenchmarkGlyphRasterizer -benchtime 3s ./internal/reader/
+LAYX_GLYPH_RASTER=vector go test -run XXX -bench BenchmarkScrollViewportAtlas -benchtime 3s ./internal/reader/
+```
+
 ## 已做：只重绘的帧（2026-10-26）
 
 滚动的列和翻页的进度都是**时钟的函数**，所以手势中的帧不需要重建视图：draw 回调自己

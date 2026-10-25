@@ -303,9 +303,15 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 
 ## 无窗口出图（layx-raster）
 
-屏幕上的正文仍然走 `UIPainter` + MyGo；需要一张 PNG 而不需要窗口时（CI 快照、
-缩略图、问题报告），`internal/reader.PageRenderer` 用独立的纯 Go 软件光栅器
-[`layx-raster`](https://github.com/laix/layx-raster) 重放同一份 DisplayList，
+屏幕上的正文仍然由 `UIPainter` + MyGo 合成，但**字形的覆盖率**默认由同一个
+[`layx-raster`](https://github.com/laix/layx-raster) 的 `Coverage` 生成：图集逐字形
+栅格化一次，之后每帧只是查表 + 贴图（`LAYX_GLYPH_RASTER=vector` 可退回
+`golang.org/x/image/vector`）。两条路的画面差在抗锯齿以内（1× 平均 0.28/255），
+但冷栅格 layx-raster 约 18µs/字形、vector 约 1.6µs；暖帧两者一样。数据与取舍见
+`docs/scroll-performance.md`。
+
+需要一张 PNG 而不需要窗口时（CI 快照、缩略图、问题报告），
+`internal/reader.PageRenderer` 用同一个软件光栅器重放同一份 DisplayList，
 不经过 MyGo、GPU 或显示服务：
 
 ```sh

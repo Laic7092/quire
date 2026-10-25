@@ -3,6 +3,7 @@ package reader
 import (
 	"image"
 	"math"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -120,6 +121,106 @@ func TestGlyphAtlasMatchesOutlines(t *testing.T) {
 					scale, fade, d.over3*100)
 			}
 		}
+	}
+}
+
+// TestGlyphRasterizersMatch paints the same viewport with the atlas built by
+// layx-raster's Coverage and by x/image/vector, and holds them to being the
+// same picture: the choice of rasterizer may move where a pixel's coverage is
+// antialiased, but it may not thin, thicken or shift the text.
+func TestGlyphRasterizersMatch(t *testing.T) {
+	l, up, _ := benchScrollColumn(t)
+	useAtlas(t, "1")
+	usePlainCoverage(t)
+	old := glyphRasterMode
+	t.Cleanup(func() { glyphRasterMode = old })
+	const scrollY float32 = 4000
+	for _, scale := range []float32{1, 2} {
+		// The atlas key does not name the rasterizer, so switching it has to
+		// drop the bitmaps the other one made.
+		up.glyphs = nil
+		glyphRasterMode = "vector"
+		want := paintViewport(l, up, scale, scrollY)
+		up.glyphs = nil
+		glyphRasterMode = "layx"
+		got := paintViewport(l, up, scale, scrollY)
+
+		d := diffFrames(want, got)
+		t.Logf("scale=%g: max=%d mean=%.3f >8=%.3f%% >32=%.3f%%",
+			scale, int(d.max), d.mean, d.over8*100, d.over3*100)
+		if d.mean > 0.5 {
+			t.Errorf("scale=%g: mean channel difference %.2f of 255, want the same picture", scale, d.mean)
+		}
+		if d.over3 > 0.0005 {
+			t.Errorf("scale=%g: %.2f%% of pixels differ by more than 32 of 255", scale, d.over3*100)
+		}
+	}
+}
+
+// BenchmarkGlyphRasterizer measures the two coverage rasterizers on the same
+// glyph outlines, at the place the atlas would rasterize them (17 DIP at DPR
+// 2). It is the cost a cold atlas pays; a warm frame is a lookup either way.
+func BenchmarkGlyphRasterizer(b *testing.B) {
+	path, err := FindFont("")
+	if err != nil {
+		b.Skipf("no font available: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	up := NewUIPainter(nil, nil)
+	gf := up.glyphFace(&paint.Font{Data: data})
+	upem := float64(gf.face.Upem())
+	if upem <= 0 {
+		b.Skip("the face has no units per em")
+	}
+	const size, dpr = 17.0, 2.0
+	s := size * dpr / upem
+	const fx, fy = 0.25, 0.75
+
+	type subject struct {
+		out          *glyphOutline
+		w, h, kx, ky int
+	}
+	var subjects []subject
+	for _, r := range "天地玄黄宇宙洪荒日月盈昃辰宿列张寒来暑往秋收冬藏AVWgjmy" {
+		gid, ok := gf.face.NominalGlyph(r)
+		if !ok {
+			continue
+		}
+		out := gf.outline(uint32(gid))
+		if out == nil || len(out.segs) == 0 {
+			continue
+		}
+		left := int(math.Floor(fx + float64(out.minX)*s))
+		top := int(math.Floor(fy + float64(out.minY)*s))
+		right := int(math.Ceil(fx+float64(out.maxX)*s)) + 1
+		bottom := int(math.Ceil(fy+float64(out.maxY)*s)) + 1
+		if w, h := right-left, bottom-top; w > 0 && h > 0 {
+			subjects = append(subjects, subject{out: out, w: w, h: h, kx: left, ky: top})
+		}
+	}
+	if len(subjects) == 0 {
+		b.Skip("the face has no drawable glyphs in the sample")
+	}
+
+	for _, mode := range []string{"vector", "layx"} {
+		b.Run(mode, func(b *testing.B) {
+			old := glyphRasterMode
+			glyphRasterMode = mode
+			b.Cleanup(func() { glyphRasterMode = old })
+			a := &glyphAtlas{}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				for _, g := range subjects {
+					a.renderCoverage(g.w, g.h, g.out, s, fx, fy, g.kx, g.ky, nil, 0)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(len(subjects)), "ns/glyph")
+		})
 	}
 }
 
@@ -412,11 +513,11 @@ func TestGlyphCoverageIgnoresWhatCameBefore(t *testing.T) {
 	bigS, smallS := 34/upem, 17/upem // device pixels per font unit
 	// The buffer the grown glyph is rasterized into keeps the large glyph's ink.
 	dirty := &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
-	dirty.coverage(w, h, big, bigS, 4, 4, 0, 0, nil, 0)
-	got := append([]uint8(nil), dirty.coverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)...)
+	dirty.renderCoverage(w, h, big, bigS, 4, 4, 0, 0, nil, 0)
+	got := append([]uint8(nil), dirty.renderCoverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)...)
 
 	fresh := &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
-	want := fresh.coverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)
+	want := fresh.renderCoverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)
 	if !slices.Equal(got, want) {
 		sum := 0
 		for i := range got {
