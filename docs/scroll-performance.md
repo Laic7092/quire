@@ -7,6 +7,10 @@
 > `layx/epub` 已建立；`layx-raster` / `scrollhost`、reader 的 `paint.Clipped`
 > 接线（因此核心裁剪在 app 里还未生效）和 tile 位图缓存仍未做。下文相关条目
 > 已内联标注状态。
+>
+> 2026-10-25：**宿主的字形图集已落地**（`internal/reader/glyph_atlas.go`），
+> 逐字形的 outline→path→flatten→hash 每帧工作消失，见「已做：字形图集」一节。
+> 下面「数据」表里 3.15 / 2.06 ms 是**上一步（裁剪）之后、图集之前**的数，保留作历史。
 
 ## 一句话结论
 
@@ -15,10 +19,13 @@
 - 更难察觉的一半在**宿主自己**：多画了约 3 个视口的字，且触控板的每个滚动事件
   都重启一次 140 ms 缓动。
 - 已修其一（越界 run 裁剪），帧成本降到原来的 43%，画面逐像素不变。
+- 已修其二（**字形图集**）：轮廓只栅格化一次，之后每帧每字形只是一次查表 +
+  一次贴图。draw 回调内的成本 **4.4 ms → 0.21 ms**（真窗口）/ **2.2 ms → 0.09 ms**
+  （headless），滑动时命中率 98.9%，画质逐像素等价（总墨量差 0.002%）。
 - 核心库的回放裁剪也已实现（`paint.Clipped`），但宿主 `UIPainter` 还没实现该接口，
-  所以 app 里尚未生效；这是下一步成本最低的接线。
-- 剩下的 2 ms 只能靠"位图缓存"或"更便宜的逐字形绘制"解决；按核心库的边界，
-  这两件事属于宿主，不该进 `render`。
+  所以 app 里尚未生效；这条现在只是"再省一点 op 派发"，不再是主要矛盾。
+- 剩下的成本落到真正的光栅与合成上（GPU 上是填充率，软件光栅上是它的采样循环），
+  以及整棵视图重建的 ~1 ms；要再降就是 tile 位图缓存那条路。
 - 浏览器里的分发形态（wasm + Canvas）另见 [`web-wasm.md`](web-wasm.md)。
 
 ## 测量环境
@@ -27,10 +34,22 @@
 `internal/book/testdata/samples/aq-zhuan.epub`。基准文件：
 
 - `internal/reader/scrollpaint_bench_test.go`：视口绘制（620×700）、裁剪开关、逐像素比对
+- `internal/reader/glyph_atlas_test.go`：图集的逐像素比对、稳定性、计数器、draw 回调内成本
 - `scroll_perf_test.go`：整窗一帧（1180×800，含视图重建）
+- `cmd/glyphprobe`：**真窗口**滑这本书，报 wall/cpu 每帧、命中率与内存
 
 这些是**同机相对比较**：真机（Mac + GPU）的绝对值不同，但"每帧要做多少次
-outline→path→flatten→hash"是平台无关的。
+outline→path→flatten→hash"、"每帧要有多少个 quad"是平台无关的。
+
+两个坑，量之前先看：
+
+- **显示器刷新率会封顶 wall 时间。** 开发机是 WSL + 远程桌面（`rdp-0`，
+  3840×2160 @ 59.98 Hz），所以那里**量不出 144 Hz**，匀速帧一律 ~16.6 ms 或它的
+  整数倍。这种环境下要比的是 **cpu/frame**（`cmd/glyphprobe` 的 `cpu/frame`，
+  或 `MYGO_FRAME_STATS=1` 的 `build+paint+present`），不是 fps。
+- **`MYGO_GPU=0` 与 headless 都是 mygo 自带的软件光栅**，它把画图片当双线性采样，
+  比 mask 混合贵 4–5 倍。所以在它们上面，图集反而更贵；图集的默认开关就按这一点
+  跟随 `Painter.Accelerated()`（见「已做：字形图集」）。
 
 ## 数据
 
@@ -86,9 +105,75 @@ CPU profile（改前，一帧）：`UIPainter.DrawGlyphs` 累计 **85%**，其�
 - `Layout.TileHeight()` / `TileCount()` / `Tiles()` 也已提供，适配层不用再自己记 tile 高。
 
 **但在 app 里还没生效**：`UIPainter` 没有实现 `paint.Clipped`（`Visible() paint.Rect`），
-所以 `render` 的回放裁剪目前是关闭的；现在真正省掉字形几何的仍然是上一节的
-`DrawGlyphs` 预裁剪。给 `UIPainter` 补一个 `Visible()` 是下一步成本最低的接线，
-之后 `noCull` 那套可以只留给逐像素测试。
+所以 `render` 的回放裁剪目前是关闭的；省掉字形几何的是下面的字形图集，以及
+`DrawGlyphs` 里的预裁剪。给 `UIPainter` 补一个 `Visible()` 仍然值得做（省 op 派发、
+让 `noCull` 那套只留给逐像素测试），但它已经不是主要矛盾。
+
+### 字形图集（已做，宿主侧）
+
+`internal/reader/glyph_atlas.go`：把「轮廓 → 覆盖率位图」从"每帧每字形一次"改成
+"每个 (面, gid, 字号, DPR, 亚像素相位) 一次"，之后每帧每字形只剩一次查表和一次
+`p.ImageRegion`。
+
+- 轮廓仍来自 `glyphFace.outlines`（go-text `GlyphDataOutline` 的缓存，没动）；
+- 用 `golang.org/x/image/vector` 把轮廓栅格化成 8 位覆盖率，存成**白色 + alpha 的
+  `ui.Bitmap`**（premultiplied white）：颜色跟着 run 的 `Tint` 走，所以换主题、改
+  fade 都不重建图集；
+- key = `(面, gid, 字号量化到 0.5 px, DPR, 亚像素相位 x/y 各量化到 1/4 px)`。DPR 必须
+  进 key（设备像素 = size × DPR）；相位进 key 是因为同一字形在不同相位下覆盖率落在
+  不同像素上，这也正是旧路径每帧重做 mask 的原因（滑动时相位一直在变）；
+- 存进**层**：每层一张 1024×512 的 `ui.Bitmap`（2 MB RGBA），层内 shelf packing；每个
+  字形按实际覆盖率**裁到包围盒**（拉丁字省约 45% 面积，CJK 约 20%），
+  所以相邻字形之间没有空白像素要采样；
+- 上限 12 MB，按**层**做 LRU 淘汰；换 DPR、换主题都不重建，只是旧层慢慢被换掉；
+- 每层每帧最多 `Update` 一次，由宿主在画完页面后调用一次
+  `UIPainter.FlushGlyphs()`：引擎按 `scene.Image` 的 version 上传纹理，写在那一帧之后
+  就会晚一帧才显示——`sheet.go` 的 `drawSheet` 用 `defer` 保证这一点。
+
+数字（同一台机，Ryzen 7 7800X3D；headless = `ui.Tester` 的软件光栅，真窗口 = 787×700，
+`cmd/glyphprobe` 跑 6.3 px/帧 的滑动）：
+
+| 测量 | 逐字形轮廓 | 图集 |
+| --- | ---: | ---: |
+| headless 一帧 620×700，draw 回调内（scale 1） | 2.20 ms | **0.091 ms**（24×） |
+| 同上 scale 2 | 2.53 ms | **0.093 ms**（27×） |
+| `BenchmarkScrollViewportPaint`（裁后，scale 1） | 1.81 ms | **0.103 ms**（18×） |
+| 真窗口滑动，draw 回调内 | 4.39 ms | **0.21 ms**（21×） |
+| 真窗口滑动，整帧 wall | 90.8 ms | **29.0 ms**（3.1×） |
+| `BenchmarkScrollFrame`（整窗重建，1180×800） | 2.82 ms | **2.40 ms** |
+| 每帧 run / 字形（裁后） | 95 / 876 | 同 |
+| 每帧 flatten | 95 | **0** |
+| 图集命中率（滑动，6.3 px/帧） | — | **98.9%** |
+| 图集项 / 内存（DPR 1 静止 / 滑动） | — | 580 / 2 MB；1947 / 2 MB |
+| 图集项 / 内存（DPR 2 滑动） | — | 3819 / 10.5 MB（预算内，0 次淘汰） |
+
+画质（`TestGlyphAtlasMatchesOutlines`：同一页两条路各渲一次，逐像素比）：
+
+| scale | fade | 最大差(/255) | 平均差 | 差 >32 的像素 | 总墨量比 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | 1 | 30 | 1.10 | 0.000% | 0.99998 |
+| 1 | 0.5 | 33 | 1.20 | 0.000% | — |
+| 2 | 1 | 36 | 0.61 | 0.000% | 1.00002 |
+| 2 | 0.5 | 39 | 0.72 | 0.000% | — |
+
+差值全部落在边缘像素的**覆盖率分配**上（`x/image/vector` 与 mygo 的 mask 光栅器是两套
+算法），总墨量差 0.002%：没有变细、变粗或位移。顺带一提，旧路径把**每个轮廓点**吸附到
+1/4 px 网格（形状被微扰），图集只吸附整个字形的相位，形状本身是精确的——所以这里是
+"等价而非变差"，不需要换 `srwiley/rasterx`。
+
+**默认按渲染器选**（`(*UIPainter).atlasWanted`）：GPU 上走图集——两种做法在 GPU 上都是
+一张带纹理的 quad，省下的是几何；mygo 回退到**自带软件光栅**时不走，因为那个渲染器把
+图片当双线性采样（每像素 4 次取 texel + 12 次插值），比 mask 的一字节混合贵 4–5 倍。
+同一窗口实测 CPU/帧：GPU 路径 90.8 → 29.0 ms（图集赢），`MYGO_GPU=0` 软件光栅
+7.8 → **13.2** ms（图集输）。所以默认跟随 `Painter.Accelerated()`，
+`LAYX_GLYPH_ATLAS=1` / `0` 强制开关（A/B 与回滚），`LAYX_GLYPH_STATS=1` 打开计数器
+（`UIPainter.GlyphStats()`）。
+
+已知差异：Windows 的 DirectWrite 后端会给 mask 覆盖率做对比度/gamma 增强
+（`scene.TextCoverage`，由 `Scene.Text` 参数驱动），走到图片路径就没有这层增强。
+Linux/macOS 的文本引擎这两个参数是恒等值（所以本机逐像素 diff 才为 0）。要严格一致
+就在 Windows 上用 `LAYX_GLYPH_ATLAS=0`，或者把那层校正离线烘进图集（需要按墨色分桶，
+图集项会翻几倍，未做）。
 
 ## 光栅化是什么，为什么核心库不做它
 
@@ -283,30 +368,34 @@ type Cache[B any] struct{ /* 位图由宿主 raster 回调产出，库只管策�
 
 ## 性能归属（重要，别抱错期望）
 
-**把同样 170 行搬进 `scrollhost` 不会快一个毫秒。** 当前 3.15 ms 的构成：
+**把同样 170 行搬进 `scrollhost` 不会快一个毫秒。** 图集之前，3.15 ms 的构成是：
 
-| 部分 | 成本 | 谁能影响 |
-| --- | ---: | --- |
-| 字形几何（outline→path→flatten→hash） | ≈ 2.0 ms | 宿主：换绘制方式才行 |
-| 整棵视图建树 + 布局 + commit | ≈ 1.0 ms | 宿主：改用 repaint 帧即消失 |
-| op 派发 + 裁剪跳过（A/B 的地盘） | < 0.05 ms | 适配层可省一半以上 |
-| 背景/边框矩形 | 0.003 ms | 谁都能 |
+| 部分 | 图集之前 | 现在 | 谁能影响 |
+| --- | ---: | ---: | --- |
+| 字形几何（outline→path→flatten→hash） | ≈ 2.0 ms | **≈ 0.1 ms**（查表 + 贴图） | 宿主：已做（字形图集） |
+| 整棵视图建树 + 布局 + commit | ≈ 1.0 ms | ≈ 1.0 ms | 宿主：改用 repaint 帧即消失 |
+| op 派发 + 裁剪跳过（A/B 的地盘） | < 0.05 ms | < 0.05 ms | 适配层可省一半以上 |
+| 背景/边框矩形 | 0.003 ms | 0.003 ms | 谁都能 |
 
-适配层的价值是**正确性只写一次、不变量可测、集成成本降低**，不是帧率。真能再降
-成本的只有两件，都落在宿主：
+适配层的价值是**正确性只写一次、不变量可测、集成成本降低**，不是帧率。现在真能再降
+成本的只剩两件，都落在宿主：
 
 1. glide 帧用 `p.AnimationFrame`（repaint-only）：**−1.0 ms**，代价是滑动过程中
    folio 的百分比不刷新。
-2. tile 预光栅成位图（`ui.Render` + `ui.NewBitmap`，整像素吸附）：**−1.9 ms**，
-   到 ≈ 0.3 ms/帧，144 Hz 有约 20 倍余量。代价是 Retina 显存
-   （620×700×4B ≈ 1.7 MB/tile，2x 约 7 MB）与主题/字号/缩放变化时的作废。
+2. tile 预光栅成位图（`ui.Render` + `ui.NewBitmap`，整像素吸附）：把"每帧 ~900 个
+   quad"换成"每帧 3 个 quad"，144 Hz 的余量再放大一档。代价是 Retina 显存
+   （620×700×4B ≈ 1.7 MB/tile，2x 约 7 MB）、主题/字号/缩放变化时的作废，以及
+   失去了"文字每一帧都精确落在亚像素网格上"（tile 必须整像素吸附）。
 
 ## 待办与决策点
 
 1. ~~核心库：回放裁剪 + 字形 op 矩形~~ 已完成（`render/replay.go`，commit `9bb6365`）；
    剩余：宿主 `UIPainter` 实现 `paint.Clipped`，否则裁剪不会触发。
-2. 下游 module `layx-raster`：先做 policy + 纯 Go 软件后端（同步光栅），把
-   2.0 ms 的逐字形几何摊成"一帧一次 blit"；异步/多分辨率留第二期。
+2. ~~把 2.0 ms 的逐字形几何摊成"一帧一次 blit"~~ 已用**宿主侧字形图集**做到
+   （`internal/reader/glyph_atlas.go`，见「已做」）：不动核心、不加 module，
+   每帧 flatten 从 95 次降到 0。剩下 `layx-raster` 的意义变成**tile 位图缓存**
+   （policy 层）与可替换后端（异步/多分辨率留第二期），不再是字形几何。
+   
 3. 适配层（可与 2 同一个 module）：A + D + E（这三块是我们 app 里已验证过的逻辑，
    搬过去风险最低）。`Layout.TileHeight()` 已有（`render/scroll.go`），这条前置条件
    已满足；适配层本身仍未开始。
@@ -328,6 +417,20 @@ cd layx-reader
 go test -run XXX -bench 'BenchmarkScrollFrame' -benchtime 3s .
 go test -run XXX -bench 'BenchmarkScrollViewportPaint' -benchtime 3s ./internal/reader/
 go test -run 'TestDrawGlyphsCullChangesNoPixel' ./internal/reader/
+
+# 字形图集：画质逐像素比对、稳定性、计数器、以及 draw 回调内的成本
+go test -run 'TestGlyphAtlas' -v ./internal/reader/
+
+# 上面同一批基准与比对，强制走旧路径，做 A/B（也可以 =1 反过来）
+LAYX_GLYPH_ATLAS=0 go test -run XXX -bench 'BenchmarkScrollFrame' -benchtime 3s .
+LAYX_GLYPH_ATLAS=0 go test -run XXX -bench 'BenchmarkScrollViewportPaint' -benchtime 3s ./internal/reader/
+
+# 真窗口：开一个窗口滑这本书，报 wall/cpu 每帧、图集命中率与内存，跑完自己退出。
+# 显示器刷新率会封顶 wall，所以同机比 cpu/frame：
+go run ./cmd/glyphprobe                                  # 默认（GPU 上走图集）
+LAYX_GLYPH_ATLAS=0 go run ./cmd/glyphprobe               # 旧路径
+MYGO_GPU=0 go run ./cmd/glyphprobe                       # mygo 自带软件光栅（图集默认关闭）
+MYGO_FRAME_STATS=1 go run ./cmd/glyphprobe               # mygo 自己的 build/paint/present 分帧
 
 # layx 侧：建 tile 的成本（滚动侧不是瓶颈的证据）
 cd ~/layx/render && go test -run XXX -bench 'BenchmarkTileCold640x900|BenchmarkTiles200' -benchtime 2s

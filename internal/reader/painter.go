@@ -1,6 +1,8 @@
 package reader
 
 import (
+	"math"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/go-text/typesetting/font"
 	ot "github.com/go-text/typesetting/font/opentype"
@@ -9,8 +11,9 @@ import (
 )
 
 // UIPainter implements render's paint.Painter on top of MyGo's native
-// ui.Painter. Glyphs are filled from the font's own outlines, as the wasm
-// example does, but the path is a ui.Path rather than an SVG string.
+// ui.Painter. Glyphs are drawn from an atlas of the font's own outlines, one
+// bitmap a glyph, as the wasm example draws them from a ui.Path: see
+// glyph_atlas.go for what that costs and when the outlines are drawn instead.
 //
 // The display list always paints in page coordinates starting at (0,0); Draw
 // offsets them to the element's rect and clips to it once, so the per-op
@@ -23,7 +26,11 @@ type UIPainter struct {
 	faces map[*paint.Font]*glyphFace
 	// bitmaps are the images the paginator placed, decoded once per id.
 	bitmaps map[paint.ImageID]*ui.Bitmap
-	dx, dy  float32
+	// glyphs is the atlas of rasterized glyphs, made on first use: a page's
+	// outlines are turned into pixels once and blitted after that.
+	glyphs *glyphAtlas
+	stats  GlyphStats
+	dx, dy float32
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one
 	// page over another. It is 1 unless SetFade says otherwise.
 	fade float32
@@ -35,7 +42,30 @@ type UIPainter struct {
 // glyphFace is one parsed face and the outlines it has handed out so far.
 type glyphFace struct {
 	face     *font.Face
-	outlines map[uint32][]font.Segment
+	outlines map[uint32]*glyphOutline
+}
+
+// glyphOutline is one glyph's outline, cached: the segments in font units, y up
+// as the font has them, and the box they cover in the screen's own way, y down.
+// Control points bound a curve, so the box is the ink's, rounded out.
+type glyphOutline struct {
+	segs                   []font.Segment
+	minX, minY, maxX, maxY float32
+}
+
+// ink sets the box the outline covers, y down.
+func (o *glyphOutline) ink() {
+	o.minX, o.minY = float32(math.MaxFloat32), float32(math.MaxFloat32)
+	o.maxX, o.maxY = -float32(math.MaxFloat32), -float32(math.MaxFloat32)
+	for i := range o.segs {
+		for _, p := range o.segs[i].ArgsSlice() {
+			o.minX, o.maxX = min(o.minX, p.X), max(o.maxX, p.X)
+			o.minY, o.maxY = min(o.minY, -p.Y), max(o.maxY, -p.Y)
+		}
+	}
+	if len(o.segs) == 0 {
+		o.minX, o.minY, o.maxX, o.maxY = 0, 0, 0, 0
+	}
 }
 
 // NewUIPainter prepares a painter for one element. The outline and image
@@ -288,16 +318,28 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	if !u.noCull && (baseline+run.Size < vis.Y || baseline-run.Size > vis.Y+vis.H) {
 		return
 	}
+	if glyphStatsOn {
+		u.stats.Runs++
+		u.stats.Glyphs += len(run.Glyphs)
+	}
+	if u.atlasWanted() {
+		u.drawGlyphsAtlas(run, gf, upem)
+		return
+	}
+	if glyphStatsOn {
+		u.stats.Flattens++
+	}
 	scale := run.Size / upem
 
 	var path ui.Path
 	var any bool
 	for i := range run.Glyphs {
 		g := &run.Glyphs[i]
-		segs := gf.outline(g.ID)
-		if len(segs) == 0 {
+		out := gf.outline(g.ID)
+		if out == nil || len(out.segs) == 0 {
 			continue
 		}
+		segs := out.segs
 		ox := u.dx + run.X + g.X
 		oy := u.dy + run.Y + g.Y
 		for j := range segs {
@@ -329,6 +371,43 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	}
 }
 
+// FlushGlyphs uploads the glyphs the atlas rasterized this frame. Call it on
+// the UI thread after the pages are drawn: the engine uploads a layer whose
+// version changed, so a layer written after that shows its glyphs from the
+// next frame. It does nothing while the atlas is off or unchanged.
+func (u *UIPainter) FlushGlyphs() {
+	if u == nil || u.glyphs == nil {
+		return
+	}
+	u.glyphs.flush()
+}
+
+// GlyphStats returns what the painter did with glyphs since the last reset,
+// counted only when LAYX_GLYPH_STATS is set: LAYX_GLYPH_STATS=1 go run . It is
+// the numbers that say whether the atlas pays for itself.
+func (u *UIPainter) GlyphStats() GlyphStats {
+	if u == nil {
+		return GlyphStats{}
+	}
+	s := u.stats
+	if a := u.glyphs; a != nil {
+		s.Slots, s.Layers, s.Bytes = len(a.index), len(a.layers), a.bytes
+	}
+	return s
+}
+
+// ResetGlyphStats starts the counters of GlyphStats over, as a test does to
+// measure one frame.
+func (u *UIPainter) ResetGlyphStats() {
+	if u == nil {
+		return
+	}
+	u.stats = GlyphStats{}
+	if u.glyphs != nil {
+		u.glyphs.stats = &u.stats
+	}
+}
+
 // glyphFace parses the face a run names, once per font.
 func (u *UIPainter) glyphFace(f *paint.Font) *glyphFace {
 	if gf, ok := u.faces[f]; ok {
@@ -338,18 +417,20 @@ func (u *UIPainter) glyphFace(f *paint.Font) *glyphFace {
 	if face == nil {
 		return nil
 	}
-	gf := &glyphFace{face: face, outlines: make(map[uint32][]font.Segment)}
+	gf := &glyphFace{face: face, outlines: make(map[uint32]*glyphOutline)}
 	u.faces[f] = gf
 	return gf
 }
 
-func (gf *glyphFace) outline(gid uint32) []font.Segment {
-	if segs, ok := gf.outlines[gid]; ok {
-		return segs
+func (gf *glyphFace) outline(gid uint32) *glyphOutline {
+	if out, ok := gf.outlines[gid]; ok {
+		return out
 	}
-	out, _ := gf.face.GlyphDataOutline(font.GID(gid))
-	gf.outlines[gid] = out.Segments
-	return out.Segments
+	data, _ := gf.face.GlyphDataOutline(font.GID(gid))
+	out := &glyphOutline{segs: data.Segments}
+	out.ink()
+	gf.outlines[gid] = out
+	return out
 }
 
 func (u *UIPainter) rect(r paint.Rect) ui.Rect {

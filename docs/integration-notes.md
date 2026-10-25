@@ -109,6 +109,7 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
 | `internal/appstate` | 面板切换、异步刷新、索引与文档同步、位置恢复 |
 | `internal/reader/selection.go` | 选区端点、分页矩形、DFS 拼文本 |
 | `internal/reader/painter.go` | `paint.Painter` 的 UI 后端、按面缓存轮廓、封面摆放 |
+| `internal/reader/glyph_atlas.go` | 字形图集：轮廓只栅格化一次，之后每帧查表 + 贴图（见 `scroll-performance.md`） |
 | `view.go` | 阅读页、书库源列表、首页（含 `homeMetricsFor`）、目标卡、各面板接线 |
 | `theme.go` | 书库系统外观与阅读纸两套 palette、皮肤缓存 |
 | `stats.go` | 阅读统计与目标持久化 |

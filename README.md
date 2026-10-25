@@ -13,9 +13,11 @@
 2. `internal/reader`：加载字体（内置 XCharter 做正文衬线、Inter 做窗口文字，CJK
    回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`（分页用
    `ModePaged`，滚动用 `ModeScroll` + tile），并实现 `paint.Painter`，把
-   layx 的 `DisplayList` 通过 `ui.Painter` / `ui.Path` / `FillPath` 画出来（字形来自
-   go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能同时
-   出现；位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。同一层还管纸与墨
+   layx 的 `DisplayList` 通过 `ui.Painter` / `ui.ImageRegion` 画出来（字形来自
+   go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能
+   同时出现；每个字形按 (面, gid, 字号, DPR, 亚像素相位) 只**栅格化一次**，存进
+   `internal/reader/glyph_atlas.go` 的图集，之后每帧只是一次查表 + 一次贴图；
+   位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。同一层还管纸与墨
    （`Palette`，几套纸都在 `internal/reader/theme.go`）、阅读设置（`Options`：字号、
    行距、字面、对齐、页边距、双页、滚动、翻页方式）和选区：`Selection` 把拖出来的两个
    `render.Location` 变成矩形（`Layout.Selection`；分页模式带页号，滚动模式带内容
@@ -58,7 +60,9 @@
    卡里，选中的那张圈一道墨线），底下是 36 高的「⚙ Customize」胶囊。点开 Customize 才是
    字号、行距、页边距三个滑块，Serif/Sans、Justified/Left、Slide/Fade 三组分段，
    Two Pages 与 Scrolling 两个开关和 Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
-4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见。
+4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见；
+   `docs/scroll-performance.md`：滚动/绘制性能的实测与分工（越界裁剪、字形图集、
+   tile 位图缓存三条路的数字与取舍）。
 
 常用功能各有一个包，都能独立测试：
 
@@ -107,6 +111,12 @@ DIP 时退回单页），点书页左/右半翻页（拖动选字）；底栏是
 选中一条可在面板底部写/改批注、保存或删除。两者都按 `Book.Key` 存进状态文件。
 
 `LAYX_NO_ANIM=1` 关掉翻页动画（CI 和 `SNAP=1` 的快照都这样跑，帧才稳定）。
+
+`LAYX_GLYPH_ATLAS=0` / `=1` 强制用旧路径（每帧把轮廓建成 `ui.Path` 再 `FillPath`）
+或新路径（字形图集）；不设时按渲染器选：GPU 上用图集，mygo 回退到自带软件光栅时用
+旧路径（原因与实测见 `docs/scroll-performance.md`）。`LAYX_GLYPH_STATS=1` 打开
+计数器，`UIPainter.GlyphStats()` 给出每帧 run / 字形数、图集命中率、栅格化次数、
+上传次数与图集内存。`MYGO_FRAME_STATS=1` 让 mygo 打印每帧的 build/layout/paint/present。
 
 首页的图书行按「上次读的时间」排序（显示菜单里可以切成按书名），位置取 `store.Position`；
 封面走 `internal/library` 只读 OPF 元数据，不打开整本书。阅读目标的账本在

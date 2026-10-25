@@ -139,6 +139,9 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	if p == nil || r.W <= 0 || r.H <= 0 {
 		return
 	}
+	// The glyphs the painter rasterized while drawing are uploaded after the
+	// pages are drawn, so this frame shows them.
+	defer a.paint.FlushGlyphs()
 	if a.showCover && a.paint != nil && a.paint.DrawCover(p, a.cover, r, 28) {
 		return
 	}
