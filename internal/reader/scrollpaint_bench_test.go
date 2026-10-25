@@ -135,3 +135,39 @@ func TestDrawGlyphsCullChangesNoPixel(t *testing.T) {
 		t.Fatal("the cull changed the painted column")
 	}
 }
+
+// BenchmarkScrollViewportAtlas paints the same viewport from the atlas and from
+// the outlines, at both device ratios: what the atlas is worth on the renderer
+// the frame is drawn on is the number that decides where it is used.
+func BenchmarkScrollViewportAtlas(b *testing.B) {
+	const scrollY float32 = 4000
+	for _, mode := range []string{"0", "1"} {
+		for _, scale := range []float32{1, 2} {
+			name := fmt.Sprintf("outlines/scale=%g", scale)
+			if mode == "1" {
+				name = fmt.Sprintf("atlas/scale=%g", scale)
+			}
+			b.Run(name, func(b *testing.B) {
+				l, up, _ := benchScrollColumn(b)
+				old := glyphAtlasMode
+				glyphAtlasMode = mode
+				b.Cleanup(func() { glyphAtlasMode = old })
+				counter := &countPainter{UIPainter: up}
+				tt := ui.NewTester(func(c *ui.Context) {
+					ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+						drawViewport(l, p, counter, scrollY)
+						p.AnimationFrame()
+					})
+				}, 620, 700)
+				tt.SetScale(scale)
+				tt.Frame()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					tt.Advance(16 * time.Millisecond)
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(counter.glyphs)/float64(b.N), "glyphs/frame")
+			})
+		}
+	}
+}

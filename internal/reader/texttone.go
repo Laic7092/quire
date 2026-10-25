@@ -67,11 +67,16 @@ var textStemOff = os.Getenv("LAYX_TEXT_STEM") == "0"
 // face does not have as the regular it fell back to, as it was before.
 var fakeBoldOff = os.Getenv("LAYX_FAKE_BOLD") == "0"
 
-// toneKey names one correction: the ink it is for, and the band of sizes the
-// type is set at, since stem darkening is the part that depends on the size.
+// toneKey names one correction: the ink it is for, the band of sizes the type is
+// set at, since stem darkening is the part that depends on the size, and whether
+// the run is drawn in a weight its face does not have. A run grown into a
+// synthetic bold is already heavier than its outline, so it takes the contrast
+// and not the growth: a bold body's strokes would close their counters with
+// both.
 type toneKey struct {
 	r, g, b uint8
 	band    uint8
+	grown   bool
 }
 
 // sizeBand buckets a size into the bands the stem darkening changes over: body
@@ -108,14 +113,18 @@ func stemDarkening(band uint8) float64 {
 }
 
 // toneLUTFor builds the correction for ink c in band: DirectWrite's contrast
-// curve, and then a growth of the edges — the pixels between paper and ink — so
-// the strokes keep their weight and their joins stay round.
-func toneLUTFor(c paint.Color, band uint8) *toneLUT {
+// curve, and then, unless the run is a synthetic bold that carries its own
+// growth, a growth of the edges — the pixels between paper and ink — so the
+// strokes keep their weight and their joins stay round.
+func toneLUTFor(c paint.Color, band uint8, grown bool) *toneLUT {
 	ink := [3]float64{float64(c.R) / 255, float64(c.G) / 255, float64(c.B) / 255}
 	luma := 0.30*ink[0] + 0.59*ink[1] + 0.11*ink[2]
 	// Dark ink gets the full contrast; pale ink, as a night paper's, none.
 	k := textContrast * math.Min(math.Max(3-4*luma, 0), 1)
 	darken := stemDarkening(band)
+	if grown {
+		darken = 0
+	}
 	lut := new(toneLUT)
 	for i := range lut {
 		a := float64(i) / 255
@@ -129,14 +138,16 @@ func toneLUTFor(c paint.Color, band uint8) *toneLUT {
 	return lut
 }
 
-// toneFor returns the correction for ink c at size, building it once per ink
-// and band: a run's colour is one of the handful a document bakes, so the
-// table is made once and every glyph of that ink is rasterized with it.
-func (u *UIPainter) toneFor(c paint.Color, size float32) *toneLUT {
+// toneFor returns the correction for ink c at size, building it once per ink,
+// band and weight: a run's colour is one of the handful a document bakes, so the
+// table is made once and every glyph of that ink is rasterized with it. grown
+// says the run is a synthetic bold, which takes the contrast without the growth
+// (see toneKey).
+func (u *UIPainter) toneFor(c paint.Color, size float32, grown bool) *toneLUT {
 	if textToneOff || c.A == 0 {
 		return nil
 	}
-	key := toneKey{r: c.R, g: c.G, b: c.B, band: sizeBand(size)}
+	key := toneKey{r: c.R, g: c.G, b: c.B, band: sizeBand(size), grown: grown}
 	if lut, ok := u.tones[key]; ok {
 		return lut
 	}
@@ -145,7 +156,7 @@ func (u *UIPainter) toneFor(c paint.Color, size float32) *toneLUT {
 		// with a bitmap of every glyph for each of them: the nearest ink's
 		// correction is within a percent or two of the exact one, and it keeps
 		// the atlas to the inks the document actually reads in.
-		if near := u.nearestTone(c, key.band); near != nil {
+		if near := u.nearestTone(c, key.band, key.grown); near != nil {
 			return near
 		}
 		return nil
@@ -153,18 +164,18 @@ func (u *UIPainter) toneFor(c paint.Color, size float32) *toneLUT {
 	if u.tones == nil {
 		u.tones = make(map[toneKey]*toneLUT)
 	}
-	lut := toneLUTFor(c, key.band)
+	lut := toneLUTFor(c, key.band, key.grown)
 	u.tones[key] = lut
 	return lut
 }
 
 // nearestTone is the correction of the closest ink in the cache to c, by luma,
-// or nil when the cache holds nothing of that band.
-func (u *UIPainter) nearestTone(c paint.Color, band uint8) *toneLUT {
+// or nil when the cache holds nothing of that band and weight.
+func (u *UIPainter) nearestTone(c paint.Color, band uint8, grown bool) *toneLUT {
 	want := inkLuma(c)
 	best, bestGap := (*toneLUT)(nil), 2.0
 	for key, lut := range u.tones {
-		if key.band != band {
+		if key.band != band || key.grown != grown {
 			continue
 		}
 		if gap := math.Abs(inkLuma(paint.Color{R: key.r, G: key.g, B: key.b}) - want); gap < bestGap {

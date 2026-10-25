@@ -124,22 +124,30 @@ func (u *UIPainter) atlas() *glyphAtlas {
 	return u.glyphs
 }
 
-// atlasWanted reports whether this frame draws its glyphs from the atlas. On a
-// GPU it does: the two paths send the backend one textured quad for every glyph
-// either way, and the atlas saves the geometry. Under mygo's own software
-// rasterizer it does not, because that one samples an image bilinearly (four
-// texels and twelve lerps a pixel), which costs four to five times what one
-// byte of mask does: measured on one window, the frames of a glide went from
-// 7.8 ms of CPU to 13.2 ms with the atlas there, and from 118 ms to 32 ms on the
-// GPU. GlyphStats tells the two apart in a frame's numbers.
+// atlasWanted reports whether this frame draws its glyphs from the atlas. It
+// does, on every renderer, and what changed the answer was this reader's own
+// work rather than the engine's: an atlas slot is cut to the ink's bounding box
+// and its quad lands on whole device pixels, so what a frame asks the renderer
+// for is one exact texel an axis, and what it no longer does is turn each glyph
+// into a path, flatten it and hash it — per glyph, per frame.
+//
+// The numbers that used to keep the software rasterizer on the outlines (7.8 ms
+// of frames against 13.2 with the atlas) were measured when a slot was a whole
+// glyph cell and the atlas was uploaded in pieces. Measured again on the same
+// machine, one viewport of a scrolling column, draw callback only:
+//
+//	outlines  2.75 ms (scale 1), 3.00 ms (scale 2)
+//	atlas     0.105 ms (scale 1), 0.117 ms (scale 2)
+//
+// and end to end through the software rasterizer, one frame of a glide of a
+// 1180×800 window: 5.2 ms painted from the outlines against 2.2 ms from the
+// atlas. The atlas is not a GPU's privilege; it is what text costs when the
+// geometry is paid once (see glyph_atlas.go).
+//
+// LAYX_GLYPH_ATLAS=0 draws the outlines, which is the rollback and the A/B: it
+// is the path the atlas has to keep matching (glyph_atlas_test.go).
 func (u *UIPainter) atlasWanted() bool {
-	switch glyphAtlasMode {
-	case "0":
-		return false
-	case "1":
-		return true
-	}
-	return u.P != nil && u.P.Accelerated()
+	return glyphAtlasMode != "0"
 }
 
 // GlyphStats is what the painter did with glyphs since the last
@@ -193,8 +201,8 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 	// How the run's coverage is corrected is the ink's business, and whether it
 	// is grown is the book's: a weight the face does not have is drawn in
 	// synthetic bold, as a browser draws one (see texttone.go).
-	tone := u.toneFor(run.Color, run.Size)
 	bold := run.EmulateBold && !fakeBoldOff
+	tone := u.toneFor(run.Color, run.Size, bold)
 	// The run's origin on the device grid, and the phase it stands at, which is
 	// the same for every glyph that shares its offsets.
 	ox := float64(u.dx+run.X) * float64(dpr)

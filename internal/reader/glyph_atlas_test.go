@@ -165,24 +165,13 @@ func TestGlyphAtlasFrame(t *testing.T) {
 	}
 }
 
-// TestGlyphAtlasByRenderer holds the default to the renderer: a frame drawn on
-// a GPU takes the atlas, one drawn by mygo's own software rasterizer does not,
-// and LAYX_GLYPH_ATLAS says otherwise.
+// TestGlyphAtlasByRenderer holds the default to the atlas on every renderer,
+// and the switch to the variable: the outlines are the A/B, not the default.
 func TestGlyphAtlasByRenderer(t *testing.T) {
 	l, up, _ := benchScrollColumn(t)
 	useAtlas(t, "")
-	var painter *ui.Painter
-	ui.Render(func(c *ui.Context) {
-		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-			painter = p
-		})
-	}, 100, 100, 1)
-	up.P = painter
-	if painter.Accelerated() {
-		t.Skip("this host draws on a GPU")
-	}
-	if up.atlasWanted() {
-		t.Error("a headless frame draws from the atlas, want the outlines under a software rasterizer")
+	if !up.atlasWanted() {
+		t.Error("a frame does not draw from the atlas by default")
 	}
 	glyphAtlasMode = "1"
 	if !up.atlasWanted() {
@@ -330,8 +319,8 @@ func TestTextToneMakesTheEdgesInkier(t *testing.T) {
 // and a pale ink — a night paper's — gets no contrast on top of the growth,
 // since what a dark page needs is the growth and not more weight.
 func TestTextToneCurve(t *testing.T) {
-	dark := toneLUTFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 1)
-	pale := toneLUTFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 1)
+	dark := toneLUTFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 1, false)
+	pale := toneLUTFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 1, false)
 	for name, lut := range map[string]*toneLUT{"dark": dark, "pale": pale} {
 		if lut[0] != 0 || lut[255] != 255 {
 			t.Fatalf("%s ink: the paper is %d and the ink %d, want 0 and 255", name, lut[0], lut[255])
@@ -349,9 +338,20 @@ func TestTextToneCurve(t *testing.T) {
 		t.Errorf("a pale ink at half coverage is %d and a dark one %d: want the pale one lighter", pale[128], dark[128])
 	}
 	// A size band takes less of the gain: display type has stems of its own.
-	big := toneLUTFor(paint.Color{A: 255}, sizeBand(30))
+	big := toneLUTFor(paint.Color{A: 255}, sizeBand(30), false)
 	if big[128] >= dark[128] {
 		t.Errorf("display type at half coverage is %d and body type %d: want the display type lighter", big[128], dark[128])
+	}
+	// A run grown into a synthetic bold takes the contrast without the growth:
+	// its strokes already carry more than their outline, and stacking the growth
+	// on that closes a bold body's counters.
+	grown := toneLUTFor(paint.Color{A: 255}, sizeBand(17), true)
+	if grown[128] >= dark[128] {
+		t.Errorf("a grown run at half coverage is %d and a plain one %d: want no growth on a grown run",
+			grown[128], dark[128])
+	}
+	if grown[128] <= 128 {
+		t.Errorf("a grown run at half coverage is %d: want the contrast kept", grown[128])
 	}
 }
 
