@@ -31,6 +31,7 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		if !a.scrolling() || a.layout == nil {
 			return false
 		}
+		perf.scrolled(ev.DY, ev.Precise)
 		a.scrollBy(ev.DY)
 		return true
 	case ui.InputPointerDown:

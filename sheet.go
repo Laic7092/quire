@@ -139,8 +139,16 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	if p == nil || r.W <= 0 || r.H <= 0 {
 		return
 	}
+	// The frame is measured around this callback, and the log learns how the
+	// frame is drawn once: on a GPU or on MyGo's own rasterizer.
+	if perf != nil {
+		perf.firstPaint(p.Scale(), p.Accelerated())
+		perf.paintBegin()
+		defer func() { perf.paintEnd(a.paint.GlyphStats()) }()
+	}
 	// The glyphs the painter rasterized while drawing are uploaded after the
-	// pages are drawn, so this frame shows them.
+	// pages are drawn, so this frame shows them. It runs before paintEnd, which
+	// is why the frame's upload count is the one this draw callback caused.
 	defer a.paint.FlushGlyphs()
 	if a.showCover && a.paint != nil && a.paint.DrawCover(p, a.cover, r, 28) {
 		return

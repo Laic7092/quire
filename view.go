@@ -112,6 +112,11 @@ const serifHead = "book-serif, serif"
 // view builds the window: the library, or the book being read with its tools at
 // the top and its folio at the foot.
 func (a *app) view(c *ui.Context) {
+	// The performance log measures the build pass from here to the end of the
+	// function: MyGo's own layout and commit come after it, and its draw
+	// callback after that.
+	perf.frameBegin()
+	defer perf.buildDone()
 	// Menu commands run outside the build and still need the clipboard and a
 	// way to ask for a frame.
 	a.services = c.Services()
@@ -123,8 +128,10 @@ func (a *app) view(c *ui.Context) {
 		// The slide is on its way: keep the frames coming until it lands.
 		if _, moving := a.turnProgress(); moving {
 			c.AnimationFrame()
+			perf.turnFrame()
 		} else {
 			a.turning = nil
+			perf.turnDone()
 		}
 	}
 	if a.gliding() {
@@ -135,6 +142,7 @@ func (a *app) view(c *ui.Context) {
 			c.AnimationFrame()
 		}
 	}
+	perf.frameScene(a.frameScene())
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		if a.book == nil {

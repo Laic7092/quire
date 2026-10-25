@@ -28,8 +28,14 @@ import (
 var glyphAtlasMode = os.Getenv("LAYX_GLYPH_ATLAS")
 
 // glyphStatsOn, set by LAYX_GLYPH_STATS=1, counts what the painter does with
-// glyphs, so a test or a benchmark can say where a frame went.
+// glyphs, so a test, a benchmark or the app's performance log can say where a
+// frame went.
 var glyphStatsOn = os.Getenv("LAYX_GLYPH_STATS") != ""
+
+// CountGlyphs turns the glyph counters on or off. The performance log turns
+// them on for a session: an upload of an atlas layer is what a real machine
+// notices and a headless benchmark does not.
+func CountGlyphs(on bool) { glyphStatsOn = on }
 
 const (
 	// glyphLayerW and glyphLayerH size one atlas layer. A layer is a ui.Bitmap

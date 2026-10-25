@@ -118,6 +118,48 @@ DIP 时退回单页），点书页左/右半翻页（拖动选字）；底栏是
 计数器，`UIPainter.GlyphStats()` 给出每帧 run / 字形数、图集命中率、栅格化次数、
 上传次数与图集内存。`MYGO_FRAME_STATS=1` 让 mygo 打印每帧的 build/layout/paint/present。
 
+### 实机性能日志
+
+想知道一台真机器上到底慢在哪，让 app 自己记一份给人看的日志（`perf.go`）：
+
+```powershell
+# PowerShell：日志同时进文件和控制台
+$env:LAYX_PERF = "1"
+.\layx-reader.exe book.epub
+
+# 已打包的 app：双击启动就用 setx 把开关写进环境，再重开一次
+setx LAYX_PERF 1
+
+# 顺带留一份真机 CPU profile，之后用 go tool pprof 打开
+$env:LAYX_CPU_PROFILE = "$env:TEMP\layx.cpu"
+```
+
+默认写到 `%APPDATA%\layx-reader\perf-<日期>-<时间>.log`（与 `state.json` 同目录），
+`-perf` 参数或 `LAYX_PERF_FILE` / `LAYX_PERF=<路径>` 换位置。日志的样子：
+
+```
+[17:42:05] 118 frames in 2.0 s (59 fps, scrolling)
+    cost    build    1.0/   2.1/   4.1 ms   paint    0.2/   0.6/   1.2 ms   (p50/p95/max)
+    budget  16.7 ms a frame (measured): 11 frames (9%) took longer
+    gaps    16.7/16.7/33.3 ms   (p50/p95/max; a gap of two budgets is a lost frame)
+    glyphs  1.0 uploads a frame, 8 rasterized, 98.7% came from the atlas
+    tiles   3.2 a frame
+    memory  1.1 MB allocated a frame, 0 GC cycles, 0.0 ms of GC assist
+    input   34 scroll events (612 px, 30 of them smooth), 6 glide restarts
+```
+
+- `cost` 是 app 自己的活：`build` 是每帧重建视图，`paint` 是它的 draw 回调；
+  MyGo 的原生 layout/commit 与 present 不在里面，要那几段就同时开
+  `MYGO_FRAME_STATS=<ms>`，它的行会进同一个文件、同一条时间轴；
+- `gap` 是两帧之间的间隔，被显示器刷新率封顶，所以 2 倍预算就是丢了一帧；
+  `budget` 数的是自己花超了的帧，那是 app 的问题，`gap` 说明读起来什么感觉；
+- 超过 `LAYX_PERF_SLOW`（默认 8 ms）的帧单独一行，带每个 tile 的耗时——
+  「这一帧刚建了一个 tile」的样子一眼就能认出来；
+- 开书、排版（文档 / 搜索索引 / 排版各自多少毫秒）、改字号、换纸、翻页各有一行事件，
+  所以慢的那一帧能对上是哪个动作；
+- `LAYX_PERF_HZ` 直接给定刷新率（不然从帧间隔自己认），`LAYX_PERF_EVERY`
+  改每块的时长。日志是纯 ASCII，Windows 的控制台不会乱码。
+
 首页的图书行按「上次读的时间」排序（显示菜单里可以切成按书名），位置取 `store.Position`；
 封面走 `internal/library` 只读 OPF 元数据，不打开整本书。阅读目标的账本在
 `stats.go`：打开过的日子与记录过的页合并成阅读天数，今年读完的书才进年度目标，

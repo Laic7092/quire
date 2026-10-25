@@ -437,4 +437,9 @@ cd ~/layx/render && go test -run XXX -bench 'BenchmarkTileCold640x900|BenchmarkT
 
 # layx 侧：回放裁剪、字形 op 矩形与 TileHeight
 cd ~/layx/render && go test -run 'Cull|GlyphOpsHaveFootprints|TileHeight' ./...
+
+# 实机：app 自己记的日志（人读的，见 README「实机性能日志」）。
+# 这份文档里的数字都来自上面几个跑在开发机上的工具；真机的绝对值
+# 要看这一条，尤其 cpu/frame 与「budget 有几帧超了」：
+LAYX_PERF=1 MYGO_FRAME_STATS=6 go run . book.epub
 ```

@@ -62,6 +62,11 @@ func (a *app) scrollTo(y float32) {
 	if y == a.scrollGoal {
 		return
 	}
+	// A column already on its way is sent somewhere else: the glide before this
+	// one is cut short, which is what a wheel's notch rate does to a reader.
+	if a.gliding() {
+		perf.glide()
+	}
 	a.scrollFrom, a.scrollGoal = a.scrollY, y
 	a.scrollAt = a.clock()
 	if a.instant {
@@ -140,6 +145,12 @@ func (a *app) afterScroll() {
 	if a.pan == nil || a.layout == nil {
 		return
 	}
+	// Writing the place down happens on the UI thread inside the build pass, so
+	// the log counts it apart from the rest of the frame.
+	if perf != nil {
+		start := time.Now()
+		defer func() { perf.record(time.Since(start)) }()
+	}
 	loc, ok := a.currentLoc()
 	if !ok {
 		return
@@ -212,7 +223,9 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			continue
 		}
 		box := ui.Rect{X: view.X, Y: view.Y + tile.Top() - y, W: view.W, H: tile.Height()}
-		a.paint.DrawTile(p, tile, box, view)
+		// The performance log keeps how long each tile took: a tile built on the
+		// frame it is shown is what a scroll stutter looks like.
+		perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
 	}
 	a.drawScrollMarks(p, view, y)
 }

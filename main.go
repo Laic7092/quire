@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -315,6 +316,8 @@ func (a *app) turn(delta int) {
 	a.turning = &turnState{from: a.page, to: page, dir: delta, at: a.clock()}
 	if a.instant {
 		a.turning = nil
+	} else {
+		perf.turnStart(a.page, page)
 	}
 	a.page = page
 	a.afterPage()
@@ -400,6 +403,7 @@ func (a *app) setOptions(o reader.Options) {
 	if o == a.opts {
 		return
 	}
+	prev := a.opts
 	if o.Scroll != a.opts.Scroll {
 		// The reading place survives the switch: remember where the reader is
 		// before the layout that names it gives way.
@@ -410,6 +414,8 @@ func (a *app) setOptions(o reader.Options) {
 	a.opts = o
 	a.optsAt = time.Now()
 	a.failed = false
+	// The log names the setting that moved, before the layout it costs.
+	perf.event("reading settings: %s (laying out again)", optionChanges(prev, o))
 	// The sliders read these back: a change made with the keys has to move them
 	// too.
 	a.uiSize = float64(o.FontSize)
@@ -420,6 +426,23 @@ func (a *app) setOptions(o reader.Options) {
 
 // settingsDelay is how long a settings change waits before it relayouts.
 const settingsDelay = 160 * time.Millisecond
+
+// frameScene names what the frame being built is doing, for the performance
+// log: a slow line says "while scrolling" half a year later, when the frame
+// number would mean nothing.
+func (a *app) frameScene() string {
+	switch {
+	case a.turning != nil:
+		return "turning a page"
+	case a.gliding():
+		return "scrolling"
+	case a.loading:
+		return "laying out"
+	case a.book == nil:
+		return "in the library"
+	}
+	return "standing still"
+}
 
 // settle starts the layout a settings change asked for, once the reader has
 // stopped moving whatever changed it.
@@ -474,9 +497,45 @@ func (a *app) setTheme(t reader.Theme) {
 	if t == a.theme {
 		return
 	}
+	// A paper change is a repaint of the same pages, so the log can say that it
+	// cost no layout at all.
+	perf.event("paper %q -> %q (a repaint, no layout)", string(a.theme), string(t))
 	a.theme = t
 	a.themeSys = false
 	a.savePrefs()
+}
+
+// optionChanges names what moved between two reading settings, for the
+// performance log: "font size 18.0 -> 20.0, margins 48 -> 40".
+func optionChanges(from, to reader.Options) string {
+	var out []string
+	num := func(name string, a, b float32) {
+		if a != b {
+			out = append(out, fmt.Sprintf("%s %.1f -> %.1f", name, a, b))
+		}
+	}
+	num("font size", from.FontSize, to.FontSize)
+	num("line height", from.LineHeight, to.LineHeight)
+	num("margin", from.Margin, to.Margin)
+	if from.Scroll != to.Scroll {
+		out = append(out, perfMode(from.Scroll)+" -> "+perfMode(to.Scroll))
+	}
+	if from.Spread != to.Spread {
+		out = append(out, fmt.Sprintf("spread %v -> %v", from.Spread, to.Spread))
+	}
+	if from.Justify != to.Justify {
+		out = append(out, fmt.Sprintf("justify %v -> %v", from.Justify, to.Justify))
+	}
+	if from.Font != to.Font {
+		out = append(out, fmt.Sprintf("face %q -> %q", from.Font, to.Font))
+	}
+	if from.Turn != to.Turn {
+		out = append(out, fmt.Sprintf("turn %q -> %q", from.Turn, to.Turn))
+	}
+	if len(out) == 0 {
+		return "no visible change"
+	}
+	return strings.Join(out, ", ")
 }
 
 // ensureLayout starts background layout when the sheet, the reading settings or
@@ -528,6 +587,10 @@ func (a *app) ensureLayout(w, h float32) {
 	a.layOpts = opts
 	a.layPaper = paper
 	a.failed = false
+	// The log gets the job as a pair of lines: the sheet it started with, and
+	// what it cost when it landed.
+	jobAt := time.Now()
+	perf.layoutStart(sw, sh, opts.Scroll)
 
 	bookPtr, fonts, win := a.book, a.fonts, a.win
 	prev := a.layout
@@ -545,14 +608,20 @@ func (a *app) ensureLayout(w, h float32) {
 		var images map[render.ImageID][]byte
 		index := prevIndex
 		rebuilt := false
+		// What each part of the job cost, for the log: a rebuild of the book,
+		// the search index that walks it, and the layout proper.
+		var docSky, indexSky, layoutSky time.Duration
 		if doc == nil || docAt != size {
 			// The reader paints links itself (ThemeLinks), so the paper's link
 			// colour stays out of the document and a theme change never rebuilds
 			// it.
+			buildAt := time.Now()
 			d, imgs, err := bookPtr.BuildWith(size, book.Options{ThemeLinks: true})
+			docSky = time.Since(buildAt)
 			if err != nil {
 				win.Update(func() {
 					defer a.refresh(win)
+					perf.event("laying out failed after %s: %v", perfSpan(time.Since(jobAt)), err)
 					if job != a.job {
 						return
 					}
@@ -567,31 +636,38 @@ func (a *app) ensureLayout(w, h float32) {
 			rebuilt = true
 			// Indexing walks the same nodes the layout will, so it is done
 			// with the build and published with it.
+			indexAt := time.Now()
 			if ix, err := search.NewIndex(bookPtr, d); err == nil {
 				index = ix
 			} else {
 				index = nil
 			}
+			indexSky = time.Since(indexAt)
 		}
 		// The same document can be laid out again by reusing what the previous
 		// layout already shaped: a theme change only repaints, and a settings
 		// change reuses the line boxes it can.
 		var layout *render.Layout
 		var err error
+		layoutAt := time.Now()
 		if doc != nil && prev != nil && prev.Document() == doc {
 			layout, err = reader.Relayout(ctx, prev, fonts, sw, sh, opts)
 		} else {
 			layout, err = reader.BuildLayout(ctx, doc, fonts, sw, sh, opts)
 		}
+		layoutSky = time.Since(layoutAt)
 		win.Update(func() {
 			defer a.refresh(win)
 			if job != a.job {
+				perf.event("a layout was dropped: a newer one began while it ran (%s)",
+					perfSpan(time.Since(jobAt)))
 				return
 			}
 			a.loading = false
 			if err != nil {
 				a.failed, a.failW, a.failH, a.failSize = true, w, h, size
 				a.status = locales.LayoutFailed(err.Error())
+				perf.event("laying out failed after %s: %v", perfSpan(time.Since(jobAt)), err)
 				return
 			}
 			// Decoding belongs on the UI thread and happens once per build.
@@ -672,6 +748,11 @@ func (a *app) ensureLayout(w, h float32) {
 			// Last, so the marks follow the new geometry and the new index: a
 			// rebuild has just cleared the hits.
 			a.refreshMarks()
+			pages, scroll := layout.PageCount(), a.layScroll
+			if scroll {
+				pages = layout.TileCount()
+			}
+			perf.laidOut(time.Since(jobAt), docSky, indexSky, layoutSky, pages, scroll)
 		})
 	}()
 }
@@ -784,10 +865,14 @@ func (a *app) openPath(path string) {
 // openAsync parses a book off the UI thread and publishes it through
 // Window.Update.
 func (a *app) openAsync(win *mygo.Window, path string) {
+	parseAt := time.Now()
+	perf.event("opening %s", path)
 	b, err := book.Open(path)
+	parseSky := time.Since(parseAt)
 	if err != nil {
 		win.Update(func() {
 			defer a.refresh(win)
+			perf.event("could not open %s after %s: %v", path, perfSpan(parseSky), err)
 			if a.opening == path {
 				a.opening = ""
 			}
@@ -795,6 +880,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		})
 		return
 	}
+	perf.event("opened %q (%d chapters) in %s", b.Title, len(b.Chapters), perfSpan(parseSky))
 	win.Update(func() {
 		defer a.refresh(win)
 		if a.opening == path {
@@ -1019,8 +1105,9 @@ func main() {
 	shelfFlag := flag.String("shelf", "", "directory of EPUB/TXT files to import into the shelf")
 	serifFlag := flag.String("serif", "", "path to the serif face (default: $LAYX_SERIF or a system serif)")
 	stateFlag := flag.String("state", "", "state file (default: the config directory)")
+	perfFlag := flag.Bool("perf", false, "write a human-readable performance log (also $LAYX_PERF)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: layx-reader [-font path] [-shelf dir] [book.epub]\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: layx-reader [-font path] [-shelf dir] [-perf] [book.epub]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -1114,9 +1201,10 @@ func main() {
 		a.pan.Show(appstate.SidebarNone)
 	}
 
-	if fontPath, err := reader.FindFont(*fontFlag); err != nil {
-		a.status = err.Error()
-		log.Println(err)
+	fontPath, fontErr := reader.FindFont(*fontFlag)
+	if fontErr != nil {
+		a.status = fontErr.Error()
+		log.Println(fontErr)
 	} else if fonts, err := reader.OpenFonts(fontPath, reader.FindSerif(*serifFlag)); err != nil {
 		a.status = err.Error()
 		log.Println(err)
@@ -1125,6 +1213,17 @@ func main() {
 		a.paint = reader.NewUIPainter(nil, fonts)
 		log.Printf("layx-reader: font %s", fontPath)
 	}
+	// The performance log, if the reader asked for one: it names the machine and
+	// the settings first, then what every frame and every layout cost. It takes
+	// the standard logger with it, so MyGo's own frame lines land in the file.
+	perfStart(perfOptions{
+		flag:      *perfFlag,
+		env:       os.Getenv("LAYX_PERF"),
+		file:      os.Getenv("LAYX_PERF_FILE"),
+		statePath: statePath,
+		reading:   perfReading(a.opts, a.theme),
+		font:      fontPath,
+	})
 	// A file opened with the app — from the Finder, the Dock, Open Recent or a
 	// second instance — may arrive before the window exists.
 	mygo.App.OnOpenFile(a.openPath)
@@ -1196,11 +1295,14 @@ func main() {
 			a.openPath(path)
 		}
 	})
-	if err := mygo.App.Run(); err != nil {
+	runErr := mygo.App.Run()
+	// The session's totals go last, while the log can still be written.
+	perf.close()
+	if runErr != nil {
 		if st != nil {
 			_ = st.Close()
 		}
-		log.Fatal(err)
+		log.Fatal(runErr)
 	}
 	if st != nil {
 		if err := st.Close(); err != nil {
