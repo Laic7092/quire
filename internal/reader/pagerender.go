@@ -47,6 +47,10 @@ type PageRenderer struct {
 	surface *raster.Rasterizer
 	images  map[paint.ImageID]image.Image
 	w, h    int
+	// tones is the same ink correction the screen's glyph atlas applies, so a
+	// page exported to a PNG carries the weight it has in the window (see
+	// texttone.go).
+	tones toneCache
 }
 
 // NewPageRenderer returns a renderer with no surface yet: the first
@@ -127,6 +131,9 @@ func (p *PageRenderer) render(width, height, scale float32, draw func(paint.Pain
 func (p *PageRenderer) surfaceFor(w, h int) *raster.Rasterizer {
 	if p.surface == nil || p.w != w || p.h != h {
 		s := raster.New(w, h)
+		s.ToneFor = func(run paint.GlyphRun) *raster.Tone {
+			return p.tones.toneFor(run.Color, run.Size, run.EmulateBold && !fakeBoldOff)
+		}
 		for id, img := range p.images {
 			s.SetImage(id, img)
 		}

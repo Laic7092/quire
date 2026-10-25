@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
@@ -212,4 +213,79 @@ func BenchmarkPageRender(b *testing.B) {
 	for b.Loop() {
 		pr.DrawPage(page, 2)
 	}
+}
+
+// TestPageRendererPrintsTheSameWeightAsTheScreen holds the two paths to the same
+// ink. The window draws through the glyph atlas and the headless renderer through
+// DrawGlyphs; both now get their correction from raster.Tone, so the same page
+// exported to a PNG must be about as heavy as the page in the window — before the
+// correction moved into the rasterizer, the PNG was 12% lighter.
+func TestPageRendererPrintsTheSameWeightAsTheScreen(t *testing.T) {
+	bk, err := book.Open("../book/testdata/samples/aq-zhuan.epub")
+	if err != nil {
+		t.Skip(err)
+	}
+	fontPath, err := FindFont("")
+	if err != nil {
+		t.Skip(err)
+	}
+	fonts, err := OpenFont(fontPath)
+	if err != nil {
+		t.Skip(err)
+	}
+	doc, _, err := bk.Build(17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const w, h = 420, 600
+	l, err := BuildLayout(context.Background(), doc, fonts, w, h, Options{FontSize: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := l.Page(5)
+	if page == nil {
+		t.Skip("no page")
+	}
+
+	useAtlas(t, "1")
+	pr := NewPageRenderer()
+	img := pr.DrawPage(page, 1)
+	paper := paint.Color{R: img.Pix[0], G: img.Pix[1], B: img.Pix[2], A: 0xff}
+	headless := inkOver(img, paper)
+
+	up := NewUIPainter(nil, nil)
+	shot := ui.Render(func(c *ui.Context) {
+		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+			up.DrawPage(p, page, r)
+			up.FlushGlyphs()
+		})
+	}, w, h, 1)
+	screen := inkOver(shot, paper)
+
+	if screen == 0 || headless == 0 {
+		t.Fatal("one of the two paths drew no ink")
+	}
+	if ratio := float64(headless) / float64(screen); ratio < 0.95 || ratio > 1.05 {
+		t.Fatalf("headless page carries %d of ink to the screen's %d (%.3fx): the two paths must print the same weight",
+			headless, screen, ratio)
+	}
+
+	// And the correction is what the weight is: with it off, the same page is
+	// lighter by about the growth it removes.
+	textToneOff = true
+	t.Cleanup(func() { textToneOff = false })
+	raw := inkOver(pr.DrawPage(page, 1), paper)
+	if ratio := float64(headless) / float64(raw); ratio < 1.05 || ratio > 1.30 {
+		t.Fatalf("the correction draws %.3fx the raw ink, want a visible but not a blotchy gain", ratio)
+	}
+}
+
+// inkOver is how dark an image is over its paper: the sum of the ink the page
+// carries, which is what a change of text weight moves.
+func inkOver(img *image.RGBA, paper paint.Color) int64 {
+	var sum int64
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		sum += int64(paper.R) - int64(img.Pix[i])
+	}
+	return sum
 }

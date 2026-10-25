@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-raster"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
@@ -375,44 +376,53 @@ func TestTextToneMakesTheEdgesInkier(t *testing.T) {
 	}
 }
 
-// TestTextToneCurve holds the table itself to the shape the correction has to
-// have: the paper and the ink stay where they are, the edges between them grow,
-// and a pale ink — a night paper's — gets no contrast on top of the growth,
-// since what a dark page needs is the growth and not more weight.
+// TestTextToneCurve holds the correction to the shape it has to have: the paper
+// and the ink stay where they are, the edges between them grow, and a pale ink —
+// a night paper's — gets no contrast on top of the growth, since what a dark page
+// needs is the growth and not more weight. The curve itself lives in
+// layx-raster; what this pins down is the policy that picks it.
 func TestTextToneCurve(t *testing.T) {
-	dark := toneLUTFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 1, false)
-	pale := toneLUTFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 1, false)
-	for name, lut := range map[string]*toneLUT{"dark": dark, "pale": pale} {
-		if lut[0] != 0 || lut[255] != 255 {
-			t.Fatalf("%s ink: the paper is %d and the ink %d, want 0 and 255", name, lut[0], lut[255])
+	tc := &toneCache{}
+	dark := tc.toneFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 17, false)
+	pale := tc.toneFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 17, false)
+	for name, tone := range map[string]*raster.Tone{"dark": dark, "pale": pale} {
+		if tone == nil {
+			t.Fatalf("%s ink: no correction", name)
 		}
-		for i := 1; i < len(lut); i++ {
-			if lut[i] < lut[i-1] {
-				t.Fatalf("%s ink: coverage %d draws %d under %d's %d", name, i, lut[i], i-1, lut[i-1])
+		if tone.Coverage(0) != 0 || tone.Coverage(255) != 255 {
+			t.Fatalf("%s ink: the paper is %d and the ink %d, want 0 and 255",
+				name, tone.Coverage(0), tone.Coverage(255))
+		}
+		for i := 1; i < 256; i++ {
+			if tone.Coverage(uint8(i)) < tone.Coverage(uint8(i-1)) {
+				t.Fatalf("%s ink: coverage %d draws %d under %d's %d", name, i, tone.Coverage(uint8(i)),
+					i-1, tone.Coverage(uint8(i-1)))
 			}
 		}
 	}
-	if d := int(dark[128]) - 128; d < 8 {
-		t.Errorf("half coverage carries %d of 255, want at least 136", dark[128])
+	if d := int(dark.Coverage(128)) - 128; d < 8 {
+		t.Errorf("half coverage carries %d of 255, want at least 136", dark.Coverage(128))
 	}
-	if pale[128] >= dark[128] {
-		t.Errorf("a pale ink at half coverage is %d and a dark one %d: want the pale one lighter", pale[128], dark[128])
+	if pale.Coverage(128) >= dark.Coverage(128) {
+		t.Errorf("a pale ink at half coverage is %d and a dark one %d: want the pale one lighter",
+			pale.Coverage(128), dark.Coverage(128))
 	}
 	// A size band takes less of the gain: display type has stems of its own.
-	big := toneLUTFor(paint.Color{A: 255}, sizeBand(30), false)
-	if big[128] >= dark[128] {
-		t.Errorf("display type at half coverage is %d and body type %d: want the display type lighter", big[128], dark[128])
+	big := tc.toneFor(paint.Color{A: 255}, 30, false)
+	if big.Coverage(128) >= dark.Coverage(128) {
+		t.Errorf("display type at half coverage is %d and body type %d: want the display type lighter",
+			big.Coverage(128), dark.Coverage(128))
 	}
 	// A run grown into a synthetic bold takes the contrast without the growth:
 	// its strokes already carry more than their outline, and stacking the growth
 	// on that closes a bold body's counters.
-	grown := toneLUTFor(paint.Color{A: 255}, sizeBand(17), true)
-	if grown[128] >= dark[128] {
+	grown := tc.toneFor(paint.Color{A: 255}, 17, true)
+	if grown.Coverage(128) >= dark.Coverage(128) {
 		t.Errorf("a grown run at half coverage is %d and a plain one %d: want no growth on a grown run",
-			grown[128], dark[128])
+			grown.Coverage(128), dark.Coverage(128))
 	}
-	if grown[128] <= 128 {
-		t.Errorf("a grown run at half coverage is %d: want the contrast kept", grown[128])
+	if grown.Coverage(128) <= 128 {
+		t.Errorf("a grown run at half coverage is %d: want the contrast kept", grown.Coverage(128))
 	}
 }
 

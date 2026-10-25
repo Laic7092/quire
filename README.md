@@ -312,6 +312,10 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 （17 DIP、DPR 2、CJK，一页约 3.2 ms），暖帧只查表。数据见
 `docs/scroll-performance.md`。
 
+墨色修正（DirectWrite 式对比度 + CoreText 式字干生长）也搬进了光栅器
+（`raster.Tone`），屏幕图集和 `PageRenderer` 用同一张表：同一页的 PNG 与窗口墨量
+相差 1%，关掉修正则轻 14%。
+
 需要一张 PNG 而不需要窗口时（CI 快照、缩略图、问题报告），
 `internal/reader.PageRenderer` 用同一个软件光栅器重放同一份 DisplayList，
 不经过 MyGo、GPU 或显示服务：

@@ -87,8 +87,8 @@ type glyphKey struct {
 	gid   uint32
 	size  float32 // quantized to half a pixel
 	dpr   float32
-	phase uint8    // x in the low two bits, y in the high two
-	tone  *toneLUT // nil when the coverage is drawn as rasterized
+	phase uint8        // x in the low two bits, y in the high two
+	tone  *raster.Tone // nil when the coverage is drawn as rasterized
 	bold  bool
 }
 
@@ -205,7 +205,7 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 	// is grown is the book's: a weight the face does not have is drawn in
 	// synthetic bold, as a browser draws one (see texttone.go).
 	bold := run.EmulateBold && !fakeBoldOff
-	tone := u.toneFor(run.Color, run.Size, bold)
+	tone := u.tones.toneFor(run.Color, run.Size, bold)
 	// The run's origin on the device grid, and the phase it stands at, which is
 	// the same for every glyph that shares its offsets.
 	ox := float64(u.dx+run.X) * float64(dpr)
@@ -234,7 +234,7 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 // device (gx, gy), rasterizing it if the atlas does not hold it yet, and the
 // device pixel that origin falls on. A nil slot means the glyph has no ink, or
 // no room was left for it.
-func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy float64, upem float32, tone *toneLUT, bold bool) (*glyphSlot, int, int) {
+func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy float64, upem float32, tone *raster.Tone, bold bool) (*glyphSlot, int, int) {
 	ix, px := glyphPhase(gx)
 	iy, py := glyphPhase(gy)
 	key := glyphKey{face: gf, gid: gid, size: size, dpr: dpr, phase: uint8(px | py<<2), tone: tone, bold: bold}
@@ -337,12 +337,15 @@ var boldOffsets = [8][2]float64{
 // corner being (kx, ky) from there. The result is the coverage of each pixel,
 // 0 to 255, w bytes to a row, corrected for the ink's tone when tone is not
 // nil and grown by spread when it is not zero.
-func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float64, kx, ky int, tone *toneLUT, spread float64) []uint8 {
+func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float64, kx, ky int, tone *raster.Tone, spread float64) []uint8 {
 	// rasterize draws the outline at (ox, oy) device pixels from its nominal
-	// place and returns the w by h coverage.
-	rasterize := func(ox, oy float64) []uint8 {
+	// place and returns the w by h coverage. A grown glyph is the union of
+	// several drawings, so the tone waits until the union is complete; the plain
+	// case has the rasterizer correct each pixel as it writes it.
+	rasterize := func(ox, oy float64, tone *raster.Tone) []uint8 {
 		z := &a.raster
 		z.Reset(w, h)
+		z.SetTone(tone)
 		// The outline is in font units, y up: to pixels, y down, from the
 		// glyph's origin, less the bitmap's corner.
 		pt := func(p ot.SegmentPoint) (float32, float32) {
@@ -373,7 +376,7 @@ func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float
 
 	dst := a.buf(&a.scratch, w, h)
 	if spread <= 0 {
-		copy(dst, rasterize(0, 0))
+		copy(dst, rasterize(0, 0, tone))
 	} else {
 		// Grown ink is the union of the outline drawn a ring of spreads away.
 		// Merge one offset at a time: the rasterizer reuses its buffer, so what
@@ -383,7 +386,7 @@ func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float
 		// whatever was rasterized last.
 		clear(dst)
 		merge := func(ox, oy float64) {
-			for i, v := range rasterize(ox, oy) {
+			for i, v := range rasterize(ox, oy, nil) {
 				if v > dst[i] {
 					dst[i] = v
 				}
@@ -394,14 +397,12 @@ func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float
 			merge(off[0]*spread, off[1]*spread)
 		}
 	}
-	if tone != nil {
-		// The ink's correction, baked in: the blend a viewer's eye gets is the
-		// one the system's own text printers give it (see texttone.go).
-		for i, v := range dst {
-			if v != 0 {
-				dst[i] = tone[v]
-			}
-		}
+	// The ink's correction, baked in: the blend a viewer's eye gets is the one
+	// the system's own text printers give it, which is raster.Tone's curve (see
+	// texttone.go for the policy around it). Only a grown glyph needs it here,
+	// on the finished union.
+	if spread > 0 {
+		tone.Apply(dst)
 	}
 	return dst
 }

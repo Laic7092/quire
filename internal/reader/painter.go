@@ -32,7 +32,7 @@ type UIPainter struct {
 	glyphs *glyphAtlas
 	// tones are the coverage corrections built so far, one per ink and band of
 	// sizes (see texttone.go).
-	tones  map[toneKey]*toneLUT
+	tones  toneCache
 	stats  GlyphStats
 	dx, dy float32
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one

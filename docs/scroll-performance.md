@@ -199,9 +199,10 @@ mygo 回退到**自带软件光栅**时用轮廓。理由当时是实测过的�
 
 已知差异：Windows 的 DirectWrite 后端会给 mask 覆盖率做对比度/gamma 增强
 （`scene.TextCoverage`，由 `Scene.Text` 参数驱动），走到图片路径就没有这层增强。
-图集路径改由 `texttone.go` 烘进覆盖率（DirectWrite 的对比度曲线 + CoreText 式的边缘
-生长，见那一节），两条路径的墨量因此对齐；但合成粗体（`EmulateBold`）**只取对比度、
-不取生长**——它已经把轮廓撑粗了一圈，再叠生长会把粗体正文的字怀堵死。
+所以本读者自己给：曲线在光栅器里（`raster.Tone`：DirectWrite 的对比度曲线 +
+CoreText 式的边缘生长），图集和离屏出图都用它，`texttone.go` 只留策略（哪些墨色、
+哪个字号带宽、是否合成粗体）与缓存。合成粗体（`EmulateBold`）**只取对比度、不取
+生长**——它已经把轮廓撑粗了一圈，再叠生长会把粗体正文的字怀堵死。
 本机（软件光栅、这本正文全是 `<h5>` 的样书）实测：整页墨量 轮廓 : 图集 = 1 : 1.04。
 
 ### 图集内部的光栅器：只留 layx-raster 的 Coverage（2026-10-26）
@@ -253,6 +254,36 @@ go test -run XXX -bench 'BenchmarkGlyphRasterizer|BenchmarkPageRender' -benchtim
 cd ../layx-raster && go test -run XXX -bench 'BenchmarkCoverageGlyph|BenchmarkDrawGlyphs' -benchtime 3s .
 go test -run TestCoverageMatchesSupersampling -v .
 ```
+
+### 墨色修正进了光栅器：屏幕与 PNG 同重（2026-10-26）
+
+上面那层修正原先只烘在**屏幕的图集**里，`PageRenderer` 出的 PNG 走的是
+`DrawGlyphs`，所以同一页在窗口里和在 PNG 里不是一个重量：实测 PNG 比屏幕**轻 12%**，
+导出件看起来比读的时候细一号。
+
+现在曲线只写一份，在 `layx-raster` 的 `raster.Tone`：
+
+- `Rasterizer.ToneFor` 让宿主按 run（墨色、字号、是否合成粗体）给表，`DrawGlyphs`
+  逐 run 应用；`layx-reader` 的 `PageRenderer` 装上它，就得到了窗口里的字重；
+- `Coverage.SetTone` 让宿主自己的图集在同一像素循环里应用同一张表，省掉一遍后处理；
+- 合成粗体（图集是九个偏移求并集）要等并集完成再套表，所以那条路保留
+  `Tone.Apply`；
+- 表按 (墨色, 字号带, 是否合成粗体) 缓存，一个文档只有几种墨，逐字形不重复算。
+
+测量（`TestPageRendererPrintsTheSameWeightAsTheScreen`，阿Q正傳第 5 页、17 DIP）：
+
+| 测量 | 值 |
+| --- | ---: |
+| 离屏 PNG 墨量 / 窗口墨量 | **1.01×**（之前 0.88×） |
+| 开修正 / 关修正 的墨量 | **1.14×** |
+| 同一页 PNG 的深色像素（r<128） | +20%（3.80 万 → 4.56 万） |
+
+曲线本身在 `layx-raster/tone_test.go` 里钉着：纸与墨不动（0→0、255→255）、单调不反转、
+半覆盖处对比度把 128 抬到 150 以上、生长再往上抬、淡墨（夜读主题）只取生长不取对比度、
+合成粗体等于"只取对比度"，以及**图集覆盖率与 `DrawGlyphs` 逐像素相同**（≤2/255）。
+
+`LAYX_TEXT_TONE=0` / `LAYX_TEXT_GROW` / `LAYX_TEXT_STEM=0` 三个开关现在同时作用于
+屏幕和 PNG——A/B 一次就能看到修正值多少。
 
 ## 已做：只重绘的帧（2026-10-26）
 

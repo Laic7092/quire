@@ -6,11 +6,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/laix/layx-raster"
 	"github.com/laix/layx/render/paint"
 )
 
-// Text reaches the screen here through a glyph atlas, not through the toolkit's
-// own glyph pipeline, and the two do not print the same page. The toolkit's
+// Text reaches the screen here through a glyph atlas and reaches an exported PNG
+// through layx-raster's DrawGlyphs, not through the toolkit's own glyph pipeline,
+// and the toolkit's pipeline does not print the same page. The toolkit's
 // Windows path blends a glyph's coverage with DirectWrite's enhanced contrast;
 // its macOS and Linux paths draw masks the system's own printer has already
 // smoothed and darkened. A coverage straight from a geometric rasterizer has
@@ -19,31 +21,15 @@ import (
 // print it, and the same book reads thinner and greyer than it does in a
 // browser.
 //
-// So the correction is baked into the atlas. A glyph is rasterized once per
-// face, size and subpixel phase anyway, and a table lookup a pixel at
-// rasterizing time costs nothing at draw time.
-//
-// What it adds is what the system printers add, and no more. The contrast curve
-// is DirectWrite's: it grows as the ink darkens, which is the enhanced contrast
-// a browser's text is drawn with. On top of it the edges are grown by a
-// fraction of a pixel, which is CoreText's font smoothing and FreeType's light
-// hinting by other means: it is what keeps a stem one pixel wide from reading as
-// two half-lit ones.
-//
-// Direct2D's gamma ratios are deliberately not applied. Measured against this
-// reader's own page they cancel the contrast curve almost exactly — at half
-// coverage the contrast takes 0.5 to 0.6 and the 1.8 gamma correction brings it
-// back to 0.49 — so they would add a table of magic numbers without changing a
-// pixel. The weight a reader compares is the growth.
-
-// toneLUT is the corrected coverage of each coverage a rasterizer can produce,
-// for one ink at one size.
-type toneLUT [256]uint8
+// What is applied is what the system printers apply, and no more, and the curve
+// itself lives in the rasterizer: see `raster.Tone`, which both the screen's
+// glyph atlas and the headless page renderer feed their coverage through, so a
+// page on screen and the same page in a PNG carry the same ink. What is left
+// here is the policy around it — which inks a document bakes, which band of
+// sizes a run is set at, whether it is a synthetic bold — and the cache that
+// keeps a document's handful of inks from being rebuilt per glyph.
 
 const (
-	// textContrast is the contrast DirectWrite's grayscale mode enhances with,
-	// the more the darker the ink (see toneLUTFor).
-	textContrast = 0.5
 	// toneCacheMax is how many corrections a painter keeps. A document bakes a
 	// handful of inks — its text, links, accents — so the cache only ever holds
 	// a few, and a runaway one falls back to the nearest ink rather than
@@ -112,30 +98,11 @@ func stemDarkening(band uint8) float64 {
 	return 0
 }
 
-// toneLUTFor builds the correction for ink c in band: DirectWrite's contrast
-// curve, and then, unless the run is a synthetic bold that carries its own
-// growth, a growth of the edges — the pixels between paper and ink — so the
-// strokes keep their weight and their joins stay round.
-func toneLUTFor(c paint.Color, band uint8, grown bool) *toneLUT {
-	ink := [3]float64{float64(c.R) / 255, float64(c.G) / 255, float64(c.B) / 255}
-	luma := 0.30*ink[0] + 0.59*ink[1] + 0.11*ink[2]
-	// Dark ink gets the full contrast; pale ink, as a night paper's, none.
-	k := textContrast * math.Min(math.Max(3-4*luma, 0), 1)
-	darken := stemDarkening(band)
-	if grown {
-		darken = 0
-	}
-	lut := new(toneLUT)
-	for i := range lut {
-		a := float64(i) / 255
-		v := a * (k + 1) / (a*k + 1)
-		// The growth peaks where the coverage is half, which is the edge of a
-		// stroke, and vanishes at the paper and inside the ink: what a dilated
-		// edge does, without moving the glyph.
-		v = math.Min(v+darken*(1-math.Abs(2*v-1)), 1)
-		lut[i] = uint8(math.Round(v * 255))
-	}
-	return lut
+// toneCache is the corrections of one painter, keyed by toneKey. A painter is
+// drawn on one goroutine, so no lock: two paths (the screen's atlas and the
+// headless renderer) each keep their own.
+type toneCache struct {
+	tones map[toneKey]*raster.Tone
 }
 
 // toneFor returns the correction for ink c at size, building it once per ink,
@@ -143,43 +110,46 @@ func toneLUTFor(c paint.Color, band uint8, grown bool) *toneLUT {
 // table is made once and every glyph of that ink is rasterized with it. grown
 // says the run is a synthetic bold, which takes the contrast without the growth
 // (see toneKey).
-func (u *UIPainter) toneFor(c paint.Color, size float32, grown bool) *toneLUT {
+func (tc *toneCache) toneFor(c paint.Color, size float32, grown bool) *raster.Tone {
 	if textToneOff || c.A == 0 {
 		return nil
 	}
 	key := toneKey{r: c.R, g: c.G, b: c.B, band: sizeBand(size), grown: grown}
-	if lut, ok := u.tones[key]; ok {
-		return lut
+	if tone, ok := tc.tones[key]; ok {
+		return tone
 	}
-	if len(u.tones) >= toneCacheMax {
+	if len(tc.tones) >= toneCacheMax {
 		// A book that names a colour a paragraph would otherwise fill the atlas
 		// with a bitmap of every glyph for each of them: the nearest ink's
 		// correction is within a percent or two of the exact one, and it keeps
 		// the atlas to the inks the document actually reads in.
-		if near := u.nearestTone(c, key.band, key.grown); near != nil {
+		if near := tc.nearestTone(c, key.band, key.grown); near != nil {
 			return near
 		}
 		return nil
 	}
-	if u.tones == nil {
-		u.tones = make(map[toneKey]*toneLUT)
+	if tc.tones == nil {
+		tc.tones = make(map[toneKey]*raster.Tone)
 	}
-	lut := toneLUTFor(c, key.band, key.grown)
-	u.tones[key] = lut
-	return lut
+	tone := raster.NewTone(c, raster.ToneOptions{
+		Grow:          stemDarkening(key.band),
+		SyntheticBold: key.grown,
+	})
+	tc.tones[key] = tone
+	return tone
 }
 
 // nearestTone is the correction of the closest ink in the cache to c, by luma,
 // or nil when the cache holds nothing of that band and weight.
-func (u *UIPainter) nearestTone(c paint.Color, band uint8, grown bool) *toneLUT {
+func (tc *toneCache) nearestTone(c paint.Color, band uint8, grown bool) *raster.Tone {
 	want := inkLuma(c)
-	best, bestGap := (*toneLUT)(nil), 2.0
-	for key, lut := range u.tones {
+	best, bestGap := (*raster.Tone)(nil), 2.0
+	for key, tone := range tc.tones {
 		if key.band != band || key.grown != grown {
 			continue
 		}
 		if gap := math.Abs(inkLuma(paint.Color{R: key.r, G: key.g, B: key.b}) - want); gap < bestGap {
-			best, bestGap = lut, gap
+			best, bestGap = tone, gap
 		}
 	}
 	return best
