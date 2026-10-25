@@ -15,10 +15,22 @@ const (
 	FontSans  = "sans"
 )
 
+// Turn is how a page gives way to the next one. The display settings offer
+// both, and a scrolling book has neither: its column never turns.
+type Turn string
+
+const (
+	// TurnSlide moves the spread leaving off the sheet while the next follows
+	// it, as a page under a finger.
+	TurnSlide Turn = "slide"
+	// TurnFade dissolves the spread leaving into the one arriving in place.
+	TurnFade Turn = "fade"
+)
+
 // Options are the reading choices the display settings change: the size, the
-// leading, the face, the alignment, the margins and whether two pages share the
-// window. Everything but the paper theme lives here, because the theme is a
-// package-level palette the document is built against.
+// leading, the face, the alignment, the margins, whether two pages share the
+// window and how a page turns. Everything but the paper theme lives here,
+// because the theme is a package-level palette the document is built against.
 type Options struct {
 	// FontSize is the reading size in CSS pixels.
 	FontSize float32
@@ -36,6 +48,10 @@ type Options struct {
 	// layout is built in render.ModeScroll and the reader scrolls it. The
 	// spread does not apply; one column fills the sheet.
 	Scroll bool
+	// Turn is how a page gives way to the next. It changes nothing the layout
+	// does, so Same ignores it: a new turn takes effect on the next turn, not
+	// in a rebuild of the book.
+	Turn Turn
 }
 
 // DefaultOptions is what a reader starts with: 17px on 1.18 leading, in the
@@ -50,6 +66,7 @@ func DefaultOptions() Options {
 		// Books opens a book as an open book: two pages side by side, and one
 		// as soon as the window is too narrow for the pair.
 		Spread: true,
+		Turn:   TurnSlide,
 	}
 }
 
@@ -87,13 +104,18 @@ func (o Options) Normalized() Options {
 		o.Margin = Margin
 	}
 	o.Margin = clamp(o.Margin, MinMargin, MaxMargin)
+	if o.Turn != TurnFade {
+		o.Turn = TurnSlide
+	}
 	return o
 }
 
 // Same reports whether two sets of options would lay out the same text the same
 // way, and so need no new layout. The spread is not included: it changes the
-// sheet's width, which the layout job watches on its own. The scroll mode is
-// included: it changes the layout's output mode and so its very geometry.
+// sheet's width, which the layout job watches on its own. Neither is the turn:
+// the pages already on screen hold every spread the transition draws. The
+// scroll mode is included: it changes the layout's output mode and so its very
+// geometry.
 func (o Options) Same(other Options) bool {
 	o, other = o.Normalized(), other.Normalized()
 	return o.FontSize == other.FontSize && o.LineHeight == other.LineHeight &&

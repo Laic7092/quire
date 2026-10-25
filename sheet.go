@@ -5,19 +5,15 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx/render/paint"
 )
 
 // The sheet is the paper the book is printed on. One page at a time on a narrow
 // window, two pages side by side — an open book — once there is room, which is
 // what Apple Books does on a wide window.
 const (
-	// turnDuration is how long a page takes to slide away: short enough to feel
+	// turnDuration is how long a page takes to give way: short enough to feel
 	// immediate, long enough to read as motion.
 	turnDuration = 240 * time.Millisecond
-	// edgeShadow is the band of shade the arriving page casts on the one it
-	// covers, in DIPs, and pageShadow how far the page's own shadow reaches.
-	edgeShadow = 16
 )
 
 // turnState is a page turn on its way across the sheet: from and to are the
@@ -135,7 +131,7 @@ func easeOut(p float32) float32 {
 }
 
 // drawSheet paints into r: the cover, or the page or pages of the book, with the
-// turn in flight sliding one spread out and the next in.
+// turn in flight moving one spread out and the next in.
 //
 // It runs inside the box's Draw callback, so it only replays display lists it
 // already has and never lays anything out.
@@ -159,22 +155,44 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 		a.drawSpine(p, r)
 		return
 	}
-	e := easeOut(progress)
 	from, to := a.turning.from, a.page
-	// The pages move as one strip: the spread leaving goes all the way off and
-	// the one arriving follows it, so the two never overlap and the sheet reads
-	// as a page sliding under the window, as Books pages on a touch screen.
+	e := easeOut(progress)
 	p.Clip(r, 0, func() {
-		if a.turning.dir >= 0 {
-			a.drawPages(p, r, from, -e*r.W)
-			a.drawPages(p, r, to, (1-e)*r.W)
-			a.drawEdgeShadow(p, r, (1-e)*r.W, 1, e*r.W)
+		if a.opts.Turn == reader.TurnFade {
+			a.drawFade(p, r, from, to, e)
 			return
 		}
-		a.drawPages(p, r, to, -(1-e)*r.W)
-		a.drawPages(p, r, from, e*r.W)
-		a.drawEdgeShadow(p, r, e*r.W, -1, r.W-e*r.W)
+		a.drawSlide(p, r, from, to, e)
 	})
+}
+
+// drawSlide moves the pages as one strip: the spread leaving goes all the way
+// off and the one arriving follows it, so the two never overlap and the sheet
+// reads as a page sliding under the window, as Books pages on a touch screen.
+//
+// The sheet is the paper, and both spreads are printed on the same one, so the
+// turn paints no edge and no shade: the text alone travels, off one side and on
+// the other, across one continuous page.
+func (a *app) drawSlide(p *ui.Painter, r ui.Rect, from, to int, e float32) {
+	if a.turning.dir >= 0 {
+		a.drawPages(p, r, from, -e*r.W)
+		a.drawPages(p, r, to, (1-e)*r.W)
+		return
+	}
+	a.drawPages(p, r, to, -(1-e)*r.W)
+	a.drawPages(p, r, from, e*r.W)
+}
+
+// drawFade dissolves the spread leaving into the one arriving in place: the
+// pages do not move, one printing gives way to the next as if the same sheet
+// were printed again, and only the text changes. The leaving spread is painted
+// whole; the arriving one is painted over it at the turn's progress, so half way
+// through each shows the other through it.
+func (a *app) drawFade(p *ui.Painter, r ui.Rect, from, to int, e float32) {
+	a.drawPages(p, r, from, 0)
+	a.paint.SetFade(e)
+	defer a.paint.SetFade(1)
+	a.drawPages(p, r, to, 0)
 }
 
 // drawPages paints the pages that start at start, shifted by dx.
@@ -208,41 +226,7 @@ func (a *app) drawPages(p *ui.Painter, r ui.Rect, start int, dx float32) {
 // drawSpine draws the line where the two pages of an open book meet, with the
 // shade each catches from the fold.
 func (a *app) drawSpine(p *ui.Painter, r ui.Rect) {
-	// Books' open book has no printed fold: the two pages are one sheet, and
-	// the only shade in the gutter is the one a turning page casts.
+	// Books' open book has no printed fold: the two pages are one sheet, and the
+	// gutter carries no shade of its own.
 	return
-}
-
-// drawEdgeShadow is the shade the arriving page casts on the one it covers: at
-// the edge it leads with, deepest against the paper and gone a few bands out.
-// side is +1 when the shade falls to the left of x, -1 when to its right.
-func (a *app) drawEdgeShadow(p *ui.Painter, r ui.Rect, x float32, side int, width float32) {
-	if width <= 0 || x <= r.X || x >= r.X+r.W {
-		return
-	}
-	pal := reader.Current()
-	const bands = 8
-	band := width / bands
-	for i := 0; i < bands; i++ {
-		k := 1 - float32(i)/float32(bands)
-		alpha := uint8(float32(0x26) * k * k)
-		x0 := x - float32(i+1)*band
-		if side < 0 {
-			x0 = x + float32(i)*band
-		}
-		x1 := x0 + band
-		x0 = max(x0, r.X)
-		x1 = min(x1, r.X+r.W)
-		if x1 <= x0 {
-			continue
-		}
-		p.Fill(ui.Rect{X: x0, Y: r.Y, W: x1 - x0, H: r.H},
-			reader.UIColor(paintAlpha(pal.Ink, alpha)), 0)
-	}
-}
-
-// paintAlpha is c with another alpha, for the shades the paper casts.
-func paintAlpha(c paint.Color, a uint8) paint.Color {
-	c.A = a
-	return c
 }

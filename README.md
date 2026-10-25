@@ -17,7 +17,7 @@
    go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能同时
    出现；位图来自 `ui.DecodeBitmap` + `ui.ImageRegion`）。同一层还管纸与墨
    （`Palette`，几套纸都在 `internal/reader/theme.go`）、阅读设置（`Options`：字号、
-   行距、字面、对齐、页边距、双页、滚动）和选区：`Selection` 把拖出来的两个
+   行距、字面、对齐、页边距、双页、滚动、翻页方式）和选区：`Selection` 把拖出来的两个
    `render.Location` 变成矩形（`Layout.Selection`；分页模式带页号，滚动模式带内容
    坐标）和选中的文字（走 `render.Chapter.Nodes`，因为引擎不导出文本区间）。
 3. `main.go` + `view.go` + `sheet.go` + `scroll.go` + `theme.go` + `settings.go` +
@@ -47,16 +47,17 @@
    滚动、↑↓ 滚三行、←/→、PageUp/PageDown、空格滚一屏（留 10% 重叠）、Home/End 到首尾；
    点击不翻页也不滚动，只清选区。页脚中间换成百分比，右边是本章还剩几屏；读到的
    位置按 `render.Location` 记，和分页模式共用一套存储与恢复。
-   翻页是一条横向滑带：旧页整幅
-   移出、新页跟着进来，边界上有一道落在纸上的影子。在纸上按住拖动可以选字，⌘C 复制
+   翻页默认是一条横向滑带：旧页整幅
+   移出、新页跟着进来；纸上只有字在走，没有页边的影子或边框。Aa 里也可以换成
+   淡入淡出：位置不动，旧页直接化进新页。在纸上按住拖动可以选字，⌘C 复制
    选中的文字；右键（macOS 是 Ctrl+点击，或菜单键/Shift+F10）是页面的菜单：复制、
    添加笔记、搜索选中的词、选中本页、清除选区。搜索命中在页面上是琥珀色，面板指着的那个更深一档。
    **Aa 面板**照 Books 的样子：219 宽、18 圆角，标题「Themes & Settings」下发丝分隔线，
    一行 38 高的分段（小 A / 大 A 一组，中间一条浅分隔线；右边是独立的 63 宽外观钮），
    3×2 的 62×55 主题卡片（Original / Quiet / Paper / Bold / Calm / Focus，Aa 与名字都印在
    卡里，选中的那张圈一道墨线），底下是 36 高的「⚙ Customize」胶囊。点开 Customize 才是
-   字号、行距、页边距三个滑块，Serif/Sans、Justified/Left 两组分段，Two Pages 与
-   Scrolling 两个开关和 Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
+   字号、行距、页边距三个滑块，Serif/Sans、Justified/Left、Slide/Fade 三组分段，
+   Two Pages 与 Scrolling 两个开关和 Reset to Defaults。面板与 Aa 之间有一个指向按钮的小三角。每一项都写进状态文件。
 4. `docs/integration-notes.md`：作为宿主的联调记录，以及对 layx 形态的意见。
 
 常用功能各有一个包，都能独立测试：

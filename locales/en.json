@@ -279,6 +279,18 @@
   "@settingsScrolling": {
     "description": "The detailed display settings: whether the book scrolls instead of turning pages."
   },
+  "settingsTurn": "Page Turn",
+  "@settingsTurn": {
+    "description": "The detailed display settings: how one page gives way to the next."
+  },
+  "settingsTurnSlide": "Slide",
+  "@settingsTurnSlide": {
+    "description": "Pages slide across the sheet as they turn."
+  },
+  "settingsTurnFade": "Fade",
+  "@settingsTurnFade": {
+    "description": "One page dissolves into the next without moving."
+  },
   "settingsReset": "Reset to Defaults",
   "@settingsReset": {
     "description": "The detailed display settings: the button that restores every choice."

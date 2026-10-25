@@ -191,6 +191,38 @@ func TestUIPainterDrawsImages(t *testing.T) {
 	}
 }
 
+// The painter's fade multiplies the alpha of what it draws, which is how one
+// page dissolves into the next: half a fade of black over white is half black.
+func TestUIPainterFade(t *testing.T) {
+	const paper = 0xff
+	shot := func(fade float32) uint8 {
+		t.Helper()
+		up := NewUIPainter(nil, nil)
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Box(c).Fill().Background(ui.RGB(paper, paper, paper)).Children(func() {
+				ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+					up.P = p
+					up.SetFade(fade)
+					up.FillRect(paint.Rect{X: r.X, Y: r.Y, Width: r.W, Height: r.H},
+						paint.Color{A: 0xff})
+				})
+			})
+		}, 20, 20)
+		tt.Frame()
+		cr, _, _, _ := tt.Image().At(10, 10).RGBA()
+		return uint8(cr >> 8)
+	}
+	for _, tc := range []struct {
+		fade float32
+		want uint8
+	}{{1, 0x00}, {0.5, 0x7f}, {0, paper}} {
+		got := shot(tc.fade)
+		if got != tc.want && got != tc.want+1 {
+			t.Errorf("fade %g drew %#02x, want %#02x", tc.fade, got, tc.want)
+		}
+	}
+}
+
 func hasRed(m *image.RGBA) bool {
 	b := m.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
@@ -285,6 +317,16 @@ func TestOptionsNormalizeAndCompare(t *testing.T) {
 	}
 	if !base.Same(DefaultOptions()) {
 		t.Error("the defaults do not lay out the same as themselves")
+	}
+
+	// The turn changes nothing the layout does: the pages on screen already
+	// hold both spreads the transition draws, so it never costs a rebuild.
+	base.Turn = TurnFade
+	if !base.Same(DefaultOptions()) {
+		t.Error("the turn asks for a new layout")
+	}
+	if got := (Options{Turn: "swirl"}).Normalized().Turn; got != TurnSlide {
+		t.Errorf("unknown turn %q kept, want the slide", got)
 	}
 }
 

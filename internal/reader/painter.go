@@ -24,6 +24,9 @@ type UIPainter struct {
 	// bitmaps are the images the paginator placed, decoded once per id.
 	bitmaps map[paint.ImageID]*ui.Bitmap
 	dx, dy  float32
+	// fade multiplies the alpha of everything drawn, so a host can dissolve one
+	// page over another. It is 1 unless SetFade says otherwise.
+	fade float32
 	// noCull turns off skipping the runs outside the clip, so a test can
 	// paint them and prove the skip changes no pixel.
 	noCull bool
@@ -43,7 +46,29 @@ func NewUIPainter(p *ui.Painter, fonts *Fonts) *UIPainter {
 		P:       p,
 		faces:   make(map[*paint.Font]*glyphFace),
 		bitmaps: make(map[paint.ImageID]*ui.Bitmap),
+		fade:    1,
 	}
+}
+
+// SetFade makes what the painter draws next translucent: f multiplies the alpha
+// of every sheet, run, image and veil, so a host can dissolve one page over
+// another. The pages start with their own opaque sheet, so drawing the arriving
+// page at f over the leaving one is a cross-fade of the two, text and paper
+// alike. f is clamped to 0..1, and drawing is opaque after SetFade(1).
+func (u *UIPainter) SetFade(f float32) {
+	if u == nil {
+		return
+	}
+	u.fade = min(max(f, 0), 1)
+}
+
+// faded is c with the painter's fade in its alpha.
+func (u *UIPainter) faded(c paint.Color) paint.Color {
+	if u.fade >= 1 {
+		return c
+	}
+	c.A = uint8(float32(c.A) * u.fade)
+	return c
 }
 
 // SetImage decodes data once and keeps the bitmap for id. It reports whether
@@ -163,7 +188,7 @@ func (u *UIPainter) FillQuads(p *ui.Painter, box ui.Rect, page int, quads []rend
 		if x1 <= x0 || y1 <= y0 {
 			continue
 		}
-		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(colour), 0)
+		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(u.faded(colour)), 0)
 	}
 }
 
@@ -187,7 +212,7 @@ func (u *UIPainter) FillScrollQuads(p *ui.Painter, view ui.Rect, quads []render.
 		if x1 <= x0 || y1 <= y0 {
 			continue
 		}
-		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(colour), 0)
+		p.Fill(ui.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, uiColor(u.faded(colour)), 0)
 	}
 }
 
@@ -202,42 +227,46 @@ func (u *UIPainter) ClipRect(r paint.Rect) {}
 func (u *UIPainter) Transform(m paint.Affine) {}
 
 func (u *UIPainter) FillRect(r paint.Rect, c paint.Color) {
-	if u.P == nil || c.Transparent() || r.Empty() {
+	if u.P == nil || c.Transparent() || r.Empty() || u.fade <= 0 {
 		return
 	}
-	u.P.Fill(u.rect(r), uiColor(c), 0)
+	u.P.Fill(u.rect(r), uiColor(u.faded(c)), 0)
 }
 
 func (u *UIPainter) StrokeRect(r paint.Rect, c paint.Color, width float32) {
-	if u.P == nil || c.Transparent() || r.Empty() || width <= 0 {
+	if u.P == nil || c.Transparent() || r.Empty() || width <= 0 || u.fade <= 0 {
 		return
 	}
-	u.P.Stroke(u.rect(r), uiColor(c), 0, width)
+	u.P.Stroke(u.rect(r), uiColor(u.faded(c)), 0, width)
 }
 
 func (u *UIPainter) FillRoundRect(r paint.Rect, radius float32, c paint.Color) {
-	if u.P == nil || c.Transparent() || r.Empty() {
+	if u.P == nil || c.Transparent() || r.Empty() || u.fade <= 0 {
 		return
 	}
-	u.P.Fill(u.rect(r), uiColor(c), radius)
+	u.P.Fill(u.rect(r), uiColor(u.faded(c)), radius)
 }
 
 // DrawImage paints an image the paginator placed. The destination rect is
 // already in page coordinates, scaled and aligned by the engine.
 func (u *UIPainter) DrawImage(id paint.ImageID, dst paint.Rect, _ paint.ImageOptions) {
-	if u.P == nil || dst.Empty() {
+	if u.P == nil || dst.Empty() || u.fade <= 0 {
 		return
 	}
 	bitmap := u.bitmaps[id]
 	if bitmap == nil {
 		return
 	}
-	u.P.ImageRegion(bitmap, ui.Rect{}, u.rect(dst), ui.ImageOptions{})
+	opts := ui.ImageOptions{}
+	if u.fade < 1 {
+		opts.Tint = ui.RGBA(0xff, 0xff, 0xff, u.fade)
+	}
+	u.P.ImageRegion(bitmap, ui.Rect{}, u.rect(dst), opts)
 }
 
 func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	if u.P == nil || run.Font == nil || len(run.Glyphs) == 0 ||
-		run.Color.Transparent() || run.Size <= 0 {
+		run.Color.Transparent() || run.Size <= 0 || u.fade <= 0 {
 		return
 	}
 	gf := u.glyphFace(run.Font)
@@ -296,7 +325,7 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 		path.Close()
 	}
 	if any {
-		u.P.FillPath(&path, uiColor(run.Color))
+		u.P.FillPath(&path, uiColor(u.faded(run.Color)))
 	}
 }
 

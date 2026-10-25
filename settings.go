@@ -229,6 +229,20 @@ func (a *app) settingsDetail(c *ui.Context) {
 		a.savePrefs()
 		a.layW, a.layH = 0, 0
 	})
+	// The turn is a pair like the face and the alignment: sliding pages, or one
+	// page fading into the next. It changes no layout, so it is saved as it is
+	// picked and the next turn follows it.
+	turn := 0
+	if a.opts.Turn == reader.TurnFade {
+		turn = 1
+	}
+	a.choose(c, locales.SettingsTurn(), turn, func(choice int) {
+		t := reader.TurnSlide
+		if choice == 1 {
+			t = reader.TurnFade
+		}
+		a.setTurn(t)
+	}, locales.SettingsTurnSlide(), locales.SettingsTurnFade())
 	// Scrolling reads the book as one column. It is a layout mode, so it goes
 	// through setOptions like the type settings: the sheet follows once the
 	// reader stops pressing.

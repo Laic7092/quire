@@ -430,6 +430,18 @@ func (a *app) settle(c *ui.Context) {
 	a.layW, a.layH = 0, 0
 }
 
+// setTurn changes how a page gives way to the next. It is not a layout
+// setting: the pages on screen already hold both spreads the turn draws, so
+// the choice costs nothing until the next turn.
+func (a *app) setTurn(t reader.Turn) {
+	t = reader.Options{Turn: t}.Normalized().Turn
+	if t == a.opts.Turn {
+		return
+	}
+	a.opts.Turn = t
+	a.savePrefs()
+}
+
 // savePrefs writes the reading settings to the store.
 func (a *app) savePrefs() {
 	if a.st == nil {
@@ -444,6 +456,7 @@ func (a *app) savePrefs() {
 		s.Prefs.Margin = o.Margin
 		s.Prefs.Spread = o.Spread
 		s.Prefs.Scroll = o.Scroll
+		s.Prefs.Turn = string(o.Turn)
 		s.Prefs.Theme = string(theme)
 	})
 	a.st.SaveSoon(0)
@@ -1066,6 +1079,7 @@ func main() {
 			Margin:     prefs.Margin,
 			Spread:     prefs.Spread,
 			Scroll:     prefs.Scroll,
+			Turn:       reader.Turn(prefs.Turn),
 		}.Normalized()
 		if prefs.Theme != "" {
 			a.theme = reader.ParseTheme(prefs.Theme)

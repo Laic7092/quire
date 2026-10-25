@@ -816,6 +816,48 @@ func (msgs Messages) SettingsScrolling() string {
 	return Catalog.Format(msgs.locale, "settingsScrolling", nil)
 }
 
+// SettingsTurn says "Page Turn"
+// in the language the app shows.
+//
+// The detailed display settings: how one page gives way to the next.
+func SettingsTurn() string { return In(i18n.Locale()).SettingsTurn() }
+
+// SettingsTurn says "Page Turn"
+// in the language of msgs.
+//
+// The detailed display settings: how one page gives way to the next.
+func (msgs Messages) SettingsTurn() string {
+	return Catalog.Format(msgs.locale, "settingsTurn", nil)
+}
+
+// SettingsTurnSlide says "Slide"
+// in the language the app shows.
+//
+// Pages slide across the sheet as they turn.
+func SettingsTurnSlide() string { return In(i18n.Locale()).SettingsTurnSlide() }
+
+// SettingsTurnSlide says "Slide"
+// in the language of msgs.
+//
+// Pages slide across the sheet as they turn.
+func (msgs Messages) SettingsTurnSlide() string {
+	return Catalog.Format(msgs.locale, "settingsTurnSlide", nil)
+}
+
+// SettingsTurnFade says "Fade"
+// in the language the app shows.
+//
+// One page dissolves into the next without moving.
+func SettingsTurnFade() string { return In(i18n.Locale()).SettingsTurnFade() }
+
+// SettingsTurnFade says "Fade"
+// in the language of msgs.
+//
+// One page dissolves into the next without moving.
+func (msgs Messages) SettingsTurnFade() string {
+	return Catalog.Format(msgs.locale, "settingsTurnFade", nil)
+}
+
 // SettingsReset says "Reset to Defaults"
 // in the language the app shows.
 //

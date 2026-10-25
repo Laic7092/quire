@@ -111,6 +111,9 @@ type Prefs struct {
 	Spread bool `json:"spread"`
 	// Scroll reads the book as one continuous column instead of pages.
 	Scroll bool `json:"scroll"`
+	// Turn is how a page gives way to the next: "slide" or "fade". Empty, as
+	// state files written before the choice existed, means the slide.
+	Turn string `json:"turn"`
 	// Theme is the paper: "white", "sepia", "gray" or "night", empty while the
 	// reader follows the system's appearance.
 	Theme string `json:"theme"`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"image"
 	"image/png"
 	"os"
 	"strings"
@@ -751,6 +752,139 @@ func TestTurnSlidesAndLands(t *testing.T) {
 	}
 	if got := easeOut(0.5); got < 0.8 || got > 1 {
 		t.Errorf("easeOut(0.5) = %g, want most of the way", got)
+	}
+}
+
+// A fade turn paints both spreads in place: the one leaving whole, the one
+// arriving over it at the turn's progress, so half way through each shows
+// through the other. It moves nothing and lays nothing out.
+func TestTurnFadesInPlace(t *testing.T) {
+	a := newWindow(t)
+	a.instant = false
+	warm := ui.NewTester(a.view, 1180, 800)
+	warm.Frame()
+
+	at := time.Now()
+	a.now = func() time.Time { return at }
+	a.setTurn(reader.TurnFade)
+	if a.opts.Turn != reader.TurnFade {
+		t.Fatalf("turn = %q, want the fade", a.opts.Turn)
+	}
+	if !a.optsAt.IsZero() {
+		t.Error("choosing the turn asked for a new layout")
+	}
+	if got := a.st.State().Prefs.Turn; got != string(reader.TurnFade) {
+		t.Errorf("saved turn = %q, want it kept for the next launch", got)
+	}
+
+	from := a.snapPage(4)
+	to := from + a.pageStep()
+	shot := func(page int, turn *turnState) *image.RGBA {
+		a.page, a.turning = page, turn
+		tt := ui.NewTester(a.view, 1180, 800)
+		tt.Frame()
+		return tt.Image()
+	}
+	leaving := shot(from, nil)
+	arriving := shot(to, nil)
+	// A fifth of the way through is about half a fade, so both spreads show.
+	mid := shot(to, &turnState{from: from, to: to, dir: 1,
+		at: at.Add(-turnDuration / 5)})
+
+	paper := reader.Current().Paper
+	ink := func(img *image.RGBA, x, y int) int {
+		r, g, b, _ := img.At(x, y).RGBA()
+		dr, dg, db := int(r>>8)-int(paper.R), int(g>>8)-int(paper.G), int(b>>8)-int(paper.B)
+		return max(dr, -dr) + max(dg, -dg) + max(db, -db)
+	}
+	// How much of a settled page's ink is still where it was. A cross-fade
+	// keeps both spreads in place, so most of each one's marks are there, only
+	// fainter; a slide would leave the one leaving's places empty.
+	kept := func(settled *image.RGBA) int {
+		var n int
+		for y := 46; y < 756; y += 2 {
+			for x := 21; x < 1159; x += 2 {
+				if ink(settled, x, y) > 40 && ink(mid, x, y) > 20 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	if got := kept(leaving); got < 1000 {
+		t.Errorf("only %d of the marks of the page leaving are still in place half way through", got)
+	}
+	if got := kept(arriving); got < 1000 {
+		t.Errorf("only %d of the marks of the page arriving are in place half way through", got)
+	}
+}
+
+// The display settings offer the turn with the other choices, and picking one
+// there is what the reader gets on the next turn.
+func TestSettingsOfferTheTurn(t *testing.T) {
+	a := newWindow(t)
+	a.page = 4
+	a.showCover = false
+	a.aaOpen, a.aaMore = true, true
+	a.syncSettingsFields()
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	for _, want := range []string{
+		locales.SettingsTurn(), locales.SettingsTurnSlide(), locales.SettingsTurnFade(),
+	} {
+		if !tt.HasText(want) {
+			t.Errorf("the display settings do not say %q: %q", want, tt.Texts())
+		}
+	}
+	if err := tt.Click(locales.SettingsTurnFade()); err != nil {
+		t.Fatalf("the fade is not pressable: %v", err)
+	}
+	tt.Frame()
+	if a.opts.Turn != reader.TurnFade {
+		t.Errorf("turn = %q after picking the fade", a.opts.Turn)
+	}
+	if !a.optsAt.IsZero() {
+		t.Error("picking the turn asked for a new layout")
+	}
+	if got := a.st.State().Prefs.Turn; got != string(reader.TurnFade) {
+		t.Errorf("saved turn = %q", got)
+	}
+	if err := tt.Click(locales.SettingsTurnSlide()); err != nil {
+		t.Fatalf("the slide is not pressable: %v", err)
+	}
+	tt.Frame()
+	if a.opts.Turn != reader.TurnSlide {
+		t.Errorf("turn = %q after picking the slide", a.opts.Turn)
+	}
+}
+
+// The slide turns one sheet of paper: no edge and no shade travel with the
+// pages, so the paper beside the text is the paper all the way across.
+func TestSlidePaintsOneSheet(t *testing.T) {
+	a := newWindow(t)
+	a.instant = false
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+
+	at := time.Now()
+	a.now = func() time.Time { return at }
+	a.setTurn(reader.TurnSlide)
+	from := a.snapPage(4)
+	a.page = from + a.pageStep()
+	a.turning = &turnState{from: from, to: a.page, dir: 1,
+		at: at.Add(-turnDuration * 15 / 100)}
+	tt.Frame()
+
+	paper := reader.Current().Paper
+	img := tt.Image()
+	// The page's foot, well below its text: the band the edge shade used to
+	// darken on a turn this early in the slide.
+	for _, p := range [][2]int{{300, 740}, {420, 750}} {
+		r, g, b, _ := img.At(p[0], p[1]).RGBA()
+		if uint8(r>>8) != paper.R || uint8(g>>8) != paper.G || uint8(b>>8) != paper.B {
+			t.Errorf("(%d,%d) is #%02x%02x%02x, not the paper #%02x%02x%02x",
+				p[0], p[1], r>>8, g>>8, b>>8, paper.R, paper.G, paper.B)
+		}
 	}
 }
 
