@@ -308,8 +308,8 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 栅格化一次，之后每帧只是查表 + 贴图。这就是 `PageRenderer` 用的同一个光栅器——
 屏幕和 PNG 是同一批像素，字形只有一套实现，没有第二条回退路径。
 
-`Coverage` 做的是**精确面积积分**（不是超采样）：冷栅格约 3.3 µs/字形
-（17 DIP、DPR 2、CJK，一页约 3.3 ms），暖帧只查表。数据见
+`Coverage` 做的是**精确面积积分**（不是超采样）：冷栅格约 3.2 µs/字形
+（17 DIP、DPR 2、CJK，一页约 3.2 ms），暖帧只查表。数据见
 `docs/scroll-performance.md`。
 
 需要一张 PNG 而不需要窗口时（CI 快照、缩略图、问题报告），
