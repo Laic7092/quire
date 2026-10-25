@@ -62,6 +62,9 @@ type glyphAtlas struct {
 	// raster reuses its buffers from one glyph to the next.
 	raster  vector.Rasterizer
 	scratch []uint8
+	// pass is the buffer a grown glyph's second and later outlines rasterize
+	// into, before the widest of them is kept.
+	pass []uint8
 	// stats is where the counters go, nil unless LAYX_GLYPH_STATS is set.
 	stats *GlyphStats
 	tick  uint32
@@ -71,12 +74,19 @@ type glyphAtlas struct {
 // and the device pixel ratio it is drawn at, and the place its origin falls on
 // the device grid, in quarters of a pixel. The same glyph at another phase has
 // its coverage in other pixels, so it is another bitmap.
+//
+// The ink is part of the key as well, and so is whether the glyph is grown:
+// the correction of a glyph's coverage is the ink's (see texttone.go), and a
+// booked body's ink and a link's are corrected differently, so they cannot
+// share one bitmap.
 type glyphKey struct {
 	face  *glyphFace
 	gid   uint32
 	size  float32 // quantized to half a pixel
 	dpr   float32
-	phase uint8 // x in the low two bits, y in the high two
+	phase uint8    // x in the low two bits, y in the high two
+	tone  *toneLUT // nil when the coverage is drawn as rasterized
+	bold  bool
 }
 
 // glyphSlot is where one glyph's coverage lies in the atlas, and where it goes
@@ -180,6 +190,11 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 	}
 	opts := ui.ImageOptions{Tint: tint}
 	a := u.atlas()
+	// How the run's coverage is corrected is the ink's business, and whether it
+	// is grown is the book's: a weight the face does not have is drawn in
+	// synthetic bold, as a browser draws one (see texttone.go).
+	tone := u.toneFor(run.Color, run.Size)
+	bold := run.EmulateBold && !fakeBoldOff
 	// The run's origin on the device grid, and the phase it stands at, which is
 	// the same for every glyph that shares its offsets.
 	ox := float64(u.dx+run.X) * float64(dpr)
@@ -189,7 +204,7 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 		g := &run.Glyphs[i]
 		gx := ox + float64(g.X)*us
 		gy := oy + float64(g.Y)*us
-		slot, ix, iy := a.slot(gf, g.ID, size, dpr, gx, gy, upem)
+		slot, ix, iy := a.slot(gf, g.ID, size, dpr, gx, gy, upem, tone, bold)
 		if slot == nil {
 			continue
 		}
@@ -208,10 +223,10 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 // device (gx, gy), rasterizing it if the atlas does not hold it yet, and the
 // device pixel that origin falls on. A nil slot means the glyph has no ink, or
 // no room was left for it.
-func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy float64, upem float32) (*glyphSlot, int, int) {
+func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy float64, upem float32, tone *toneLUT, bold bool) (*glyphSlot, int, int) {
 	ix, px := glyphPhase(gx)
 	iy, py := glyphPhase(gy)
-	key := glyphKey{face: gf, gid: gid, size: size, dpr: dpr, phase: uint8(px | py<<2)}
+	key := glyphKey{face: gf, gid: gid, size: size, dpr: dpr, phase: uint8(px | py<<2), tone: tone, bold: bold}
 	if slot, ok := a.index[key]; ok {
 		if slot != nil {
 			a.touch(slot.layer)
@@ -235,12 +250,18 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	s := float64(size) * float64(dpr) / float64(upem)
 	fx := float64(px) / glyphPhases
 	fy := float64(py) / glyphPhases
+	// A run whose weight the face does not have is grown by a fraction of a
+	// device pixel each way, as a synthetic bold: the box has to hold that too.
+	spread := float64(0)
+	if bold {
+		spread = fakeBoldSpread(float64(size * dpr))
+	}
 	// The ink's box, rounded out, one spare pixel each way for the coverage of
 	// an edge that lands on the box's own boundary.
-	left := int(math.Floor(fx + float64(out.minX)*s))
-	top := int(math.Floor(fy + float64(out.minY)*s))
-	right := int(math.Ceil(fx+float64(out.maxX)*s)) + 1
-	bottom := int(math.Ceil(fy+float64(out.maxY)*s)) + 1
+	left := int(math.Floor(fx + float64(out.minX)*s - spread))
+	top := int(math.Floor(fy + float64(out.minY)*s - spread))
+	right := int(math.Ceil(fx+float64(out.maxX)*s+spread)) + 1
+	bottom := int(math.Ceil(fy+float64(out.maxY)*s+spread)) + 1
 	w, h := right-left, bottom-top
 	if w <= 0 || h <= 0 || w > glyphLayerW || h > glyphLayerH {
 		a.index[key] = nil
@@ -250,7 +271,7 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	// for a curved glyph. Rasterize it, then keep only the pixels the outline
 	// actually reaches: a slot costs its area in the atlas, and every pixel of
 	// it is sampled again every frame it shows.
-	cov := a.coverage(w, h, out, s, fx, fy, left, top)
+	cov := a.coverage(w, h, out, s, fx, fy, left, top, tone, spread)
 	x0, y0, x1, y1, ok := trimCoverage(cov, w, h)
 	if !ok {
 		a.index[key] = nil // nothing of it would show
@@ -276,48 +297,115 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	return slot, ix, iy
 }
 
+// fakeBoldSpread is how far a synthetic bold grows a glyph, in device pixels.
+// Skia strokes a fake bold with a pen 0.028 of the size across, and this is the
+// radius of the same growth: half of it. The floor and the cap matter more than
+// the fraction. A floor of a third of a pixel keeps small print from growing out
+// of proportion, and the cap is what a union of nine copies can carry: past
+// about two thirds of a pixel the ring of offsets stops reading as a thickened
+// edge and starts reading as the same glyph drawn several times, which is what
+// a heading at 30 DIP did before the cap.
+func fakeBoldSpread(size float64) float64 {
+	if fakeBoldOff || size <= 0 {
+		return 0
+	}
+	return min(max(size*0.014, 0.25), 0.6)
+}
+
+// boldOffsets are the places a bold glyph's outline is rasterized at, relative
+// to its own: the centre and a ring a spread away, which together grow the ink
+// by the spread in every direction. Only a synthesized bold pays for
+// them, and only once per phase.
+var boldOffsets = [8][2]float64{
+	{1, 0}, {0.7071, 0.7071}, {0, 1}, {-0.7071, 0.7071},
+	{-1, 0}, {-0.7071, -0.7071}, {0, -1}, {0.7071, -0.7071},
+}
+
 // coverage rasterizes the outline of out into the atlas's scratch buffer, w by
 // h pixels, its ink placed as at the glyph's origin (fx, fy), the buffer's
 // corner being (kx, ky) from there. The result is the coverage of each pixel,
-// 0 to 255, w bytes to a row.
-func (a *glyphAtlas) coverage(w, h int, out *glyphOutline, s, fx, fy float64, kx, ky int) []uint8 {
-	if n := w * h; cap(a.scratch) < n {
-		a.scratch = make([]uint8, n)
+// 0 to 255, w bytes to a row, corrected for the ink's tone when tone is not
+// nil and grown by spread when it is not zero.
+func (a *glyphAtlas) coverage(w, h int, out *glyphOutline, s, fx, fy float64, kx, ky int, tone *toneLUT, spread float64) []uint8 {
+	// rasterize draws the outline into buf, moved by (ox, oy) device pixels.
+	rasterize := func(buf []uint8, ox, oy float64) {
+		z := &a.raster
+		z.Reset(w, h)
+		z.DrawOp = draw.Src
+		// The outline is in font units, y up: to pixels, y down, from the
+		// glyph's origin, less the bitmap's corner.
+		pt := func(p ot.SegmentPoint) (float32, float32) {
+			return float32(fx + float64(p.X)*s - float64(kx) + ox), float32(fy - float64(p.Y)*s - float64(ky) + oy)
+		}
+		for i := range out.segs {
+			seg := &out.segs[i]
+			args := seg.ArgsSlice()
+			switch seg.Op {
+			case ot.SegmentOpMoveTo:
+				z.MoveTo(pt(args[0]))
+			case ot.SegmentOpLineTo:
+				z.LineTo(pt(args[0]))
+			case ot.SegmentOpQuadTo:
+				bx, by := pt(args[0])
+				cx, cy := pt(args[1])
+				z.QuadTo(bx, by, cx, cy)
+			case ot.SegmentOpCubeTo:
+				bx, by := pt(args[0])
+				cx, cy := pt(args[1])
+				dx, dy := pt(args[2])
+				z.CubeTo(bx, by, cx, cy, dx, dy)
+			}
+		}
+		z.ClosePath()
+		img := image.Alpha{Pix: buf, Stride: w, Rect: image.Rect(0, 0, w, h)}
+		// An opaque source over an Alpha's pixels is the coverage itself.
+		z.Draw(&img, img.Rect, image.Opaque, image.Point{})
+	}
+	dst := a.buf(&a.scratch, w, h)
+	if spread <= 0 {
+		rasterize(dst, 0, 0)
 	} else {
-		a.scratch = a.scratch[:n]
-	}
-	dst := image.Alpha{Pix: a.scratch, Stride: w, Rect: image.Rect(0, 0, w, h)}
-	z := &a.raster
-	z.Reset(w, h)
-	z.DrawOp = draw.Src
-	// The outline is in font units, y up: to pixels, y down, from the glyph's
-	// origin, less the bitmap's corner.
-	pt := func(p ot.SegmentPoint) (float32, float32) {
-		return float32(fx + float64(p.X)*s - float64(kx)), float32(fy - float64(p.Y)*s - float64(ky))
-	}
-	for i := range out.segs {
-		seg := &out.segs[i]
-		args := seg.ArgsSlice()
-		switch seg.Op {
-		case ot.SegmentOpMoveTo:
-			z.MoveTo(pt(args[0]))
-		case ot.SegmentOpLineTo:
-			z.LineTo(pt(args[0]))
-		case ot.SegmentOpQuadTo:
-			bx, by := pt(args[0])
-			cx, cy := pt(args[1])
-			z.QuadTo(bx, by, cx, cy)
-		case ot.SegmentOpCubeTo:
-			bx, by := pt(args[0])
-			cx, cy := pt(args[1])
-			dx, dy := pt(args[2])
-			z.CubeTo(bx, by, cx, cy, dx, dy)
+		// Grown ink is the union of the outline drawn a ring of spreads away.
+		// The union starts from an empty buffer every time: the scratch holds
+		// the glyph before this one, and merging into it would grow a bold glyph
+		// by whatever was rasterized last.
+		pass := a.buf(&a.pass, w, h)
+		clear(dst)
+		rasterize(pass, 0, 0)
+		for i, v := range pass {
+			if v > dst[i] {
+				dst[i] = v
+			}
+		}
+		for _, off := range boldOffsets {
+			rasterize(pass, off[0]*spread, off[1]*spread)
+			for i, v := range pass {
+				if v > dst[i] {
+					dst[i] = v
+				}
+			}
 		}
 	}
-	z.ClosePath()
-	// An opaque source over an Alpha's pixels is the coverage itself.
-	z.Draw(&dst, dst.Rect, image.Opaque, image.Point{})
-	return dst.Pix
+	if tone != nil {
+		// The ink's correction, baked in: the blend a viewer's eye gets is the
+		// one the system's own text printers give it (see texttone.go).
+		for i, v := range dst {
+			if v != 0 {
+				dst[i] = tone[v]
+			}
+		}
+	}
+	return dst
+}
+
+// buf returns the atlas's reusable w by h byte buffer.
+func (a *glyphAtlas) buf(b *[]uint8, w, h int) []uint8 {
+	if n := w * h; cap(*b) < n {
+		*b = make([]uint8, n)
+	} else {
+		*b = (*b)[:n]
+	}
+	return *b
 }
 
 // trimCoverage returns the box of cov, w by h, that holds every pixel the

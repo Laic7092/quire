@@ -3,11 +3,13 @@ package reader
 import (
 	"image"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx/render"
+	"github.com/laix/layx/render/paint"
 )
 
 // paintViewport replays the viewport of a scrolling column into a fresh frame,
@@ -67,6 +69,18 @@ func useAtlas(t *testing.T, mode string) {
 	t.Cleanup(func() { glyphAtlasMode = old })
 }
 
+// usePlainCoverage turns off what the atlas does to a glyph's coverage beyond
+// rasterizing it — the ink's correction and the growth of a synthetic bold —
+// for a test that compares the atlas with the outlines. Both are baked into the
+// atlas and neither into a path fill, and what those two paths are held to being
+// is the same picture of the same outlines.
+func usePlainCoverage(t *testing.T) {
+	t.Helper()
+	oldTone, oldBold := textToneOff, fakeBoldOff
+	textToneOff, fakeBoldOff = true, true
+	t.Cleanup(func() { textToneOff, fakeBoldOff = oldTone, oldBold })
+}
+
 func abs(v int) int {
 	if v < 0 {
 		return -v
@@ -82,6 +96,7 @@ func abs(v int) int {
 func TestGlyphAtlasMatchesOutlines(t *testing.T) {
 	l, up, _ := benchScrollColumn(t)
 	useAtlas(t, "")
+	usePlainCoverage(t)
 	const scrollY float32 = 4000
 	for _, scale := range []float32{1, 2} {
 		for _, fade := range []float32{1, 0.5} {
@@ -206,8 +221,11 @@ func TestGlyphAtlasScrolling(t *testing.T) {
 		if s.Uploads == 0 {
 			t.Errorf("scale=%g: the atlas added glyphs but uploaded nothing", scale)
 		}
-		if s.Uploads > frames {
-			t.Errorf("scale=%g: %d uploads for %d frames, want one a layer a frame", scale, s.Uploads, frames)
+		// A frame uploads every layer it wrote to, so a frame that fills one
+		// layer and opens the next costs two: the bound is a layer a frame plus
+		// the layers the run opened.
+		if s.Uploads > frames+s.Layers {
+			t.Errorf("scale=%g: %d uploads for %d frames and %d layers", scale, s.Uploads, frames, s.Layers)
 		}
 	}
 }
@@ -261,4 +279,152 @@ func paintFrame(c *ui.Context, l *render.Layout, up *UIPainter, scrollY float32,
 		*draws = append(*draws, time.Since(start))
 		p.AnimationFrame()
 	})
+}
+
+// inkMass is how much ink a frame carries: every pixel counted by how far it is
+// from the paper, over the whole picture. It is the number that says whether the
+// type got heavier, which is what the tone correction and a synthetic bold are
+// for.
+func inkMass(img *image.RGBA) int64 {
+	var sum int64
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			sum += int64(255*3) - (int64(r>>8) + int64(g>>8) + int64(b>>8))
+		}
+	}
+	return sum
+}
+
+// TestTextToneMakesTheEdgesInkier holds the ink correction to what it is for:
+// the same page drawn with it carries more ink, because every antialiased edge
+// of a stroke is drawn heavier than a bare geometric rasterizer draws it. It
+// also holds the rollback to being the plain rasterizer's picture.
+func TestTextToneMakesTheEdgesInkier(t *testing.T) {
+	l, up, _ := benchScrollColumn(t)
+	useAtlas(t, "1")
+	fakeBoldOff = true
+	const scrollY float32 = 4000
+	textToneOff = true
+	t.Cleanup(func() { textToneOff, fakeBoldOff = false, false })
+	plain := inkMass(paintViewport(l, up, 1, scrollY))
+	textToneOff = false
+	corrected := inkMass(paintViewport(l, up, 1, scrollY))
+	if corrected <= plain {
+		t.Fatalf("the correction carried %d of the %d ink the plain coverage did", corrected, plain)
+	}
+	// A page is mostly paper, so a few per cent of its ink is a tenth or more of
+	// the ink the type carries. Ten times that would be a mistake in the curve.
+	if grew := float64(corrected-plain) / float64(plain); grew > 0.05 {
+		t.Errorf("the correction added %.1f%% of the page's ink, want a per cent or two", grew*100)
+	}
+	// Off means off: the same picture as before it was turned on.
+	textToneOff = true
+	if again := inkMass(paintViewport(l, up, 1, scrollY)); again != plain {
+		t.Errorf("turning the correction off drew %d, want the %d it started with", again, plain)
+	}
+}
+
+// TestTextToneCurve holds the table itself to the shape the correction has to
+// have: the paper and the ink stay where they are, the edges between them grow,
+// and a pale ink — a night paper's — gets no contrast on top of the growth,
+// since what a dark page needs is the growth and not more weight.
+func TestTextToneCurve(t *testing.T) {
+	dark := toneLUTFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 1)
+	pale := toneLUTFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 1)
+	for name, lut := range map[string]*toneLUT{"dark": dark, "pale": pale} {
+		if lut[0] != 0 || lut[255] != 255 {
+			t.Fatalf("%s ink: the paper is %d and the ink %d, want 0 and 255", name, lut[0], lut[255])
+		}
+		for i := 1; i < len(lut); i++ {
+			if lut[i] < lut[i-1] {
+				t.Fatalf("%s ink: coverage %d draws %d under %d's %d", name, i, lut[i], i-1, lut[i-1])
+			}
+		}
+	}
+	if d := int(dark[128]) - 128; d < 8 {
+		t.Errorf("half coverage carries %d of 255, want at least 136", dark[128])
+	}
+	if pale[128] >= dark[128] {
+		t.Errorf("a pale ink at half coverage is %d and a dark one %d: want the pale one lighter", pale[128], dark[128])
+	}
+	// A size band takes less of the gain: display type has stems of its own.
+	big := toneLUTFor(paint.Color{A: 255}, sizeBand(30))
+	if big[128] >= dark[128] {
+		t.Errorf("display type at half coverage is %d and body type %d: want the display type lighter", big[128], dark[128])
+	}
+}
+
+// TestFakeBoldGrowsTheRun holds a run asking for a weight its face does not have
+// to being drawn heavier when it is grown, and to the plain face when the
+// growth is turned off: the book asks for bold, and the face it matched is the
+// regular.
+func TestFakeBoldGrowsTheRun(t *testing.T) {
+	l, up, _ := benchScrollColumn(t)
+	useAtlas(t, "1")
+	const scrollY float32 = 4000
+	fakeBoldOff = false
+	t.Cleanup(func() { fakeBoldOff = false })
+	grown := inkMass(paintViewport(l, up, 1, scrollY))
+	fakeBoldOff = true
+	plain := inkMass(paintViewport(l, up, 1, scrollY))
+	if grown <= plain {
+		t.Fatalf("the grown run carried %d of the %d ink the plain one did", grown, plain)
+	}
+}
+
+// TestGlyphCoverageIgnoresWhatCameBefore holds a grown glyph to being the union
+// of its own outline and nothing else. The buffers a glyph is rasterized into
+// are reused from one glyph to the next, so a union that starts from the buffer
+// rather than from nothing grows a bold glyph by whatever was rasterized last —
+// which drew a heading as a smear of its neighbours, and only for the runs that
+// asked for a weight their face did not have.
+func TestGlyphCoverageIgnoresWhatCameBefore(t *testing.T) {
+	l, up, _ := benchScrollColumn(t)
+	useAtlas(t, "1")
+	fakeBoldOff = false
+	t.Cleanup(func() { fakeBoldOff = false })
+	paintViewport(l, up, 1, 0)
+
+	var gf *glyphFace
+	for _, f := range up.faces {
+		gf = f
+		break
+	}
+	if gf == nil {
+		t.Fatal("the page drew no face")
+	}
+	// A large glyph and a small one, both of them the book's own.
+	out := gf.outline('g')
+	if out == nil || len(out.segs) == 0 {
+		t.Skip("the face has no g to draw")
+	}
+	big := gf.outline('W')
+	if big == nil || len(big.segs) == 0 {
+		t.Skip("the face has no W to draw")
+	}
+	const w, h = 32, 32
+	const spread = 0.5
+	upem := float64(gf.face.Upem())
+	if upem <= 0 {
+		t.Skip("the face has no units per em")
+	}
+	bigS, smallS := 34/upem, 17/upem // device pixels per font unit
+	// The buffer the grown glyph is rasterized into keeps the large glyph's ink.
+	dirty := &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
+	dirty.coverage(w, h, big, bigS, 4, 4, 0, 0, nil, 0)
+	got := append([]uint8(nil), dirty.coverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)...)
+
+	fresh := &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
+	want := fresh.coverage(w, h, out, smallS, 4, 4, 0, 0, nil, spread)
+	if !slices.Equal(got, want) {
+		sum := 0
+		for i := range got {
+			if got[i] != want[i] {
+				sum++
+			}
+		}
+		t.Fatalf("a glyph rasterized after another differs in %d of %d pixels from one drawn first", sum, len(got))
+	}
+	_ = l
 }

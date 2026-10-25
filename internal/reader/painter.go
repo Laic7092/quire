@@ -2,6 +2,7 @@ package reader
 
 import (
 	"math"
+	"os"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/go-text/typesetting/font"
@@ -29,6 +30,9 @@ type UIPainter struct {
 	// glyphs is the atlas of rasterized glyphs, made on first use: a page's
 	// outlines are turned into pixels once and blitted after that.
 	glyphs *glyphAtlas
+	// tones are the coverage corrections built so far, one per ink and band of
+	// sizes (see texttone.go).
+	tones  map[toneKey]*toneLUT
 	stats  GlyphStats
 	dx, dy float32
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one
@@ -193,6 +197,50 @@ func (u *UIPainter) DrawTile(p *ui.Painter, tile *render.Tile, box ui.Rect, view
 func (u *UIPainter) Save()    {}
 func (u *UIPainter) Restore() {}
 
+// textGrid, cleared by LAYX_TEXT_GRID=0, stops the painter from putting a run's
+// baseline on the device grid: the switch that shows what the snapping is worth.
+var textGrid = os.Getenv("LAYX_TEXT_GRID") != "0"
+
+// baseline returns the y a run's baseline is drawn at, in the painter's own
+// coordinates: the run's own place, moved to the nearest whole device pixel.
+//
+// A line of type is rasterized once per place its origin falls on the device
+// grid, in quarters of a pixel, and a page's lines are not that far apart on
+// any screen whose ratio is not a whole number: at 150% a line of this reader's
+// body type stands 30.09 device pixels below the one before it, so the phase
+// each line falls on walks 0.09 of a pixel a line and steps to the next quarter
+// every two or three lines. Nothing about that is crisp or fuzzy in a single
+// line — every line is drawn at the phase it has — but down the column it is a
+// seam every two or three lines, where the edges of the type change together,
+// and a reader calls that a line they cannot see. Snapping the baseline holds
+// one phase down the whole column, the way snapping the column holds one phase
+// through the whole glide (see drawScroll).
+//
+// It is honest about what it costs: the line moves by up to half a device
+// pixel, and the leading between two lines varies by one. Both are under what a
+// typesetter grid-fits away already, and neither is visible in a still page; the
+// seam is.
+func (u *UIPainter) baseline(y float32) float32 {
+	if u.P == nil || !textGrid {
+		return y
+	}
+	return gridBaseline(u.dy, y, u.P.Scale())
+}
+
+// gridBaseline is y, a baseline in the coordinates of a box at dy, moved to the
+// nearest whole device pixel of a screen at dpr. It works on where the line
+// lands and not on where it sits in the content — the column's own offset is a
+// whole device pixel already (drawScroll), so a baseline snapped this way
+// travels with the column pixel for pixel, and two frames of a glide stay one
+// picture moved.
+func gridBaseline(dy, y, dpr float32) float32 {
+	if !(dpr > 0) {
+		return y
+	}
+	screen := float64(dy+y) * float64(dpr)
+	return float32(math.Round(screen))/dpr - dy
+}
+
 // FillQuads fills highlight rectangles on one page: the quads whose Page is
 // page, placed inside box, which must be the box the page was drawn in. Quads
 // carry page coordinates, margins included, so they line up with DrawPage's
@@ -299,6 +347,9 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 		run.Color.Transparent() || run.Size <= 0 || u.fade <= 0 {
 		return
 	}
+	// The baseline goes on the device grid before anything is drawn (see
+	// baseline below), so both glyph paths put a line where the other does.
+	run.Y = u.baseline(run.Y)
 	gf := u.glyphFace(run.Font)
 	if gf == nil {
 		return
@@ -314,8 +365,8 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	// skip them before any of that work. run.Y is the baseline in the tile's
 	// own coordinates and dy is where the tile's top edge lands this frame.
 	vis := u.P.Visible()
-	baseline := u.dy + run.Y
-	if !u.noCull && (baseline+run.Size < vis.Y || baseline-run.Size > vis.Y+vis.H) {
+	base := u.dy + run.Y
+	if !u.noCull && (base+run.Size < vis.Y || base-run.Size > vis.Y+vis.H) {
 		return
 	}
 	if glyphStatsOn {
@@ -368,6 +419,12 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	}
 	if any {
 		u.P.FillPath(&path, uiColor(u.faded(run.Color)))
+		if run.EmulateBold && !fakeBoldOff {
+			// A path is not corrected or grown the way the atlas is, but a
+			// weight the book asks for and the face does not have is still
+			// asked for: the outline is stroked as synthetic bold.
+			u.P.StrokePath(&path, max(0.35, run.Size*0.028), uiColor(u.faded(run.Color)))
+		}
 	}
 }
 

@@ -118,6 +118,10 @@ DIP 时退回单页），点书页左/右半翻页（拖动选字）；底栏是
 计数器，`UIPainter.GlyphStats()` 给出每帧 run / 字形数、图集命中率、栅格化次数、
 上传次数与图集内存。`MYGO_FRAME_STATS=1` 让 mygo 打印每帧的 build/layout/paint/present。
 
+`LAYX_TEXT_GRID=0` 关掉「把每行基线放到整设备像素」：行距在非整数倍屏幕上（150%
+是 30.09 设备像素）每行漂一点，相位每两三行跳 1/4 像素，整列看过去就是一条条看
+不见的分界；开着一整列同相位（`internal/reader/textgrid_test.go` 量了两种情况）。
+
 ### 实机性能日志
 
 想知道一台真机器上到底慢在哪，让 app 自己记一份给人看的日志（`perf.go`）：
