@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/internal/reader"
 )
 
 // A glide paints the column without building the window: the view is built once
@@ -187,4 +188,59 @@ func TestTurnPaintsWithoutBuilding(t *testing.T) {
 	if got := a.pageLabel(); !tt.HasText(got) {
 		t.Errorf("the folio does not say %q after the turn: %q", got, tt.Texts())
 	}
+}
+
+// A turn slides the strip in whole device pixels, as the scrolling column moves,
+// so both spreads keep one glyph phase for the whole slide: what a turn costs
+// the atlas is the bitmaps of the spread arriving, not a fresh set of them for
+// every pixel the strip passes. Measured against the same turn unsnapped — the
+// switch LAYX_NO_SNAP sets — it is the difference between a few hundred
+// rasterizations a turn and thousands.
+func TestTurnKeepsOneGlyphPhase(t *testing.T) {
+	rastered, slots := turnGlyphs(t, true)
+	unsnapped, unsnappedSlots := turnGlyphs(t, false)
+	t.Logf("snapped: %d rasterized, %d slots; unsnapped: %d rasterized, %d slots",
+		rastered, slots, unsnapped, unsnappedSlots)
+	if rastered*4 > unsnapped {
+		t.Errorf("a snapped turn rasterized %d glyphs, want far fewer than the %d of an unsnapped one",
+			rastered, unsnapped)
+	}
+	if slots*4 > unsnappedSlots*3 {
+		t.Errorf("a snapped turn left %d glyphs in the atlas, want well under the %d of an unsnapped one",
+			slots, unsnappedSlots)
+	}
+}
+
+// turnGlyphs runs one turn to its end and returns what it rasterized and how
+// many glyphs it left in the atlas.
+func turnGlyphs(t *testing.T, snap bool) (rastered, slots int) {
+	t.Helper()
+	old := snapScroll
+	snapScroll = snap
+	t.Cleanup(func() { snapScroll = old })
+	reader.CountGlyphs(true)
+	t.Cleanup(func() { reader.CountGlyphs(false) })
+
+	a := newWindow(t)
+	a.instant = false
+	at := time.Now()
+	a.now = func() time.Time { return at }
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.SetScale(2)
+	tt.Frame()
+	a.paint.ResetGlyphStats()
+	a.turn(1)
+	if a.turning == nil {
+		t.Fatal("the turn did not start")
+	}
+	a.services.Invalidate()
+	for i := 0; i < 60 && a.turning != nil; i++ {
+		at = at.Add(17 * time.Millisecond)
+		tt.Frame()
+	}
+	if a.turning != nil {
+		t.Fatal("the turn never landed")
+	}
+	s := a.paint.GlyphStats()
+	return s.Rasters, s.Slots
 }

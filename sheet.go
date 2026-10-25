@@ -260,17 +260,25 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 // off and the one arriving follows it, so the two never overlap and the sheet
 // reads as a page sliding under the window, as Books pages on a touch screen.
 //
-// The sheet is the paper, and both spreads are printed on the same one, so the
-// turn paints no edge and no shade: the text alone travels, off one side and on
-// the other, across one continuous page.
+// The strip travels in whole device pixels, as the scrolling column does and for
+// the same reason: a glyph is rasterized once per place its origin falls in a
+// pixel, so a strip at a fraction of one swaps every glyph of both spreads for a
+// near copy of itself on every frame of the turn — the type shimmers, and the
+// atlas grows by several hundred bitmaps a turn to do it. Whole pixels keep one
+// phase for the whole slide, which is the phase the spread has at rest: the turn
+// costs no rasterizing at all.
 func (a *app) drawSlide(p *ui.Painter, r ui.Rect, from, to int, e float32) {
+	scale := float32(0)
+	if p != nil {
+		scale = p.Scale()
+	}
 	if a.turning.dir >= 0 {
-		a.drawPages(p, r, from, -e*r.W)
-		a.drawPages(p, r, to, (1-e)*r.W)
+		a.drawPages(p, r, from, snapDevices(-e*r.W, scale))
+		a.drawPages(p, r, to, snapDevices((1-e)*r.W, scale))
 		return
 	}
-	a.drawPages(p, r, to, -(1-e)*r.W)
-	a.drawPages(p, r, from, e*r.W)
+	a.drawPages(p, r, to, snapDevices(-(1-e)*r.W, scale))
+	a.drawPages(p, r, from, snapDevices(e*r.W, scale))
 }
 
 // drawFade dissolves the spread leaving into the one arriving in place: the

@@ -218,6 +218,12 @@ mygo 的 `repaintFrame` 只重画上一帧的元素。落地那一下（以及�
   `TestTurnPaintsWithoutBuilding`（翻页同一套）、`TestRepaintPaintsTheSameColumn`
   （只重绘画出与 build 完全相同的画面）。
 
+翻页的滑带顺带改成**整设备像素**（跟滚动列同一个 `snapDevices`）：滑带每帧落在
+亚像素上时，两张跨页的每个字形都会换一张「相近的位图」——画面在抖，图集在一次翻页
+里被塞进几千项。实测同一本书、缩放 2：一次翻页栅格化 **3797 → 545** 个字形，
+图集项 2948 → 1639，层数 6 → 3（`TestTurnKeepsOneGlyphPhase` 用 `LAYX_NO_SNAP`
+自己对照）。
+
 ## 光栅化是什么，为什么核心库不做它
 
 排版给出的只是**几何**：`"字形 #3412、#2088，基线 (48, 913.5)，字号 17，颜色 #3b3b3b"`、
