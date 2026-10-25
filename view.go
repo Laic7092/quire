@@ -968,18 +968,34 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 			})
 		})
 		a.folio(c, t)
+		// The page area's width is what says whether the sheet holds one page or
+		// an open book, so it is read before the layout that depends on it is
+		// asked for. The box is the committed frame's, which is one frame older
+		// than the area, and the very first frame of a book has neither: the
+		// layout waits for the area and asks for the frame that measures it,
+		// rather than laying the whole book out at a guessed width and then
+		// laying it out again at the real one.
+		if ab := area.Bounds(); ab.W > 0 {
+			a.areaW = ab.W
+		}
 		if b := a.body.Bounds(c); b.W > 0 && b.H > 0 {
 			a.boxW, a.boxH = b.W, b.H
 			a.ensureLayout(b.W, b.H)
+		}
+		// The first frame of a book has no box and no page area behind it yet, and
+		// the layout cannot be asked for without them: ask for the frame that has
+		// them, rather than laying the book out at a guessed width or leaving the
+		// reader on the spinner until something else happens to draw. A window
+		// with no room in it measures nothing, so it is not asked again: a resize
+		// builds a frame of its own.
+		if w, h := c.Size(); w > 0 && h > 0 && a.layout == nil && !a.loading && (a.boxW <= 0 || a.areaW <= 0) {
+			c.Invalidate()
 		}
 		// A window that grew meanwhile leaves less flow below the viewport: keep
 		// the column inside the book rather than past its end.
 		if a.scrolling() {
 			a.scrollY = clampf(a.scrollY, 0, a.maxScroll())
 			a.scrollGoal = clampf(a.scrollGoal, 0, a.maxScroll())
-		}
-		if ab := area.Bounds(); ab.W > 0 {
-			a.areaW = ab.W
 		}
 	})
 }

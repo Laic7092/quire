@@ -538,6 +538,17 @@ func optionChanges(from, to reader.Options) string {
 	return strings.Join(out, ", ")
 }
 
+// layoutSheet is the sheet a layout starts at, and whether the page area that
+// decides it has been measured. The area's width is what says whether the sheet
+// holds one page or two, so a layout started before it is known lays the whole
+// book out at a width the reader never sees, and the frame that measures the
+// area lays it out again. A book opens on that frame, so this is the one case
+// where the layout waits instead of guessing.
+func (a *app) layoutSheet(w, h float32) (sw, sh float32, measured bool) {
+	sw, sh = a.sheetSize(w, h, a.opts)
+	return sw, sh, a.areaW > 0
+}
+
 // ensureLayout starts background layout when the sheet, the reading settings or
 // the paper changed. It runs on the UI thread and passes only copies to the
 // goroutine; Window.Update publishes the result back on the UI thread. The width
@@ -549,7 +560,7 @@ func (a *app) ensureLayout(w, h float32) {
 		return
 	}
 	opts := a.opts
-	sw, sh := a.sheetSize(w, h, opts)
+	sw, sh, measured := a.layoutSheet(w, h)
 	paper := paperOf(reader.Current())
 	// The page keeps its margins whatever the window does: below three of them
 	// there is no line to lay out, so say so instead of failing the job.
@@ -557,6 +568,13 @@ func (a *app) ensureLayout(w, h float32) {
 		a.loading = false
 		a.failed, a.failW, a.failH, a.failSize = true, w, h, opts.FontSize
 		a.status = locales.LayoutTooNarrow()
+		return
+	}
+	if !measured {
+		// The page area's width is what decides the sheet, and the frame that
+		// shows the reading view for the first time is the one that carries it.
+		// Waiting for it is what keeps the whole book from being laid out at a
+		// guessed width and then laid out again at the real one.
 		return
 	}
 	if a.book == nil || a.fonts == nil {
@@ -900,6 +918,11 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 		a.layout = nil
 		a.page = 0
 		a.layW, a.layH = 0, 0
+		// The sheet, the box and the page area are all of this book's reading
+		// view: none of them is measured yet, and the layout of the new book
+		// waits for the first frame to measure them rather than reusing a
+		// window's worth of geometry from the book before it.
+		a.boxW, a.boxH, a.areaW = 0, 0, 0
 		a.turning = nil
 		a.clearSelection()
 		a.hitQuads = nil
