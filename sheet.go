@@ -151,14 +151,43 @@ func easeOut(p float32) float32 {
 //
 // It runs inside the box's Draw callback, so it only replays display lists it
 // already has and never lays anything out.
+//
+// A sheet that moves — a glide of the column, a page turn — is drawn by frames
+// that build nothing: the turn's place is a function of the clock already, and
+// the column's is stepped here, on the frame's own clock, when the build pass of
+// this frame did not do it. Those frames ask for the next one themselves
+// (Painter.AnimationFrame, which paints the elements of this one again), and the
+// frame that lands asks for a build, whose pass writes the place down and draws
+// the folio over it. So the view is built once for a whole gesture instead of
+// once for every frame of it.
+// folioEvery is how long the folio may lag behind the column while a glide
+// runs. The bar under the text is built with the view — the percentage, the
+// chapter, the pill's place — so a glide that only paints would leave it at the
+// place the gesture started from. A build this often keeps it within a blink of
+// the column and still builds one frame in eight, which is what makes a frame of
+// a gesture cost its paint and nothing else.
+const folioEvery = 120 * time.Millisecond
+
 func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	if p == nil || r.W <= 0 || r.H <= 0 {
 		return
 	}
-	// The frame is measured around this callback, and the log learns how the
-	// frame is drawn once: on a GPU or on MyGo's own rasterizer.
+	// Whether this frame built the view: the build pass stepped the column and
+	// named the frame for the log, and a frame that builds nothing does both
+	// here. It is read and cleared once, so a second paint of the same frame
+	// neither steps twice nor counts twice.
+	built := a.frameBuilt
+	a.frameBuilt = false
 	if perf != nil {
+		// The frame is measured around this callback, and the log learns how the
+		// frame is drawn once: on a GPU or on MyGo's own rasterizer.
 		perf.firstPaint(p.Scale(), p.Accelerated())
+		if !built {
+			// A frame that only paints: the log begins it here, with nothing built,
+			// so a glide's frames read as the paint they are.
+			perf.frameBegin()
+			perf.frameScene(a.frameScene())
+		}
 		perf.paintBegin()
 		defer func() { perf.paintEnd(a.paint.GlyphStats()) }()
 	}
@@ -173,6 +202,31 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 		return
 	}
 	if a.scrolling() {
+		if !built && !a.posedAt.Equal(p.Now()) {
+			// The column moves on this frame's clock, as it does in the build pass
+			// of a frame that builds; both share the glide's state, so a gesture
+			// that mixes the two does not change its motion. What the frame leaves
+			// to the build is the publishing of the place (stepColumn).
+			a.stepColumn()
+			a.posedAt = p.Now()
+		}
+		if a.gliding() {
+			p.AnimationFrame()
+			if p.Now().Sub(a.folioAt) >= folioEvery {
+				// The folio is part of the view, and the view of a frame that only
+				// paints is the one before it: a build now and then is what keeps the
+				// bar under the text on the place the column has reached, and what
+				// writes the reading position down while the reader is still moving.
+				a.folioAt = p.Now()
+				a.services.Invalidate()
+			}
+		} else if !built {
+			// The glide landed in a frame that built nothing: ask for the one that
+			// writes the place down, tells the panels where the reader is and draws
+			// the folio over the new place. Without it the folio would keep the
+			// percentage the gesture started from until something else happened.
+			a.services.Invalidate()
+		}
 		a.drawScroll(p, r)
 		return
 	}
@@ -180,8 +234,17 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	if !moving {
 		a.drawPages(p, r, a.page, 0)
 		a.drawSpine(p, r)
+		if a.turning != nil && !built {
+			// The slide landed between two builds: a build settles it, and starts
+			// the turn a held key asked for while it was on its way.
+			a.services.Invalidate()
+		}
 		return
 	}
+	// The turn is on its way: keep the frames coming until it lands, and count
+	// them, since most of them build nothing (see perf.turnFrame).
+	perf.turnFrame()
+	p.AnimationFrame()
 	from, to := a.turning.from, a.page
 	e := easeOut(progress)
 	p.Clip(r, 0, func() {

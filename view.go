@@ -120,37 +120,34 @@ func (a *app) view(c *ui.Context) {
 	// Menu commands run outside the build and still need the clipboard and a
 	// way to ask for a frame.
 	a.services = c.Services()
+	// The draw callback of this frame is the one the box built here keeps: it
+	// must not step the column a second time (see drawSheet).
+	a.frameBuilt = true
 	a.syncMenu()
 	a.keys(c)
 	t := a.applyTheme(c)
 	a.settle(c)
 	if a.turning != nil {
-		// The slide is on its way: keep the frames coming until it lands.
-		if _, moving := a.turnProgress(); moving {
-			c.AnimationFrame()
-			perf.turnFrame()
-		} else {
+		// The slide is on its way, or it has landed and a key still held asked
+		// for the next pages while it was under way. A turn's place is a function
+		// of the clock, so the frames that show it ask from the draw callback and
+		// need no view built (drawSheet); this pass is where a landed turn is
+		// settled and the next one starts, from the spread the last one arrived
+		// at, so the run of turns is one page after another and never a restart.
+		if _, moving := a.turnProgress(); !moving {
 			a.turning = nil
 			perf.turnDone()
-			// A key still held asked for the next pages while that slide was
-			// under way: it starts now, from the spread the last turn arrived at,
-			// so the run of turns is one page after another and never a restart.
 			if delta := a.turnNext; delta != 0 {
 				a.startTurn(delta, true)
-				if a.turning != nil {
-					c.AnimationFrame()
-					perf.turnFrame()
-				}
 			}
 		}
 	}
 	if a.gliding() {
-		// A wheel's notches glide: step the column and ask for the next frame
-		// until it lands.
+		// A wheel's notches glide: cover what this frame's share of the distance
+		// is, so that the box the sheet draws in is placed from a column that has
+		// already moved. The frames after this one paint without building (see
+		// drawSheet), which is where a glide spends most of its time.
 		a.stepScroll()
-		if a.gliding() {
-			c.AnimationFrame()
-		}
 	}
 	perf.frameScene(a.frameScene())
 

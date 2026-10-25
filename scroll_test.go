@@ -17,9 +17,20 @@ import (
 // column is what is on screen.
 func newScrollWindow(t *testing.T) (*app, *ui.Tester) {
 	t.Helper()
+	return newScrollWindowView(t, nil)
+}
+
+// newScrollWindowView is newScrollWindow whose view wrap wraps, for a test that
+// counts the passes the window builds or looks at what each one draws.
+func newScrollWindowView(t *testing.T, wrap func(*ui.Context, func(*ui.Context))) (*app, *ui.Tester) {
+	t.Helper()
 	a := newWindow(t)
 	a.opts.Scroll = true
-	tt := ui.NewTester(a.view, 1000, 760)
+	view := a.view
+	if wrap != nil {
+		view = func(c *ui.Context) { wrap(c, a.view) }
+	}
+	tt := ui.NewTester(view, 1000, 760)
 	tt.Frame()
 
 	// A scrolling book has one column, so the sheet is one maximum page wide

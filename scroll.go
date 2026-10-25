@@ -335,9 +335,28 @@ func (a *app) stopScroll() {
 // before it drew, and the reader sees the type stop dead and then hop. So the
 // last frame of a glide takes the last pixel whole, and no frame that is still
 // on its way takes less than one.
+//
+// It runs in the build pass, which is where the place is published: a frame that
+// only paints moves the column with stepColumn and leaves the publishing to the
+// build that lands (see drawSheet).
 func (a *app) stepScroll() {
+	if a.stepColumn() {
+		a.afterScroll()
+	}
+}
+
+// stepColumn is the motion itself: where the column stands after the time since
+// the last frame, whether it landed there, and the tiles around it. It reports
+// whether the column was moving at all.
+//
+// It is the part of a scroll that the moving frames need, and the part they may
+// do while painting: it moves the picture and builds the display lists the
+// picture is made of, and touches nothing the view shows. What the reader's
+// place publishes — the panels' chapter, the store's reading position — is
+// afterScroll's, and stays in the build pass.
+func (a *app) stepColumn() bool {
 	if a.scrollAt.IsZero() {
-		return
+		return false
 	}
 	now := a.clock()
 	raw := now.Sub(a.scrollAt)
@@ -350,8 +369,7 @@ func (a *app) stepScroll() {
 		a.scrollVel = 0
 		a.scrollAt = time.Time{}
 		a.scrollAhead()
-		a.afterScroll()
-		return
+		return true
 	}
 	if a.scrollPlan {
 		// A planned glide is a place on a clock, not a debt paid down: it needs no
@@ -368,8 +386,7 @@ func (a *app) stepScroll() {
 			a.scrollAt = time.Time{}
 		}
 		a.scrollAhead()
-		a.afterScroll()
-		return
+		return true
 	}
 	dt := a.frameStep(raw)
 	gap := a.scrollGoal - a.scrollY
@@ -393,7 +410,7 @@ func (a *app) stepScroll() {
 		a.scrollAt = time.Time{}
 	}
 	a.scrollAhead()
-	a.afterScroll()
+	return true
 }
 
 // frameStep is the time this frame integrates, and it is never much more than a
