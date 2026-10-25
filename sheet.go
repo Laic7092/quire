@@ -14,14 +14,30 @@ const (
 	// turnDuration is how long a page takes to give way: short enough to feel
 	// immediate, long enough to read as motion.
 	turnDuration = 240 * time.Millisecond
+	// turnFlickDuration is how long each turn of a held key lasts. A repeat
+	// arrives every 30 ms or so, far faster than a reading turn; keeping the
+	// short slide means the sheet can finish every one of them, so a held key
+	// flicks through the book instead of restarting one slide it never lands.
+	turnFlickDuration = 90 * time.Millisecond
 )
 
 // turnState is a page turn on its way across the sheet: from and to are the
-// starts of the spreads leaving and arriving, dir which way it goes.
+// starts of the spreads leaving and arriving, dir which way it goes, and dur
+// how long this one takes (zero for the reading pace).
 type turnState struct {
 	from, to int
 	dir      int
 	at       time.Time
+	dur      time.Duration
+}
+
+// duration is how long this turn takes: the reading pace unless the key that
+// asked for it is being held.
+func (t *turnState) duration() time.Duration {
+	if t.dur > 0 {
+		return t.dur
+	}
+	return turnDuration
 }
 
 // pagesOnSheet is how many pages the sheet shows: two when the reader asked for
@@ -110,7 +126,7 @@ func (a *app) turnProgress() (float32, bool) {
 	if a.instant {
 		return 1, false
 	}
-	p := float32(a.clock().Sub(t.at)) / float32(turnDuration)
+	p := float32(a.clock().Sub(t.at)) / float32(t.duration())
 	if p >= 1 {
 		return 1, false
 	}

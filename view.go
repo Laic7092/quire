@@ -132,6 +132,16 @@ func (a *app) view(c *ui.Context) {
 		} else {
 			a.turning = nil
 			perf.turnDone()
+			// A key still held asked for the next pages while that slide was
+			// under way: it starts now, from the spread the last turn arrived at,
+			// so the run of turns is one page after another and never a restart.
+			if delta := a.turnNext; delta != 0 {
+				a.startTurn(delta, true)
+				if a.turning != nil {
+					c.AnimationFrame()
+					perf.turnFrame()
+				}
+			}
 		}
 	}
 	if a.gliding() {

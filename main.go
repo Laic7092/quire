@@ -170,8 +170,11 @@ type app struct {
 	// place is named changes. jumpAt marks it pending.
 	jumpLoc render.Location
 	jumpAt  bool
-	// turning is the page turn being shown, nil when the sheet is still.
-	turning *turnState
+	// turning is the page turn being shown, nil when the sheet is still, and
+	// turnNext the direction a key still held asked for while that turn is on
+	// its way: it waits for the slide to land rather than restarting it.
+	turning  *turnState
+	turnNext int
 	// instant turns the page without sliding, as tests and reduced-motion
 	// readers need.
 	instant bool
@@ -309,11 +312,34 @@ func (a *app) turn(delta int) {
 	if a.layout == nil {
 		return
 	}
+	// A slide already on the sheet is not restarted under the reader's eyes: a
+	// key repeat would move the pages back to the start of the slide every
+	// 30 ms, so the turn would never land and the pages would jump. The ask
+	// waits for that slide to land instead.
+	if a.turning != nil {
+		a.turnNext = delta
+		return
+	}
+	a.startTurn(delta, false)
+}
+
+// startTurn puts one turn on the sheet and moves the reading position to the
+// spread it arrives at. flick is the short slide a held key's turns take: a
+// repeat arrives every 30 ms or so, so a slide at the reading pace would still
+// be under way when the next one was asked for, and the run would never settle
+// on a page. At the short pace each turn lands between repeats, which is what
+// makes holding the key flick through the book.
+func (a *app) startTurn(delta int, flick bool) {
+	a.turnNext = 0
 	page := a.turnTarget(a.page, delta)
 	if page == a.page {
 		return
 	}
-	a.turning = &turnState{from: a.page, to: page, dir: delta, at: a.clock()}
+	dur := turnDuration
+	if flick {
+		dur = turnFlickDuration
+	}
+	a.turning = &turnState{from: a.page, to: page, dir: delta, at: a.clock(), dur: dur}
 	if a.instant {
 		a.turning = nil
 	} else {

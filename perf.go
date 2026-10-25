@@ -539,8 +539,9 @@ func (p *perfLog) turnFrame() {
 }
 
 // turnDone notes a turn landing, with how long it took and over how many
-// frames: a turn that should take 140 ms and takes 300 is the frame budget
-// being missed, not the animation being wrong.
+// frames: a reading turn that should take 240 ms and takes 300 is the frame
+// budget being missed, not the animation being wrong. A run of turns from a
+// held key lands every 90 ms, which is the short slide, not a mistimed one.
 func (p *perfLog) turnDone() {
 	if p == nil {
 		return

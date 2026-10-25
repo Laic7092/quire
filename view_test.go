@@ -662,6 +662,42 @@ func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 	}
 }
 
+// A book is laid out at the sheet the page area has, never at a guess: the
+// width decides whether the sheet holds one page or two, so a layout started
+// before the area is measured lays the whole book out at a width the reader
+// never sees, and the next frame lays it out again.
+func TestTheSheetWaitsForThePageArea(t *testing.T) {
+	a := newWindow(t)
+	a.opts.Spread = true
+	a.areaW = 0
+	if _, _, measured := a.layoutSheet(960, 594); measured {
+		t.Fatal("a sheet was chosen before the page area was measured")
+	}
+
+	a.areaW = 1180
+	sw, sh, measured := a.layoutSheet(960, 594)
+	if !measured {
+		t.Fatal("the measured page area gave no sheet")
+	}
+	if want := (a.areaW - 2*pagePadding) / 2; sw != want {
+		t.Errorf("sheet %.0f wide, want the spread's half %.0f", sw, want)
+	}
+	if sh != 594 {
+		t.Errorf("sheet %.0f high, want the box's 594", sh)
+	}
+
+	// And the reading view measures the area itself: after the frame that has
+	// committed geometry, the width is the window's, which is what the sheet is
+	// sized from on the very next build.
+	a.areaW = 0
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	tt.Frame()
+	if got := a.areaW; got != 1180 {
+		t.Errorf("page area %.0f wide, want the window's 1180", got)
+	}
+}
+
 // An open book: two pages side by side on a wide window, and a turn that moves
 // by the pair, as Books pages an open book.
 func TestSpreadShowsTwoPagesAndTurnsByThePair(t *testing.T) {
@@ -752,6 +788,71 @@ func TestTurnSlidesAndLands(t *testing.T) {
 	}
 	if got := easeOut(0.5); got < 0.8 || got > 1 {
 		t.Errorf("easeOut(0.5) = %g, want most of the way", got)
+	}
+}
+
+// Holding the turn key flicks through the book. A repeat that arrives while a
+// slide is under way waits for it to land instead of restarting it, and the
+// slide that follows takes the short pace a held key asks for.
+func TestHeldTurnWaitsForTheSlideThenFlicks(t *testing.T) {
+	a := newWindow(t)
+	a.instant = false
+	a.opts.Spread = false // one page a turn, so the page number says where it went
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+
+	at := time.Now()
+	a.now = func() time.Time { return at }
+
+	// A press on its own slides at the reading pace.
+	a.turn(1)
+	first := a.turning
+	if first == nil {
+		t.Fatal("the first press put no turn on the sheet")
+	}
+	if got := first.duration(); got != turnDuration {
+		t.Errorf("the first slide lasts %s, want %s", got, turnDuration)
+	}
+	if a.page != 5 {
+		t.Fatalf("page %d after the first press, want 5", a.page)
+	}
+
+	// A repeat while it is under way must not restart what the reader is
+	// watching: the page it is going to stays, and the slide keeps its clock.
+	at = at.Add(turnDuration / 3)
+	a.turn(1)
+	if a.turning != first {
+		t.Error("the repeat restarted the slide in flight")
+	}
+	if a.page != 5 {
+		t.Errorf("page %d while the slide is under way, want 5", a.page)
+	}
+
+	// The waiting ask is served when that slide lands, and as the short slide.
+	at = at.Add(turnDuration)
+	tt.Frame()
+	if a.turning == nil {
+		t.Fatal("the held ask never became a turn")
+	}
+	if got := a.turning.duration(); got != turnFlickDuration {
+		t.Errorf("the held slide lasts %s, want %s", got, turnFlickDuration)
+	}
+	if got := a.turning.from; got != 5 {
+		t.Errorf("the held slide leaves page %d, want 5", got)
+	}
+	if a.page != 6 {
+		t.Errorf("page %d after the held slide started, want 6", a.page)
+	}
+
+	// And it lands by itself a slide later: a held key is a queue of one turn,
+	// not one turn restarted every repeat.
+	at = at.Add(turnFlickDuration)
+	tt.Frame()
+	if a.turning != nil {
+		t.Error("the short slide never landed")
+	}
+	if a.page != 6 {
+		t.Errorf("page %d after the short slide landed, want 6", a.page)
 	}
 }
 
