@@ -301,6 +301,25 @@ go run ./cmd/corpus -dir ~/epub-corpus -v -paint
 而不是在用户屏幕上。`internal/reader` 的常量在这里有一份副本：这个工具必须
 不依赖 GTK/cgo 就能在无显示环境里跑。
 
+## 无窗口出图（layx-raster）
+
+屏幕上的正文仍然走 `UIPainter` + MyGo；需要一张 PNG 而不需要窗口时（CI 快照、
+缩略图、问题报告），`internal/reader.PageRenderer` 用独立的纯 Go 软件光栅器
+[`layx-raster`](https://github.com/laix/layx-raster) 重放同一份 DisplayList，
+不经过 MyGo、GPU 或显示服务：
+
+```sh
+go run ./cmd/bookshot -book internal/book/testdata/samples/aq-zhuan.epub \
+    -page 2 -theme original -scale 2 -out /tmp/page.png
+```
+
+`bookshot` 走的正是读者的链路：`book.Open` → `book.BuildWith` →
+`reader.BuildLayout` → `PageRenderer.DrawPage`（滚动布局用 `DrawTile`）。`-theme`
+决定纸、墨和链接色（和阅读页一样由 `reader.SetPalette` 在排版前定下），`-scale`
+是设备像素比。图片走同一个 `Book.Build` 的字节流，由 `reader.DecodeImage` 解码后
+注册给光栅器。测试见 `internal/reader/pagerender_test.go`：1×/2× 尺寸、纸色、
+重复绘制的逐字节一致、长文 tile，以及图片确实落到页面上。
+
 ## 链接
 
 正文里的 `<a href>` 由 `epub` 映射成 `render.Node.Link`，render 给出命中矩形

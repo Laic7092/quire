@@ -1,0 +1,175 @@
+package reader
+
+import (
+	"bytes"
+	"context"
+	"image"
+	"image/color"
+	"image/png"
+	"testing"
+
+	"github.com/laix/layx/render"
+	"github.com/laix/layx/render/paint"
+)
+
+func differsFromPaper(img *image.RGBA, paper paint.Color) int {
+	n := 0
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		if img.Pix[i] != paper.R || img.Pix[i+1] != paper.G || img.Pix[i+2] != paper.B {
+			n++
+		}
+	}
+	return n
+}
+
+func TestPageRendererDrawsPage(t *testing.T) {
+	b, fonts := testBookAndFont(t)
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 480, 640, Options{FontSize: 18})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := layout.Page(0)
+	if page == nil {
+		t.Fatal("page 0 is nil")
+	}
+
+	pr := NewPageRenderer()
+	paper := Current().Paper
+	img := pr.DrawPage(page, 1)
+	if got, want := img.Bounds().Dx(), int(page.Size().Width); got != want {
+		t.Fatalf("width = %d, want %d", got, want)
+	}
+	if got, want := img.Bounds().Dy(), int(page.Size().Height); got != want {
+		t.Fatalf("height = %d, want %d", got, want)
+	}
+	if c := img.RGBAAt(0, 0); c.R != paper.R || c.G != paper.G || c.B != paper.B {
+		t.Fatalf("paper = %v, want %v", c, paper)
+	}
+	ink1 := differsFromPaper(img, paper)
+	if ink1 < 500 {
+		t.Fatalf("page covered %d pixels of ink, want a readable page", ink1)
+	}
+
+	// The surface is reused, so copy the pixels before the next draw: the same
+	// page must come out identical.
+	first := append([]byte(nil), img.Pix...)
+	again := pr.DrawPage(page, 1)
+	if !bytes.Equal(first, again.Pix) {
+		t.Fatal("drawing the same page twice produced different pixels")
+	}
+
+	hi := pr.DrawPage(page, 2)
+	if got, want := hi.Bounds().Dx(), 2*int(page.Size().Width); got != want {
+		t.Fatalf("2x width = %d, want %d", got, want)
+	}
+	if got, want := hi.Bounds().Dy(), 2*int(page.Size().Height); got != want {
+		t.Fatalf("2x height = %d, want %d", got, want)
+	}
+	ink2 := differsFromPaper(hi, paper)
+	if ink2 <= ink1 {
+		t.Fatalf("2x page covered %d pixels, 1x covered %d", ink2, ink1)
+	}
+}
+
+func TestPageRendererDrawsTile(t *testing.T) {
+	b, fonts := testBookAndFont(t)
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 480, 640, Options{FontSize: 18, Scroll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.TileCount() == 0 {
+		t.Fatal("scroll layout has no tiles")
+	}
+	tile := layout.Tile(0)
+	if tile == nil {
+		t.Fatal("tile 0 is nil")
+	}
+
+	pr := NewPageRenderer()
+	img := pr.DrawTile(tile, 1)
+	if got, want := img.Bounds().Dx(), int(tile.Size().Width); got != want {
+		t.Fatalf("width = %d, want %d", got, want)
+	}
+	if got, want := img.Bounds().Dy(), int(tile.Size().Height); got != want {
+		t.Fatalf("height = %d, want %d", got, want)
+	}
+	if ink := differsFromPaper(img, Current().Paper); ink < 500 {
+		t.Fatalf("tile covered %d pixels of ink, want a readable tile", ink)
+	}
+}
+
+func TestPageRendererDrawsRegisteredImage(t *testing.T) {
+	_, fonts := testBookAndFont(t)
+
+	var pic bytes.Buffer
+	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for x := 0; x < 4; x++ {
+		for y := 0; y < 4; y++ {
+			src.Set(x, y, color.RGBA{R: 0xff, A: 0xff})
+		}
+	}
+	if err := png.Encode(&pic, src); err != nil {
+		t.Fatal(err)
+	}
+
+	const imageID = render.ImageID(7)
+	builder := render.NewDocumentBuilder().
+		SetStyles([]render.Style{{}, {FontFamily: "book", FontSize: 18}}).
+		SetMetadata(render.Metadata{Reflowable: true})
+	if err := builder.AddChapter(render.Chapter{
+		ID:   "c",
+		Root: 0,
+		Nodes: []render.Node{
+			{Kind: render.NodeBlock, Style: 1, Children: []render.NodeID{1}},
+			{Kind: render.NodeImage, Image: imageID, Width: 40, Height: 40},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 200, 200, Options{FontSize: 18})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := layout.Page(0)
+	if page == nil {
+		t.Fatal("page 0 is nil")
+	}
+
+	pr := NewPageRenderer()
+	if !pr.SetImage(imageID, pic.Bytes()) {
+		t.Fatal("PNG did not decode")
+	}
+	if pr.SetImage(imageID+1, []byte("not an image")) {
+		t.Error("garbage decoded as an image")
+	}
+	img := pr.DrawPage(page, 1)
+
+	found := false
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		if img.Pix[i] > 0xc0 && img.Pix[i+1] < 0x40 && img.Pix[i+2] < 0x40 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("the registered image never reached the page")
+	}
+}
+
+func TestDecodeImageRejectsGarbage(t *testing.T) {
+	if _, err := DecodeImage([]byte("not an image")); err == nil {
+		t.Fatal("garbage decoded as an image")
+	}
+}
