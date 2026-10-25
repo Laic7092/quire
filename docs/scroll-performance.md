@@ -11,6 +11,14 @@
 > 2026-10-25：**宿主的字形图集已落地**（`internal/reader/glyph_atlas.go`），
 > 逐字形的 outline→path→flatten→hash 每帧工作消失，见「已做：字形图集」一节。
 > 下面「数据」表里 3.15 / 2.06 ms 是**上一步（裁剪）之后、图集之前**的数，保留作历史。
+>
+> 2026-10-26：两件未完的事做完了，并且**推翻了一条旧结论**：
+> 1. `UIPainter` 实现了 `paint.Clipped`（`Visible()`），核心库的回放裁剪在 app 里生效；
+> 2. 图集**不再按渲染器开关**：裁到包围盒 + 整像素贴图的槽位把「软件光栅上图集更贵」
+>    这条旧测量作废了。现在软件光栅上，一个视口的 draw 回调 2.75 ms → **0.105 ms**，
+>    1180×800 整帧 5.2 → **2.2 ms**（见「图集的默认开关」）；
+> 3. 滚动与翻页的帧**只重绘、不重建视图**（`Painter.AnimationFrame`），视图每个手势
+>    只建一次（见「已做：只重绘的帧」）。
 
 ## 一句话结论
 
@@ -161,19 +169,54 @@ CPU profile（改前，一帧）：`UIPainter.DrawGlyphs` 累计 **85%**，其�
 1/4 px 网格（形状被微扰），图集只吸附整个字形的相位，形状本身是精确的——所以这里是
 "等价而非变差"，不需要换 `srwiley/rasterx`。
 
-**默认按渲染器选**（`(*UIPainter).atlasWanted`）：GPU 上走图集——两种做法在 GPU 上都是
-一张带纹理的 quad，省下的是几何；mygo 回退到**自带软件光栅**时不走，因为那个渲染器把
-图片当双线性采样（每像素 4 次取 texel + 12 次插值），比 mask 的一字节混合贵 4–5 倍。
-同一窗口实测 CPU/帧：GPU 路径 90.8 → 29.0 ms（图集赢），`MYGO_GPU=0` 软件光栅
-7.8 → **13.2** ms（图集输）。所以默认跟随 `Painter.Accelerated()`，
-`LAYX_GLYPH_ATLAS=1` / `0` 强制开关（A/B 与回滚），`LAYX_GLYPH_STATS=1` 打开计数器
+### 图集的默认开关（2026-10-26：改成全平台默认）
+
+`(*UIPainter).atlasWanted` 曾经跟着 `Painter.Accelerated()` 走：GPU 上用图集，
+mygo 回退到**自带软件光栅**时用轮廓。理由当时是实测过的——那个渲染器把图片当双线性
+采样（每像素 4 次取 texel + 12 次插值），比 mask 的一字节混合贵，同一窗口 CPU/帧
+7.8 ms 涨到 13.2 ms。
+
+那条测量现在**不成立**，变的是图集这边的两个实现细节，不是渲染器：
+
+1. 槽位**裁到墨迹的包围盒**（拉丁字省约 45% 面积，CJK 约 20%），所以贴图覆盖的像素
+   少了一大截；
+2. 槽位的 quad 落在**整设备像素**上（`dst` 的宽高就是位图宽高除以 DPR），双线性
+   采样在 texel 中心上就是取那一个 texel，不再有半像素的插值。
+
+重测（Ryzen 7 7800X3D，`ui.Tester`，`benchScrollColumn` 的样本书）：
+
+| 测量 | 轮廓 | 图集 |
+| --- | ---: | ---: |
+| 视口 draw 回调 620×700，scale 1 | 2.75 ms | **0.105 ms**（26×） |
+| 同上 scale 2 | 3.00 ms | **0.117 ms**（26×） |
+| 整窗一帧 1180×800（`BenchmarkScrollFrame`） | 4.72 ms | **2.58 ms** |
+| 滑动中的一帧（`BenchmarkScrollGlideFrame`） | 5.2 ms | **2.05 ms** |
+
+所以默认改成**所有渲染路径都用图集**，`LAYX_GLYPH_ATLAS=0` 变成纯粹的 A/B 与回滚
+（它同时是 `TestGlyphAtlasMatchesOutlines` 里的对照）。`LAYX_GLYPH_STATS=1` 打开计数器
 （`UIPainter.GlyphStats()`）。
 
 已知差异：Windows 的 DirectWrite 后端会给 mask 覆盖率做对比度/gamma 增强
 （`scene.TextCoverage`，由 `Scene.Text` 参数驱动），走到图片路径就没有这层增强。
-Linux/macOS 的文本引擎这两个参数是恒等值（所以本机逐像素 diff 才为 0）。要严格一致
-就在 Windows 上用 `LAYX_GLYPH_ATLAS=0`，或者把那层校正离线烘进图集（需要按墨色分桶，
-图集项会翻几倍，未做）。
+图集路径改由 `texttone.go` 烘进覆盖率（DirectWrite 的对比度曲线 + CoreText 式的边缘
+生长，见那一节），两条路径的墨量因此对齐；但合成粗体（`EmulateBold`）**只取对比度、
+不取生长**——它已经把轮廓撑粗了一圈，再叠生长会把粗体正文的字怀堵死。
+本机（软件光栅、这本正文全是 `<h5>` 的样书）实测：整页墨量 轮廓 : 图集 = 1 : 1.04。
+
+## 已做：只重绘的帧（2026-10-26）
+
+滚动的列和翻页的进度都是**时钟的函数**，所以手势中的帧不需要重建视图：draw 回调自己
+`stepColumn()`（移动列、备好 tile），然后 `Painter.AnimationFrame()` 要下一帧——
+mygo 的 `repaintFrame` 只重画上一帧的元素。落地那一下（以及每 `folioEvery` = 120 ms
+的页脚更新）用 `Services.Invalidate()` 换一次真正的 build，把阅读位置写进 store、
+把百分比/章节/书签滑块画到新位置。
+
+- 视图每个手势只建一次，`perf.go` 的 `build` 从每帧一次变成每格一次；
+- 日志里那些只画不建的帧也照常计数（`drawSheet` 自己 `perf.frameBegin`），
+  否则一次手势会在日志里只剩两帧（`TestPerfLogCountsTheFramesThatOnlyPaint`）；
+- 回归：`TestGlidePaintsWithoutBuilding`（滑动期间 build ≤ 1/4 帧且落地后页脚正确）、
+  `TestTurnPaintsWithoutBuilding`（翻页同一套）、`TestRepaintPaintsTheSameColumn`
+  （只重绘画出与 build 完全相同的画面）。
 
 ## 光栅化是什么，为什么核心库不做它
 
@@ -373,15 +416,15 @@ type Cache[B any] struct{ /* 位图由宿主 raster 回调产出，库只管策�
 | 部分 | 图集之前 | 现在 | 谁能影响 |
 | --- | ---: | ---: | --- |
 | 字形几何（outline→path→flatten→hash） | ≈ 2.0 ms | **≈ 0.1 ms**（查表 + 贴图） | 宿主：已做（字形图集） |
-| 整棵视图建树 + 布局 + commit | ≈ 1.0 ms | ≈ 1.0 ms | 宿主：改用 repaint 帧即消失 |
+| 整棵视图建树 + 布局 + commit | ≈ 1.0 ms | **每手势一次**（≈ 0.06 ms/帧，均摊） | 宿主：已做（只重绘的帧） |
 | op 派发 + 裁剪跳过（A/B 的地盘） | < 0.05 ms | < 0.05 ms | 适配层可省一半以上 |
 | 背景/边框矩形 | 0.003 ms | 0.003 ms | 谁都能 |
 
 适配层的价值是**正确性只写一次、不变量可测、集成成本降低**，不是帧率。现在真能再降
-成本的只剩两件，都落在宿主：
+成本的只剩一件，落在宿主：
 
-1. glide 帧用 `p.AnimationFrame`（repaint-only）：**−1.0 ms**，代价是滑动过程中
-   folio 的百分比不刷新。
+1. ~~glide 帧用 `p.AnimationFrame`（repaint-only）~~ 已做：视图每个手势只建一次；
+   页脚靠每 120 ms 一次的 build 跟上，不再是"滑动中百分比不刷新"的代价。
 2. tile 预光栅成位图（`ui.Render` + `ui.NewBitmap`，整像素吸附）：把"每帧 ~900 个
    quad"换成"每帧 3 个 quad"，144 Hz 的余量再放大一档。代价是 Retina 显存
    （620×700×4B ≈ 1.7 MB/tile，2x 约 7 MB）、主题/字号/缩放变化时的作废，以及
@@ -389,18 +432,19 @@ type Cache[B any] struct{ /* 位图由宿主 raster 回调产出，库只管策�
 
 ## 待办与决策点
 
-1. ~~核心库：回放裁剪 + 字形 op 矩形~~ 已完成（`render/replay.go`，commit `9bb6365`）；
-   剩余：宿主 `UIPainter` 实现 `paint.Clipped`，否则裁剪不会触发。
-2. ~~把 2.0 ms 的逐字形几何摊成"一帧一次 blit"~~ 已用**宿主侧字形图集**做到
-   （`internal/reader/glyph_atlas.go`，见「已做」）：不动核心、不加 module，
-   每帧 flatten 从 95 次降到 0。剩下 `layx-raster` 的意义变成**tile 位图缓存**
-   （policy 层）与可替换后端（异步/多分辨率留第二期），不再是字形几何。
-   
+1. ~~核心库：回放裁剪 + 字形 op 矩形~~ 已完成（`render/replay.go`，commit `9bb6365`），
+   宿主侧 `UIPainter.Visible()` 也已接上：裁剪现在真的在 app 里触发，
+   `TestDrawGlyphsCullChangesNoPixel` 同时覆盖画家自己的行裁剪和引擎的 op 裁剪。
+2. ~~把 2.0 ms 的逐字形几何摊成"一帧一次 blit"~~ 已用**宿主侧字形图集**做到，
+   并且它现在是所有渲染路径的默认（见「图集的默认开关」）。剩下 `layx-raster`
+   的意义是**tile 位图缓存**（policy 层）与可替换后端（异步/多分辨率留第二期），
+   不再是字形几何。
 3. 适配层（可与 2 同一个 module）：A + D + E（这三块是我们 app 里已验证过的逻辑，
    搬过去风险最低）。`Layout.TileHeight()` 已有（`render/scroll.go`），这条前置条件
    已满足；适配层本身仍未开始。
-4. 宿主手感三条：`ev.Precise` 直接位移、glide 用 repaint 帧、位置记录去抖
-   （现在每秒 144 次 `SetPosition` + `Timer.Reset`）。
+4. 宿主手感三条：~~`ev.Precise` 直接位移~~、~~glide 用 repaint 帧~~、~~位置记录去抖~~
+   都已完成：连续设备 1:1、滑动与翻页只重绘（见「已做：只重绘的帧」）、位置在落地
+   和每 `folioEvery` 记一次而不是每帧。
 5. 未定：`TileHeight` 取视口高还是更小（更小的 tile + 裁剪 = 更贴合的覆盖，但
    tile 数量与显示列表重建次数上升）；以及 `layx-raster` 的瓦片尺寸是否跟核心的
    `TileHeight` 解耦（浏览器的做法是 256–512 固定尺寸、与视口无关）。
@@ -414,9 +458,10 @@ type Cache[B any] struct{ /* 位图由宿主 raster 回调产出，库只管策�
 
 ```sh
 cd layx-reader
-go test -run XXX -bench 'BenchmarkScrollFrame' -benchtime 3s .
-go test -run XXX -bench 'BenchmarkScrollViewportPaint' -benchtime 3s ./internal/reader/
-go test -run 'TestDrawGlyphsCullChangesNoPixel' ./internal/reader/
+go test -run XXX -bench 'BenchmarkScrollFrame|BenchmarkScrollGlideFrame' -benchtime 3s .
+go test -run XXX -bench 'BenchmarkScrollViewportPaint|BenchmarkScrollViewportAtlas' -benchtime 3s ./internal/reader/
+go test -run 'TestDrawGlyphsCullChangesNoPixel|TestGlyphAtlasMatchesOutlines' ./internal/reader/
+go test -run 'TestGlidePaintsWithoutBuilding|TestTurnPaintsWithoutBuilding|TestRepaintPaintsTheSameColumn' .
 
 # 字形图集：画质逐像素比对、稳定性、计数器、以及 draw 回调内的成本
 go test -run 'TestGlyphAtlas' -v ./internal/reader/
@@ -427,9 +472,9 @@ LAYX_GLYPH_ATLAS=0 go test -run XXX -bench 'BenchmarkScrollViewportPaint' -bench
 
 # 真窗口：开一个窗口滑这本书，报 wall/cpu 每帧、图集命中率与内存，跑完自己退出。
 # 显示器刷新率会封顶 wall，所以同机比 cpu/frame：
-go run ./cmd/glyphprobe                                  # 默认（GPU 上走图集）
-LAYX_GLYPH_ATLAS=0 go run ./cmd/glyphprobe               # 旧路径
-MYGO_GPU=0 go run ./cmd/glyphprobe                       # mygo 自带软件光栅（图集默认关闭）
+go run ./cmd/glyphprobe                                  # 默认（图集）
+LAYX_GLYPH_ATLAS=0 go run ./cmd/glyphprobe               # 旧路径：每帧重建轮廓
+MYGO_GPU=0 go run ./cmd/glyphprobe                       # mygo 自带软件光栅（同样走图集）
 MYGO_FRAME_STATS=1 go run ./cmd/glyphprobe               # mygo 自己的 build/paint/present 分帧
 
 # layx 侧：建 tile 的成本（滚动侧不是瓶颈的证据）

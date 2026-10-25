@@ -114,11 +114,16 @@ DIP 时退回单页），点书页左/右半翻页（拖动选字）；底栏是
 
 `LAYX_NO_ANIM=1` 关掉翻页动画（CI 和 `SNAP=1` 的快照都这样跑，帧才稳定）。
 
-`LAYX_GLYPH_ATLAS=0` / `=1` 强制用旧路径（每帧把轮廓建成 `ui.Path` 再 `FillPath`）
-或新路径（字形图集）；不设时按渲染器选：GPU 上用图集，mygo 回退到自带软件光栅时用
-旧路径（原因与实测见 `docs/scroll-performance.md`）。`LAYX_GLYPH_STATS=1` 打开
+`LAYX_GLYPH_ATLAS=0` / `=1` 关掉或强制字形图集：默认两条渲染路径（GPU 与 mygo
+自带的软件光栅）都用图集。`LAYX_GLYPH_ATLAS=0` 是每帧把轮廓建成 `ui.Path` 再
+`FillPath` 的旧路径，留作 A/B 与回滚（原因与实测数字见 `docs/scroll-performance.md`）。
+`LAYX_GLYPH_STATS=1` 打开
 计数器，`UIPainter.GlyphStats()` 给出每帧 run / 字形数、图集命中率、栅格化次数、
 上传次数与图集内存。`MYGO_FRAME_STATS=1` 让 mygo 打印每帧的 build/layout/paint/present。
+
+滚动与翻页的每一帧**只重绘、不重建视图**：列的位置是时钟的函数，draw 回调自己步进
+并 `Painter.AnimationFrame()` 要下一帧，视图只在手势开始那一下（和 `folioEvery` 的
+页脚更新、落地那一下）建一次。这让“成本”一栏里 `build` 从每帧一次变成每格一次。
 
 `LAYX_TEXT_GRID=0` 关掉「把每行基线放到整设备像素」：行距在非整数倍屏幕上（150%
 是 30.09 设备像素）每行漂一点，相位每两三行跳 1/4 像素，整列看过去就是一条条看
