@@ -2,7 +2,6 @@ package reader
 
 import (
 	"image"
-	"image/draw"
 	"math"
 	"os"
 
@@ -10,7 +9,6 @@ import (
 	ot "github.com/go-text/typesetting/font/opentype"
 	"github.com/laix/layx-raster"
 	"github.com/laix/layx/render/paint"
-	"golang.org/x/image/vector"
 )
 
 // Drawing a page's glyphs from their outlines costs the painter more than the
@@ -23,30 +21,17 @@ import (
 // The atlas holds white with the coverage in its alpha, so its colours follow
 // the run's tint and a theme or a fade change rebuilds nothing.
 //
-// The coverage itself comes from github.com/laix/layx-raster by default: its
-// Coverage draws the outline once and the result is copied into the layer.
-// golang.org/x/image/vector stays behind LAYX_GLYPH_RASTER=vector as the A/B and
-// the rollback. The two agree to within antialiasing (mean 0.28 of 255 at 1x,
-// 0.15 at 2x in TestGlyphRasterizersMatch), but a cold layx-raster glyph costs
-// about ten times the vector one (18µs against 1.6µs at 17 DIP and DPR 2; see
-// BenchmarkGlyphRasterizer). A warm frame is a lookup either way, so the price
-// is paid on the first frame of a page or a tile, not while reading a page
-// already on screen.
+// The coverage itself comes from github.com/laix/layx-raster: its Coverage
+// draws the outline once, exactly, and the result is copied into the layer.
+// That is the same rasterizer the headless page renderer uses, so a glyph on
+// screen and a glyph in a PNG are the same pixels. A warm frame is a lookup
+// either way, so the rasterizing happens on the first frame of a page or a
+// tile, not while reading a page already on screen.
 //
-// LAYX_GLYPH_ATLAS=1 or 0 forces the atlas or the outlines, for A/B and
-// rollback; unset, the atlas is used where the frame is drawn on a GPU (see
+// LAYX_GLYPH_ATLAS=0 forces the outlines instead of the atlas, for A/B and
+// rollback; unset or 1, the atlas is used on every path (see
 // (*UIPainter).atlasWanted).
 var glyphAtlasMode = os.Getenv("LAYX_GLYPH_ATLAS")
-
-// glyphRasterMode picks the coverage rasterizer behind the atlas.
-// LAYX_GLYPH_RASTER=vector restores golang.org/x/image/vector, which is what
-// the atlas grew up on and is kept as the rollback and the A/B; unset (the
-// default) or any other value uses layx-raster's Coverage (see
-// github.com/laix/layx-raster). Both draw the same outlines at the same subpixel
-// phase; they disagree only in how a pixel's area is sampled, which the tests
-// hold to antialiasing. layx-raster rasterizes a cold glyph about ten times
-// slower, so the switch is the way back to the cheaper first frame of a page.
-var glyphRasterMode = os.Getenv("LAYX_GLYPH_RASTER")
 
 // glyphStatsOn, set by LAYX_GLYPH_STATS=1, counts what the painter does with
 // glyphs, so a test, a benchmark or the app's performance log can say where a
@@ -80,14 +65,9 @@ type glyphAtlas struct {
 	layers []*glyphLayer
 	index  map[glyphKey]*glyphSlot
 	bytes  int
-	// vectorRaster is the legacy coverage rasterizer, used only when
-	// LAYX_GLYPH_RASTER=vector. layxRaster is the default. Both reuse their
-	// buffers from one glyph to the next.
-	vectorRaster vector.Rasterizer
-	layxRaster   raster.Coverage
-	// rasterBuf is the legacy rasterizer's destination.
-	rasterBuf []uint8
-	scratch   []uint8
+	// raster reuses its path and buffers from one glyph to the next.
+	raster  raster.Coverage
+	scratch []uint8
 	// stats is where the counters go, nil unless LAYX_GLYPH_STATS is set.
 	stats *GlyphStats
 	tick  uint32
@@ -352,48 +332,17 @@ var boldOffsets = [8][2]float64{
 	{-1, 0}, {-0.7071, -0.7071}, {0, -1}, {0.7071, -0.7071},
 }
 
-// coverageRasterizer is the path API the two coverage rasterizers share. The
-// atlas feeds the same outline to either; only the way a pixel's area is
-// sampled differs.
-type coverageRasterizer interface {
-	Reset(w, h int)
-	MoveTo(x, y float32)
-	LineTo(x, y float32)
-	QuadTo(cx, cy, x, y float32)
-	CubeTo(c1x, c1y, c2x, c2y, x, y float32)
-	ClosePath()
-}
-
 // renderCoverage rasterizes the outline of out into the atlas's scratch buffer,
 // w by h pixels, its ink placed as at the glyph's origin (fx, fy), the buffer's
 // corner being (kx, ky) from there. The result is the coverage of each pixel,
 // 0 to 255, w bytes to a row, corrected for the ink's tone when tone is not
 // nil and grown by spread when it is not zero.
-//
-// The rasterizer is layx-raster's Coverage unless LAYX_GLYPH_RASTER=vector
-// asks for the previous x/image/vector path (see glyphRasterMode).
 func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float64, kx, ky int, tone *toneLUT, spread float64) []uint8 {
 	// rasterize draws the outline at (ox, oy) device pixels from its nominal
 	// place and returns the w by h coverage.
 	rasterize := func(ox, oy float64) []uint8 {
-		var z coverageRasterizer
-		var finish func() []uint8
-		if glyphRasterMode == "vector" {
-			buf := a.buf(&a.rasterBuf, w, h)
-			z = &a.vectorRaster
-			z.Reset(w, h)
-			a.vectorRaster.DrawOp = draw.Src
-			finish = func() []uint8 {
-				img := image.Alpha{Pix: buf, Stride: w, Rect: image.Rect(0, 0, w, h)}
-				// An opaque source over an Alpha's pixels is the coverage itself.
-				a.vectorRaster.Draw(&img, img.Rect, image.Opaque, image.Point{})
-				return buf
-			}
-		} else {
-			z = &a.layxRaster
-			z.Reset(w, h)
-			finish = a.layxRaster.Alpha
-		}
+		z := &a.raster
+		z.Reset(w, h)
 		// The outline is in font units, y up: to pixels, y down, from the
 		// glyph's origin, less the bitmap's corner.
 		pt := func(p ot.SegmentPoint) (float32, float32) {
@@ -419,7 +368,7 @@ func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float
 			}
 		}
 		z.ClosePath()
-		return finish()
+		return z.Alpha()
 	}
 
 	dst := a.buf(&a.scratch, w, h)
@@ -427,10 +376,10 @@ func (a *glyphAtlas) renderCoverage(w, h int, out *glyphOutline, s, fx, fy float
 		copy(dst, rasterize(0, 0))
 	} else {
 		// Grown ink is the union of the outline drawn a ring of spreads away.
-		// Merge one offset at a time: each rasterizer reuses its own buffer, so
-		// what the union keeps has to be in dst, not in the rasterizer. The
-		// union starts from an empty buffer every time: the scratch holds the
-		// glyph before this one, and merging into it would grow a bold glyph by
+		// Merge one offset at a time: the rasterizer reuses its buffer, so what
+		// the union keeps has to be in dst, not in the rasterizer. The union
+		// starts from an empty buffer every time: the scratch holds the glyph
+		// before this one, and merging into it would grow a bold glyph by
 		// whatever was rasterized last.
 		clear(dst)
 		merge := func(ox, oy float64) {

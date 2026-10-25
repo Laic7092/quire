@@ -124,42 +124,9 @@ func TestGlyphAtlasMatchesOutlines(t *testing.T) {
 	}
 }
 
-// TestGlyphRasterizersMatch paints the same viewport with the atlas built by
-// layx-raster's Coverage and by x/image/vector, and holds them to being the
-// same picture: the choice of rasterizer may move where a pixel's coverage is
-// antialiased, but it may not thin, thicken or shift the text.
-func TestGlyphRasterizersMatch(t *testing.T) {
-	l, up, _ := benchScrollColumn(t)
-	useAtlas(t, "1")
-	usePlainCoverage(t)
-	old := glyphRasterMode
-	t.Cleanup(func() { glyphRasterMode = old })
-	const scrollY float32 = 4000
-	for _, scale := range []float32{1, 2} {
-		// The atlas key does not name the rasterizer, so switching it has to
-		// drop the bitmaps the other one made.
-		up.glyphs = nil
-		glyphRasterMode = "vector"
-		want := paintViewport(l, up, scale, scrollY)
-		up.glyphs = nil
-		glyphRasterMode = "layx"
-		got := paintViewport(l, up, scale, scrollY)
-
-		d := diffFrames(want, got)
-		t.Logf("scale=%g: max=%d mean=%.3f >8=%.3f%% >32=%.3f%%",
-			scale, int(d.max), d.mean, d.over8*100, d.over3*100)
-		if d.mean > 0.5 {
-			t.Errorf("scale=%g: mean channel difference %.2f of 255, want the same picture", scale, d.mean)
-		}
-		if d.over3 > 0.0005 {
-			t.Errorf("scale=%g: %.2f%% of pixels differ by more than 32 of 255", scale, d.over3*100)
-		}
-	}
-}
-
-// BenchmarkGlyphRasterizer measures the two coverage rasterizers on the same
-// glyph outlines, at the place the atlas would rasterize them (17 DIP at DPR
-// 2). It is the cost a cold atlas pays; a warm frame is a lookup either way.
+// BenchmarkGlyphRasterizer measures the coverage rasterizer on the glyph
+// outlines the atlas draws, at the place it would rasterize them (17 DIP at DPR
+// 2). It is the cost a cold atlas pays; a warm frame is a lookup instead.
 func BenchmarkGlyphRasterizer(b *testing.B) {
 	path, err := FindFont("")
 	if err != nil {
@@ -205,23 +172,16 @@ func BenchmarkGlyphRasterizer(b *testing.B) {
 		b.Skip("the face has no drawable glyphs in the sample")
 	}
 
-	for _, mode := range []string{"vector", "layx"} {
-		b.Run(mode, func(b *testing.B) {
-			old := glyphRasterMode
-			glyphRasterMode = mode
-			b.Cleanup(func() { glyphRasterMode = old })
-			a := &glyphAtlas{}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				for _, g := range subjects {
-					a.renderCoverage(g.w, g.h, g.out, s, fx, fy, g.kx, g.ky, nil, 0)
-				}
-			}
-			b.StopTimer()
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(len(subjects)), "ns/glyph")
-		})
+	a := &glyphAtlas{}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		for _, g := range subjects {
+			a.renderCoverage(g.w, g.h, g.out, s, fx, fy, g.kx, g.ky, nil, 0)
+		}
 	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(len(subjects)), "ns/glyph")
 }
 
 // TestGlyphAtlasIsStable draws the same viewport twice and holds the atlas to

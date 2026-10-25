@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"testing"
 
+	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
@@ -171,5 +172,44 @@ func TestPageRendererDrawsRegisteredImage(t *testing.T) {
 func TestDecodeImageRejectsGarbage(t *testing.T) {
 	if _, err := DecodeImage([]byte("not an image")); err == nil {
 		t.Fatal("garbage decoded as an image")
+	}
+}
+
+// BenchmarkPageRender measures one page of a real book through the headless
+// renderer at DPR 2: the whole display list, glyphs rasterized from their
+// outlines. It is the cost of a page turn in an offscreen render, the same work
+// the window does once for a page's glyph atlas.
+func BenchmarkPageRender(b *testing.B) {
+	bk, err := book.Open("../book/testdata/samples/aq-zhuan.epub")
+	if err != nil {
+		b.Skip(err)
+	}
+	fontPath, err := FindFont("")
+	if err != nil {
+		b.Skip(err)
+	}
+	fonts, err := OpenFont(fontPath)
+	if err != nil {
+		b.Skip(err)
+	}
+	doc, _, err := bk.Build(17)
+	if err != nil {
+		b.Fatal(err)
+	}
+	l, err := BuildLayout(context.Background(), doc, fonts, 420, 600, Options{FontSize: 17})
+	if err != nil {
+		b.Fatal(err)
+	}
+	page := l.Page(2)
+	if page == nil {
+		b.Skip("no page")
+	}
+
+	pr := NewPageRenderer()
+	pr.DrawPage(page, 2) // size the surface and warm the glyph faces
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		pr.DrawPage(page, 2)
 	}
 }

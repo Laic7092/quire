@@ -124,8 +124,9 @@ CPU profile（改前，一帧）：`UIPainter.DrawGlyphs` 累计 **85%**，其�
 `p.ImageRegion`。
 
 - 轮廓仍来自 `glyphFace.outlines`（go-text `GlyphDataOutline` 的缓存，没动）；
-- 用 `golang.org/x/image/vector` 把轮廓栅格化成 8 位覆盖率，存成**白色 + alpha 的
-  `ui.Bitmap`**（premultiplied white）：颜色跟着 run 的 `Tint` 走，所以换主题、改
+- 用 [`layx-raster`](https://github.com/laix/layx-raster) 的 `Coverage` 把轮廓栅格化
+  成 8 位覆盖率（和离屏出图同一个光栅器），存成**白色 + alpha 的 `ui.Bitmap`**
+  （premultiplied white）：颜色跟着 run 的 `Tint` 走，所以换主题、改
   fade 都不重建图集；
 - key = `(面, gid, 字号量化到 0.5 px, DPR, 亚像素相位 x/y 各量化到 1/4 px)`。DPR 必须
   进 key（设备像素 = size × DPR）；相位进 key 是因为同一字形在不同相位下覆盖率落在
@@ -164,7 +165,7 @@ CPU profile（改前，一帧）：`UIPainter.DrawGlyphs` 累计 **85%**，其�
 | 2 | 1 | 36 | 0.61 | 0.000% | 1.00002 |
 | 2 | 0.5 | 39 | 0.72 | 0.000% | — |
 
-差值全部落在边缘像素的**覆盖率分配**上（`x/image/vector` 与 mygo 的 mask 光栅器是两套
+差值全部落在边缘像素的**覆盖率分配**上（图集的光栅器与 mygo 的 mask 光栅器是两套
 算法），总墨量差 0.002%：没有变细、变粗或位移。顺带一提，旧路径把**每个轮廓点**吸附到
 1/4 px 网格（形状被微扰），图集只吸附整个字形的相位，形状本身是精确的——所以这里是
 "等价而非变差"，不需要换 `srwiley/rasterx`。
@@ -203,43 +204,54 @@ mygo 回退到**自带软件光栅**时用轮廓。理由当时是实测过的�
 不取生长**——它已经把轮廓撑粗了一圈，再叠生长会把粗体正文的字怀堵死。
 本机（软件光栅、这本正文全是 `<h5>` 的样书）实测：整页墨量 轮廓 : 图集 = 1 : 1.04。
 
-### 图集内部的光栅器：layx-raster 的 Coverage（2026-10-26）
+### 图集内部的光栅器：只留 layx-raster 的 Coverage（2026-10-26）
 
-图集只负责"一次"，不负责"怎么画一个字形"。那一步现在默认交给
-[`github.com/laix/layx-raster`](https://github.com/laix/layx-raster) 的 `Coverage`：
-它把设备空间的一条路径画成 8 位覆盖率，和图集要的东西正好一样。原来的
-`golang.org/x/image/vector` 保留为 A/B 与回滚，环境变量是 `LAYX_GLYPH_RASTER=vector`。
+图集只负责"一次"，不负责"怎么画一个字形"。那一步现在只有一套实现：
+[`github.com/laix/layx-raster`](https://github.com/laix/layx-raster) 的 `Coverage`。
+`golang.org/x/image/vector` 已经删掉——它当初是图集的起点，留着两条路就要维护两份
+A/B、两个环境变量，而画质和速度都不再需要它。
 
-同一视口、同一条 outline、同一条 tone 处理，两条路逐像素比
-（`TestGlyphRasterizersMatch`，`benchScrollColumn` 的样本书）：
+第一版 `Coverage` 是 8 条竖向子扫描线 + 水平解析面积，冷栅格要 **18 µs/字形**
+（vector 约 1.6 µs），那是自找的：超采样把一个像素写了 8 次，还要排 8 次序。改成
+**精确面积积分**后是 **3.3 µs/字形**：每条边按它穿过的每个像素行落一块带符号面积，
+行内从左到右累加出环绕数，取绝对值夹到 1 就是覆盖率；水平方向解析、竖直方向由行
+重叠自然得到，一个像素只写一次。`BenchmarkCoverageGlyph`（`layx-raster`）盯住这条
+路径的开销，`BenchmarkGlyphRasterizer`（这里）盯住真实字形。
 
-| scale | 最大差(/255) | 平均差 | 差 >8 的像素 | 差 >32 的像素 |
-| --- | ---: | ---: | ---: | ---: |
-| 1 | 18 | **0.280** | 0.039% | 0.000% |
-| 2 | 12 | **0.148** | 0.029% | 0.000% |
-
-没有变细、变粗或位移，差只在边缘像素的覆盖率分配上。
-
-代价在**冷栅格**：`BenchmarkGlyphRasterizer` 用同一批 CJK/拉丁字形，17 DIP、DPR 2，
-每个字形一次（不含图集查找）：
+冷栅格（17 DIP、DPR 2，一批 CJK/拉丁字形，每字形一次，不含图集查找）：
 
 | 光栅器 | 每字形 | 分配 |
 | --- | ---: | ---: |
-| `x/image/vector` | **1.62 µs** | 31 次/字形，2.0 KB |
-| layx-raster `Coverage` | **18.0 µs** | 0 次 |
+| `x/image/vector`（已删除） | 1.6 µs | 31 次/字形，2.0 KB |
+| `Coverage`，8 条子扫描线（第一版） | 18.0 µs | 0 次 |
+| `Coverage`，精确面积（现在） | **3.3 µs** | 0 次 |
 
-一个 620×700 的视口在 DPR 2 下约有 1000 个图集槽位，所以第一帧新页/新 tile 的
-冷栅格从约 1.5 ms 变成约 19 ms；图集命中后的帧完全不变（`TestGlyphAtlasScrolling`
-里滑动中的 `rasters=3.9/frame`）。这是一笔落在**翻页/新 tile 第一帧**上的成本，
-不是每帧成本；默认选 layx-raster 是为了屏幕和离屏共用一套光栅器，回退开关保持
-`vector`，基准与 A/B 测试都留在仓库里。
+一个 620×700 的视口在 DPR 2 下约有 1000 个图集槽位，所以新页/新 tile 的第一帧冷
+栅格约 **3.3 ms**（第一版是 19 ms，vector 是 1.6 ms）。图集命中后的帧完全不变
+（`TestGlyphAtlasScrolling` 里滑动中的 `rasters≈4/frame`）：这是一笔落在**翻页/新
+tile 第一帧**上的成本，不是每帧成本。
+
+画质：两条路都还在的时候逐像素比过（`benchScrollColumn` 的样本书、同一条 outline、
+同一条 tone 处理），差全在边缘像素的覆盖率分配上，没有变细、变粗或位移：
+
+| 版本 | scale | 最大差(/255) | 平均差 | 差 >32 的像素 |
+| --- | --- | ---: | ---: | ---: |
+| 8 条子扫描线 | 1 | 18 | 0.280 | 0.000% |
+| 8 条子扫描线 | 2 | 12 | 0.148 | 0.000% |
+| 精确面积 | 1 | 12 | **0.108** | 0.000% |
+| 精确面积 | 2 | 12 | **0.069** | 0.000% |
+
+同一页用两种积分器出图（`bookshot`，阿Q正傳第 2 页、DPR 2、整页）平均差 0.11/255、
+差 >32 的像素 0.08%——精确面积是更接近真值的那一边。离屏出图也因此变快：
+`BenchmarkPageRender` 同一页从 11.4–12.2 ms 降到 **8.2 ms**，分配 282 KB/2230 次 →
+40 B/4 次。
 
 复现：
 
 ```sh
-go test -run TestGlyphRasterizersMatch -v ./internal/reader/
-go test -run XXX -bench BenchmarkGlyphRasterizer -benchtime 3s ./internal/reader/
-LAYX_GLYPH_RASTER=vector go test -run XXX -bench BenchmarkScrollViewportAtlas -benchtime 3s ./internal/reader/
+go test -run XXX -bench 'BenchmarkGlyphRasterizer|BenchmarkPageRender' -benchtime 3s ./internal/reader/
+cd ../layx-raster && go test -run XXX -bench 'BenchmarkCoverageGlyph|BenchmarkDrawGlyphs' -benchtime 3s .
+go test -run TestCoverageMatchesSupersampling -v .
 ```
 
 ## 已做：只重绘的帧（2026-10-26）
@@ -419,7 +431,7 @@ layx-raster     下游：瓦片策略 + 可替换光栅后端        （可选�
 | 层 | 内容 | 依赖 |
 | --- | --- | --- |
 | **policy** | 瓦片栅格（固定尺寸/与视口解耦）、可见集、预取优先级、LRU、代际失效、分辨率阶梯、整像素吸附、从下往上 blit、异步队列 | 只依赖 `render`/`paint`/标准库 |
-| **backend** | `Raster(t *render.Tile, scale float32) (Bitmap, error)` 的可替换实现：纯 Go 软件（`x/image/vector` + 自建字形图集）／宿主 `ui.Render` 包装／未来的 CoreText、DirectWrite、Skia 包装 | 各自独立，可只引一个 |
+| **backend** | `Raster(t *render.Tile, scale float32) (Bitmap, error)` 的可替换实现：纯 Go 软件（现在就是 [`layx-raster`](https://github.com/laix/layx-raster)：精确面积积分 + 自建字形图集）／宿主 `ui.Render` 包装／未来的 CoreText、DirectWrite、Skia 包装 | 各自独立，可只引一个 |
 
 要点：
 
