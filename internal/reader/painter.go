@@ -39,7 +39,10 @@ type UIPainter struct {
 	// page over another. It is 1 unless SetFade says otherwise.
 	fade float32
 	// noCull turns off skipping the runs outside the clip, so a test can
-	// paint them and prove the skip changes no pixel.
+	// paint them and prove the skip changes no pixel. It turns off the painter's
+	// Visible as well, so the test covers both culls: the painter's own, which
+	// drops a run by its baseline, and render's replay, which drops every op
+	// whose rectangle misses the viewport.
 	noCull bool
 }
 
@@ -196,6 +199,25 @@ func (u *UIPainter) DrawTile(p *ui.Painter, tile *render.Tile, box ui.Rect, view
 
 func (u *UIPainter) Save()    {}
 func (u *UIPainter) Restore() {}
+
+// Visible implements paint.Clipped: the part of the page or tile that can reach
+// the screen, in the display list's own coordinates. DrawPage and DrawTile clip
+// to the element and to the region being shown, so an op whose rectangle misses
+// this draws nothing of itself; render's replay skips those before the painter
+// is handed them, which is the dispatch a tile's hidden lines cost otherwise.
+// A tile is one viewport tall and the column replays the tiles around the
+// viewport, so a frame is handed about three viewports' worth of ops for one
+// viewport of pixels.
+//
+// The painter asked not to cull — a test painting a column whole, to prove the
+// cull changes no pixel — reports everything visible.
+func (u *UIPainter) Visible() paint.Rect {
+	if u == nil || u.P == nil || u.noCull {
+		return paint.Rect{X: -1e6, Y: -1e6, Width: 2e6, Height: 2e6}
+	}
+	v := u.P.Visible()
+	return paint.Rect{X: v.X - u.dx, Y: v.Y - u.dy, Width: v.W, Height: v.H}
+}
 
 // textGrid, cleared by LAYX_TEXT_GRID=0, stops the painter from putting a run's
 // baseline on the device grid: the switch that shows what the snapping is worth.
