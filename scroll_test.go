@@ -310,9 +310,9 @@ func TestScrollGlidesToTheWheelTarget(t *testing.T) {
 		t.Errorf("an ask moved the column before a frame did: %.0f", a.scrollY)
 	}
 
-	// The frames cover the distance, a share of what is left each, until the step
-	// reaches scrollTopSpeed; then it travels at that speed and eases into the
-	// place. The first frame is the longest, the last the shortest, and it lands.
+	// The frames cover the distance, a share of what is left each one, come up to
+	// the speed the debt implies and then ease into the place. The first frame is
+	// the longest, the last the shortest, and it lands.
 	const frame = 7 * time.Millisecond
 	var moves []float32
 	for i := 0; i < 80 && a.gliding(); i++ {
@@ -600,8 +600,7 @@ func TestANotchLandWithoutSnapping(t *testing.T) {
 	a.instant = false
 	at := time.Now()
 	a.now = func() time.Time { return at }
-	// a display that turns over every 7 ms, as the glide's limiter reads it
-	a.frameEvery = 7 * time.Millisecond
+	// a display that turns over every 7 ms
 	a.scrollBy(49.5)
 	prev := a.scrollY
 	var deltas []float32

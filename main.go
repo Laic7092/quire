@@ -180,9 +180,6 @@ type app struct {
 	// set a rate rather than a place, so the column holds one speed while the key
 	// repeats instead of gliding once per repeat (see (*app).scrollKey).
 	scrollRate bool
-	// frameEvery is how long a frame of a glide takes on this display, learned
-	// from the frames themselves (see (*app).frameStep).
-	frameEvery time.Duration
 	// A planned glide: the place it started from, when, and how long it takes. One
 	// ask from a column standing still is a bell over these (see (*app).plan).
 	scrollFrom    float32

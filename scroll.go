@@ -62,25 +62,11 @@ const scrollRamp = 30 * time.Millisecond
 // reads as the scroll going soft at the end.
 const scrollLand = 2
 
-// scrollFrameMax is the longest gap between two frames that still teaches the
-// column how long a frame is: past it the reader was not scrolling, and a glide's
-// frame is not that long.
-const scrollFrameMax = 34 * time.Millisecond
-
 // scrollStarved is the gap past which a glide is taken to have been starved of
 // frames rather than to be running: the app was busy, or the window was in the
 // background, and the column arrives at the place it was sent to instead of
 // resuming a crawl nobody was watching.
 const scrollStarved = 100 * time.Millisecond
-
-// scrollTopSpeed is how fast the column may travel, in DIPs a second, while a
-// stream of asks is being paid. It is above what a hand asks for, so that asks
-// are never left behind: a wheel spun at 25 notches a second asks for about
-// 1500 DIPs a second in lines of the book, and the ceiling is well above what a
-// hand asks for. A place far away does not come this way — it is a place, and
-// scrollTo lands on it — so the ceiling only ever guards arithmetic, and is not
-// a speed the reader feels.
-const scrollTopSpeed = 12000
 
 // platformScrollLine is how many DIPs the toolkit gives one of the platform's
 // scroll lines: a notch of a wheel arrives as its line count times this, which
@@ -226,8 +212,8 @@ func (a *app) scrollNow(y float32) {
 // which did keep a held key from sprinting, but it also threw away distance a
 // wheel had asked for — a spin of ten notches delivered three or four, and the
 // column could not be made to move faster however hard the wheel was turned. The
-// follow and scrollTopSpeed shape the motion now, and both are above what a hand
-// asks for, so what is asked for is what is delivered.
+// follow shapes the motion now, and it is above what a hand asks for, so what is
+// asked for is what is delivered.
 func (a *app) scrollBy(dy float32) {
 	if a.layout == nil || dy == 0 {
 		return
@@ -457,7 +443,11 @@ func (a *app) stepColumn() bool {
 		a.scrollAhead()
 		return true
 	}
-	dt := a.frameStep(raw)
+	// The frame's time is delivered whole, so the motion is time-correct: a late
+	// frame covers a late frame's distance rather than carrying two frames' worth
+	// into the next one. The only gap that is cut is one past scrollStarved, and
+	// that lands above.
+	dt := raw
 	gap := a.scrollGoal - a.scrollY
 	pixel := a.pixel() // 0 where the column is not drawn on the grid
 	if dt > 0 && gap != 0 {
@@ -491,61 +481,43 @@ func (a *app) stepColumn() bool {
 	return true
 }
 
-// frameStep is the time this frame integrates, and it is never much more than a
-// frame. A glide that is standing still draws no frames, so the frame that starts
-// one is a whole idle gap after the last — 17 ms on a display that turns over
-// every 7 — and delivering that in one step is a lurch twice the size of any
-// other frame's. What the display did not give us is not motion: the debt is paid
-// over the frames the glide does get, and the glide is a frame longer for it.
-//
-// raw is also what the display's own interval is learned from, so that the limit
-// follows the screen: only a gap short enough to be one frame teaches it.
-func (a *app) frameStep(raw time.Duration) time.Duration {
-	if raw > 0 && raw <= scrollFrameMax {
-		if a.frameEvery <= 0 {
-			a.frameEvery = raw
-		} else {
-			a.frameEvery = (a.frameEvery*7 + raw) / 8
-		}
-	}
-	// One frame, exactly: a step never carries two frames' worth, so the picture
-	// moves by one frame's share on every frame it gets and the glide is a frame
-	// longer instead of a frame faster.
-	if limit := a.frameGap(); raw > limit {
-		return limit
-	}
-	return raw
+// pace is how one kind of ask moves the column: the time its debt is covered
+// over, how long the speed takes to come up to it, and the ceiling on that
+// speed, 0 when the debt is the only limit.
+type pace struct {
+	over time.Duration
+	ramp time.Duration
+	top  float32
 }
 
-// frameGap is how long a frame takes on this display, as the glides have seen it.
-func (a *app) frameGap() time.Duration {
-	if a.frameEvery <= 0 {
-		return time.Second / 60
-	}
-	return a.frameEvery
-}
-
-// step is how far the column moves this frame, in DIPs, toward the gap it owes.
-//
-// The speed is the one the gap implies — the debt covered over scrollFollow —
-// and never more than scrollTopSpeed, so a place far away is travelled rather
-// than whipped. That speed is not taken up at once: it is come up to over
-// scrollRamp, which is what a notch needs, because one arrives as a whole
-// distance in a single frame and a column that takes it at once covers a share of
-// it in the frame, which is the lurch a reader sees before the glide settles. A
-// stream of asks keeps the speed it had, so holding a key accelerates to the
-// rate the key repeats at and cruises there, and a wheel joins whatever it had.
+// step is how far the column moves this frame, in DIPs, toward the gap it owes,
+// when the asks come as a stream: a wheel spun hard, a trackpad. The speed is the
+// one the gap implies — the debt covered over scrollFollow — and the debt is the
+// only ceiling, so a place far away is travelled rather than whipped. That speed
+// is not taken up at once: it is come up to over scrollRamp, which is what a
+// notch needs, because one arrives as a whole distance in a single frame and a
+// column that takes it at once covers a share of it in the frame, which is the
+// lurch a reader sees before the glide settles. A stream of asks keeps the speed
+// it had, so a wheel joins whatever it had.
 //
 // Every frame moves the picture: a share of the debt smaller than a pixel is
 // drawn as the frame before it, so the step is at least one pixel while the debt
 // is at least one pixel, and the caller lands the column rather than crawl.
 func (a *app) step(gap float32, dt time.Duration, pixel float32) float32 {
+	return a.stepToward(gap, dt, pixel, pace{over: scrollFollow, ramp: scrollRamp})
+}
+
+// stepToward is the motion both shapes of an ask are made of: the speed the debt
+// implies, come up to over p.ramp and held under p.top, never further than the
+// debt itself — and at least one device pixel while there is a pixel of it left,
+// so that every frame of a glide moves the picture.
+func (a *app) stepToward(gap float32, dt time.Duration, pixel float32, p pace) float32 {
 	secs := dt.Seconds()
-	want := float64(gap) / scrollFollow.Seconds()
-	if top := float64(scrollTopSpeed); math.Abs(want) > top {
+	want := float64(gap) / p.over.Seconds()
+	if top := float64(p.top); top > 0 && math.Abs(want) > top {
 		want = math.Copysign(top, want)
 	}
-	a.scrollVel += float32((want - float64(a.scrollVel)) * math.Min(1, secs/scrollRamp.Seconds()))
+	a.scrollVel += float32((want - float64(a.scrollVel)) * math.Min(1, secs/p.ramp.Seconds()))
 	move := float64(a.scrollVel) * secs
 	if math.Abs(move) > math.Abs(float64(gap)) {
 		move = float64(gap)
@@ -633,29 +605,15 @@ func (a *app) keyRate() float32 {
 	return float32(scrollKeyLines) * line / float32(scrollKeyOver.Seconds())
 }
 
-// stepRate is how far the column moves this frame while a key is asking: one
-// rate for every frame of the hold, come up to over scrollKeyRamp. There is no
-// bell and no controller here — the reader walking down a column holds one
-// speed — and the debt left when the presses stop is given back over
-// scrollKeyTail, so the stop is a settle rather than a cut.
+// stepRate is the same integrator while a key is asking: one rate for every
+// frame of the hold, come up to over scrollKeyRamp and held under the rate the
+// key sets. There is no bell and no controller here — the reader walking down a
+// column holds one speed — and the debt left when the presses stop is given back
+// over scrollKeyTail, so the stop is a settle rather than a cut.
 func (a *app) stepRate(gap float32, dt time.Duration, pixel float32) float32 {
-	secs := dt.Seconds()
-	want := float64(gap) / scrollKeyTail.Seconds()
-	if top := float64(a.keyRate()); math.Abs(want) > top {
-		want = math.Copysign(top, want)
-	}
-	a.scrollVel += float32((want - float64(a.scrollVel)) * math.Min(1, secs/scrollKeyRamp.Seconds()))
-	move := float64(a.scrollVel) * secs
-	if math.Abs(move) > math.Abs(float64(gap)) {
-		move = float64(gap)
-	}
-	if pixel > 0 && math.Abs(move)*float64(pixel) < 1 {
-		move = math.Copysign(1/float64(pixel), float64(gap))
-	}
-	if math.Abs(move) > math.Abs(float64(gap)) {
-		move = float64(gap)
-	}
-	return float32(move)
+	return a.stepToward(gap, dt, pixel, pace{
+		over: scrollKeyTail, ramp: scrollKeyRamp, top: a.keyRate(),
+	})
 }
 
 // scrollScreens moves the column by screens screens, keeping a slice of the
