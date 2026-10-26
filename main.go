@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,13 @@ type app struct {
 	// read the UI thread's field. The UI thread writes both together.
 	winShared atomic.Pointer[mygo.Window]
 	fonts     *reader.Fonts
+	// fontSans and fontSerif are the files the reading faces come from, resolved
+	// at launch and opened with the first book (see loadFonts). fontErr is why
+	// there is no face to open, and fontsLoading marks a load in flight so a
+	// second one waits for it instead of parsing the faces again.
+	fontSans, fontSerif string
+	fontErr             error
+	fontsLoading        bool
 
 	// ready is set once the first window exists. Open-file events that arrive
 	// during launch wait in pendingOpen until then.
@@ -475,6 +483,11 @@ func (a *app) setOptions(o reader.Options) {
 	a.opts = o
 	a.optsAt = time.Now()
 	a.failed = false
+	// A face the session has not read in yet — the serif one, after reading sans
+	// — is opened now, off the UI thread, so the layout that follows is set in it.
+	if prev.Font != o.Font {
+		a.reloadFonts()
+	}
 	// The log names the setting that moved, before the layout it costs.
 	perf.event("reading settings: %s (laying out again)", optionChanges(prev, o))
 	// The sliders read these back: a change made with the keys has to move them
@@ -938,12 +951,104 @@ func (a *app) openPath(path string) {
 		return
 	}
 	a.opening = path
-	go a.openAsync(win, path)
+	// The faces a book is set in are read with it, the first time a book is
+	// read: a shelf alone never pays for the system's CJK face, which costs
+	// tens of megabytes once parsed. The serif file is only read for a book set
+	// in the serif face.
+	face := a.opts.Font
+	load := !a.fontsLoading && (a.fonts == nil || face == reader.FontSerif && !a.fonts.HasSerif())
+	if load {
+		a.fontsLoading = true
+	}
+	go a.openAsync(win, path, a.fonts, face, load)
+}
+
+// loadFonts opens the faces a book is set in, for the face setting: the
+// system's sans CJK face always, its serif one only when the book is set in it.
+// It runs off the UI thread, so the launch of a book never waits for the parse,
+// and its result is published through Window.Update.
+func (a *app) loadFonts(face string) (*reader.Fonts, error) {
+	if a.fontErr != nil {
+		return nil, a.fontErr
+	}
+	serif := a.fontSerif
+	if face != reader.FontSerif {
+		serif = ""
+	}
+	fonts, err := reader.OpenFonts(a.fontSans, serif)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("layx-reader: font %s, serif %q", fonts.Path, fonts.SerifPath)
+	// Parsing the faces leaves the tables the layout keeps and, beside them, the
+	// copies and scratch the parse was made with. Hand that garbage back to the
+	// system now, while no page waits for it, rather than at the next collection:
+	// it is most of what a freshly opened book adds to the process.
+	debug.FreeOSMemory()
+	return fonts, nil
+}
+
+// reloadFonts opens the faces the current setting needs when the session has
+// none yet — the book was opened before they landed, or the reader switched to
+// the serif face after reading sans. It runs on the UI thread and does the
+// reading on a goroutine, like a book's own open.
+func (a *app) reloadFonts() {
+	if a.fontsLoading || a.fontErr != nil || a.book == nil {
+		return
+	}
+	face := a.opts.Font
+	if a.fonts != nil && (face != reader.FontSerif || a.fonts.HasSerif()) {
+		return
+	}
+	win := a.win
+	if win == nil {
+		return
+	}
+	a.fontsLoading = true
+	go func() {
+		fonts, err := a.loadFonts(face)
+		win.Update(func() {
+			defer a.refresh(win)
+			a.fontsLoading = false
+			if err != nil {
+				log.Println(err)
+				a.status = err.Error()
+				return
+			}
+			a.fonts = fonts
+			// The pages on screen were set in the face before this one, and the
+			// painter holds their images: the book is built and laid out again.
+			a.paint = reader.NewUIPainter(nil, fonts)
+			a.doc = nil
+			a.layW, a.layH = 0, 0
+			// A setting that moved while the faces loaded asks for them again.
+			if a.opts.Font == reader.FontSerif && a.fontSerif != "" && !a.fonts.HasSerif() {
+				a.reloadFonts()
+			}
+		})
+	}()
 }
 
 // openAsync parses a book off the UI thread and publishes it through
-// Window.Update.
-func (a *app) openAsync(win *mygo.Window, path string) {
+// Window.Update. fonts is the set the session has (nil before the first book),
+// and load asks for the faces the book is set in to be opened first.
+func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face string, load bool) {
+	if load {
+		loaded, err := a.loadFonts(face)
+		if err != nil {
+			log.Println(err)
+			win.Update(func() {
+				defer a.refresh(win)
+				a.fontsLoading = false
+				if a.opening == path {
+					a.opening = ""
+				}
+				a.status = err.Error()
+			})
+			return
+		}
+		fonts = loaded
+	}
 	parseAt := time.Now()
 	perf.event("opening %s", path)
 	b, err := book.Open(path)
@@ -951,6 +1056,7 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 	if err != nil {
 		win.Update(func() {
 			defer a.refresh(win)
+			a.fontsLoading = false
 			perf.event("could not open %s after %s: %v", path, perfSpan(parseSky), err)
 			if a.opening == path {
 				a.opening = ""
@@ -962,8 +1068,16 @@ func (a *app) openAsync(win *mygo.Window, path string) {
 	perf.event("opened %q (%d chapters) in %s", b.Title, len(b.Chapters), perfSpan(parseSky))
 	win.Update(func() {
 		defer a.refresh(win)
+		a.fontsLoading = false
 		if a.opening == path {
 			a.opening = ""
+		}
+		if fonts != nil && fonts != a.fonts {
+			// The faces this session read with, opened with the book that needed
+			// them: from here on a page can be laid out and drawn.
+			a.fonts = fonts
+			a.paint = reader.NewUIPainter(nil, fonts)
+			a.doc = nil
 		}
 		a.job++ // drop any layout still in flight
 		a.loading = false
@@ -1285,18 +1399,17 @@ func main() {
 		a.pan.Show(appstate.SidebarNone)
 	}
 
+	// The reading faces are named here, not read: a parsed system CJK face costs
+	// tens of megabytes, and the shelf alone is set in the window's own Inter.
+	// The first book opens them, in the faces its setting reads in (see
+	// (*app).loadFonts).
 	fontPath, fontErr := reader.FindFont(*fontFlag)
 	if fontErr != nil {
 		a.status = fontErr.Error()
 		log.Println(fontErr)
-	} else if fonts, err := reader.OpenFonts(fontPath, reader.FindSerif(*serifFlag)); err != nil {
-		a.status = err.Error()
-		log.Println(err)
-	} else {
-		a.fonts = fonts
-		a.paint = reader.NewUIPainter(nil, fonts)
-		log.Printf("layx-reader: font %s", fontPath)
 	}
+	a.fontSans, a.fontErr = fontPath, fontErr
+	a.fontSerif = reader.FindSerif(*serifFlag)
 	// The performance log, if the reader asked for one: it names the machine and
 	// the settings first, then what every frame and every layout cost. It takes
 	// the standard logger with it, so MyGo's own frame lines land in the file.

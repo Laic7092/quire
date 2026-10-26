@@ -11,7 +11,8 @@
    章节标题、段落切分），它把纯文本转成同样的 `Chapter`，所以后面的排版、
    目录、搜索都不知道书不是 EPUB。
 2. `internal/reader`：加载字体（内置 XCharter 做正文衬线、Inter 做窗口文字，CJK
-   回落到 `LAYX_FONT` / `-font` / 系统字体），调用 `render.Engine.Layout`（分页用
+   回落到 `LAYX_FONT` / `-font` / 系统字体，第一次打开书时才读取），调用
+   `render.Engine.Layout`（分页用
    `ModePaged`，滚动用 `ModeScroll` + tile），并实现 `paint.Painter`，把
    layx 的 `DisplayList` 通过 `ui.Painter` / `ui.ImageRegion` 画出来（字形来自
    go-text 轮廓，按 `paint.GlyphRun.Font` 分面缓存，所以一页里衬线正文和黑体标题能
@@ -236,6 +237,12 @@ macOS 上额外做了这些：
 `/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf`、
 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`。正文的 XCharter 是内置的，
 `-serif` / `LAYX_SERIF` 找到的系统衬线只作为它缺字时的后备。
+
+这些字体文件在启动时只**定位**、不读取：一个解析过系统 CJK 字面的 `FontSet` 是几十 MB，
+而书架只用窗口的 Inter。第一次打开书才读，且只读当前字体设置需要的面——衬线设置会连
+`-serif` 那个系统衬线一起读，无衬线设置则不读它。每个面解析后约占文件的三倍（layx 留一份
+数据、go-text 把表急切解析出来），所以一份系统 CJK 字面只进 `FontSet` 一次，解析完立刻
+`debug.FreeOSMemory()` 把解析的中间垃圾还给系统。
 
 ## 界面语言（i18n）
 
