@@ -349,16 +349,20 @@ func TestFontsAndThemes(t *testing.T) {
 	if got := fonts.Family(FontSans); got != "book" {
 		t.Errorf("sans family = %q", got)
 	}
+	if fonts.HasSerif() {
+		t.Error("a set made without a serif path holds a system serif face")
+	}
+	// HasSerif reports the system's face alone: it is what tells the app to make
+	// the set again when the reader picks the serif face.
 	serif, err := OpenFonts(path, FindSerif(""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "book"
-	if serif.SerifPath != "" {
-		want = "book-serif"
+	if got := serif.Family(FontSerif); got != "book-serif" {
+		t.Errorf("serif family = %q, want the bundled book face", got)
 	}
-	if got := serif.Family(FontSerif); got != want {
-		t.Errorf("serif family = %q, want %q", got, want)
+	if FindSerif("") == "" && serif.HasSerif() {
+		t.Error("a system with no serif face reports one")
 	}
 
 	for _, theme := range ThemeOrder {
@@ -375,5 +379,32 @@ func TestFontsAndThemes(t *testing.T) {
 	}
 	if System(false) != ThemeOriginal || System(true) != ThemeQuiet {
 		t.Errorf("system papers: %q %q", System(false), System(true))
+	}
+}
+
+// A face is parsed once per set: the sans font tagged serif as well would put a
+// second parsed copy of it in the set, which for a system CJK face is the
+// difference between sixty and a hundred megabytes of a freshly opened book.
+func TestFontsHoldEachFaceOnce(t *testing.T) {
+	path, err := FindFont("")
+	if err != nil {
+		t.Skipf("no system font: %v", err)
+	}
+	fonts, err := OpenFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inter, the system's sans face and the bundled book face.
+	if got := fonts.Set.FontCount(); got != 3 {
+		t.Errorf("a set without a serif face holds %d faces, want 3", got)
+	}
+	if serif := FindSerif(""); serif != "" {
+		both, err := OpenFonts(path, serif)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := both.Set.FontCount(); got != 4 {
+			t.Errorf("a set with a serif face holds %d faces, want 4", got)
+		}
 	}
 }

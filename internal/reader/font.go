@@ -78,10 +78,16 @@ var DefaultSerifFonts = []string{
 // Fonts are the faces a book is set in, prepared both for layout (FontSet) and
 // for glyph outlines (the files themselves, which the painter parses once per
 // face it draws).
+//
+// Every face of a set is a copy of a font file with tables parsed out of it, so
+// a set is tens of megabytes once a system CJK face is in it: one is made when a
+// book opens, not before, and the serif file is only read when the book is set
+// in the serif face.
 type Fonts struct {
 	Set *render.FontSet
 	// Path is the sans file, the one CJK text needs; SerifPath the serif one,
-	// empty when the system has none and the sans face stands in.
+	// empty when the set was made without one — the system has none, or the
+	// book is set in the sans face — and the serif choice reads in the sans one.
 	Path      string
 	SerifPath string
 }
@@ -95,6 +101,10 @@ func OpenFont(path string) (*Fonts, error) {
 // OpenFonts loads the sans face and, when serifPath is not empty, the serif one.
 // Both are in one set, so a serif page falls back to the sans face — a CJK
 // serif font often has no Latin italics, and DejaVu Serif no CJK at all.
+//
+// A face costs about three times its file in memory once parsed, so a caller
+// that may read in either face passes the serif path only for a book set in it,
+// and loads the other set later if the reader changes their mind.
 func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 	sans, err := os.ReadFile(sansPath)
 	if err != nil {
@@ -103,10 +113,13 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 	f := &Fonts{Path: sansPath}
 	// The chrome is set in the bundled Inter, and the book's serif choice in
 	// the bundled XCharter; the system's CJK face follows both in the set, so
-	// Chinese and Japanese keep the system's own shapes.
+	// Chinese and Japanese keep the system's own shapes. The chrome is the only
+	// text MyGo lays out here, so only Inter is registered with it: a system CJK
+	// face handed to MyGo would be copied again into the platform's own font
+	// cache, a copy the reading view never draws from — its glyphs come from the
+	// set below.
 	_ = ui.RegisterFont(uiSans, UIFont)
 	uiFontReady = true
-	_ = ui.RegisterFont(sans, familySans)
 	faces := []render.FontFace{
 		{Family: familySans, Weight: 400, Data: uiSans},
 		{Family: familySans, Weight: 400, Data: sans},
@@ -116,14 +129,13 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 		if serif, err := os.ReadFile(serifPath); err == nil {
 			faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: serif})
 			f.SerifPath = serifPath
-			_ = ui.RegisterFont(serif, familySerif)
 		}
 	}
-	faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: sans})
-	f.SerifPath = "bundled:xcharter"
-	if serifPath != "" {
-		f.SerifPath = serifPath
-	}
+	// A serif run falls back to the sans faces without a face of the sans font
+	// tagged serif: the set resolves every glyph against all of its faces, the
+	// serif family first (see render.FontSet.order). Tagging the sans font
+	// serif as well put a second parsed copy of it in the set, which is what a
+	// system CJK face cannot afford.
 	fs, err := render.NewFontSet(faces...)
 	if err != nil {
 		return nil, fmt.Errorf("reader: load font %s: %w", sansPath, err)
@@ -132,10 +144,16 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 	return f, nil
 }
 
-// Family is the layout family name for a face choice. A system without a serif
-// face sets both choices in the sans one, rather than failing.
+// HasSerif reports whether the set holds the system's serif face. Without one
+// the serif choice is set in the sans face and the bundled XCharter, which has
+// no CJK: a reader who picked the serif face has the set made again with it.
+func (f *Fonts) HasSerif() bool { return f != nil && f.SerifPath != "" }
+
+// Family is the layout family name for a face choice. The serif family always
+// holds the bundled book face, whether or not the system adds a serif one after
+// it, and the sans family follows both for the glyphs they lack.
 func (f *Fonts) Family(choice string) string {
-	if f != nil && choice == FontSerif && f.SerifPath != "" {
+	if choice == FontSerif {
 		return familySerif
 	}
 	return familySans
