@@ -43,7 +43,8 @@ type chapterIndex struct {
 //
 // The index stores the document it was built from so a host can notice that a
 // relayout (after a font-size change, say) produced a different document. See
-// Document and Stale.
+// Document and Stale; Page applies the same check to the layout it resolves
+// against.
 type Index struct {
 	doc      *render.Document
 	chapters []chapterIndex
@@ -132,8 +133,16 @@ func chapterText(ch render.Chapter) (string, []textSpan) {
 // Search returns at most limit hits in reading order. Matching is
 // case-insensitive for ASCII; limit <= 0 means 100. Matches that only exist
 // because two text nodes were concatenated are skipped.
+//
+// Leading and trailing whitespace is not part of the query: text pasted out of
+// a page or typed with a trailing space still finds what it names, and a query
+// that is only whitespace finds nothing.
 func (ix *Index) Search(query string, limit int) []Hit {
-	if ix == nil || query == "" {
+	if ix == nil {
+		return nil
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
 		return nil
 	}
 	if limit <= 0 {
@@ -267,11 +276,15 @@ func snippet(text string, start, end int) string {
 // nil, when the hit does not belong to this index's document, or when the
 // layout's chapter structure no longer matches the index.
 //
-// render.Layout does not expose its *Document, so Page cannot compare document
-// identity directly. A host that still has the document it laid out should
-// check ix.Stale(doc) before calling Page.
+// A layout built from a different document — after a font-size change, say —
+// is rejected rather than answered from node ids that no longer mean the same
+// text, which would report a page the hit is not on. Layout.Document names the
+// document it was built from, so the check is exact.
 func Page(layout *render.Layout, ix *Index, h Hit) (int, bool) {
 	if layout == nil || ix == nil || ix.doc == nil {
+		return 0, false
+	}
+	if doc := layout.Document(); doc != nil && doc != ix.doc {
 		return 0, false
 	}
 	if h.Chapter < 0 || h.Chapter >= len(ix.chapters) || h.Loc.Chapter != h.Chapter {

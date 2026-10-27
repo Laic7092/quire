@@ -231,3 +231,142 @@ func TestPageOfHit(t *testing.T) {
 		t.Error("empty snippet")
 	}
 }
+
+// A query pasted or typed with space around it names the same text: only the
+// query itself is matched, and a query of nothing but whitespace finds nothing.
+func TestSearchIgnoresSurroundingSpace(t *testing.T) {
+	_, _, ix := sampleIndex(t)
+	want := len(ix.Search("滄浪亭", 0))
+	if want == 0 {
+		t.Fatal("the sample no longer contains the query")
+	}
+	for _, query := range []string{" 滄浪亭", "滄浪亭 ", "\n滄浪亭\t", "　滄浪亭　"} {
+		if got := len(ix.Search(query, 0)); got != want {
+			t.Errorf("Search(%q) = %d hits, want %d", query, got, want)
+		}
+	}
+	for _, query := range []string{"", " ", "\n\t", "　"} {
+		if hits := ix.Search(query, 0); len(hits) != 0 {
+			t.Errorf("Search(%q) = %d hits, want none", query, len(hits))
+		}
+	}
+}
+
+// Hits do not overlap: the scan moves past an accepted match, so "aa" has one
+// hit in "aaa", and repeated text in one node yields one hit per position
+// without duplicates.
+func TestSearchHitsDoNotOverlap(t *testing.T) {
+	b := &book.Book{Title: "overlap", Chapters: []book.Chapter{{
+		Title: "one",
+		XHTML: []byte("<html><body><p>aaababab</p></body></html>"),
+	}}}
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := NewIndex(b, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "aa" matches at 0 and 1; only the first is a hit, and the scan resumes
+	// after it instead of reporting the overlap.
+	hits := ix.Search("aa", 0)
+	if len(hits) != 1 || hits[0].Offset != 0 {
+		t.Fatalf("Search(\"aa\") = %+v, want one hit at 0", hits)
+	}
+
+	hits = ix.Search("ab", 0)
+	if len(hits) != 3 {
+		t.Fatalf("Search(\"ab\") = %d hits, want 3: %+v", len(hits), hits)
+	}
+	ch, ok := doc.Chapter(0)
+	if !ok {
+		t.Fatal("chapter missing from document")
+	}
+	for i, h := range hits {
+		// "ab" sits at 2, 4 and 6 of "aaababab".
+		if h.Offset != 2+2*i {
+			t.Errorf("hit %d offset = %d, want %d", i, h.Offset, 2+2*i)
+		}
+		runes := []rune(ch.Nodes[h.Loc.Node].Text)
+		if h.Loc.Offset+2 > len(runes) || string(runes[h.Loc.Offset:h.Loc.Offset+2]) != "ab" {
+			t.Errorf("hit %d node offset %d does not point at the match in %q",
+				i, h.Loc.Offset, string(runes))
+		}
+	}
+}
+
+// A layout built from another document must not answer for the index: its node
+// ids mean different text, so the page it reports is not the hit's page.
+func TestPageRejectsLayoutOfAnotherDocument(t *testing.T) {
+	b, doc, ix := sampleIndex(t)
+	path, err := reader.FindFont("")
+	if err != nil {
+		t.Skipf("no font available: %v", err)
+	}
+	fonts, err := reader.OpenFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := ix.Search("滄浪亭", 0)
+	if len(hits) == 0 {
+		t.Fatal("no hits")
+	}
+	h := hits[len(hits)-1]
+
+	other, err := b.DocumentSized(24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		doc  *render.Document
+		want bool
+	}{
+		{"same document", doc, true},
+		{"other document", other, false},
+	} {
+		layout, err := reader.BuildLayout(context.Background(), tc.doc, fonts, 480, 640,
+			reader.Options{FontSize: 18})
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, ok := Page(layout, ix, h)
+		if ok != tc.want {
+			t.Errorf("%s: Page = %d, %v; want ok %v", tc.name, page, ok, tc.want)
+		}
+	}
+}
+
+// The query is literal text, never a pattern: regex metacharacters match
+// themselves and find nothing when the chapter has no such characters.
+func TestSearchIsLiteralText(t *testing.T) {
+	b := &book.Book{Title: "literal", Chapters: []book.Chapter{{
+		Title: "one",
+		XHTML: []byte("<html><body><p>abc a.c a*c</p></body></html>"),
+	}}}
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := NewIndex(b, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		want  int
+	}{
+		{"a.c", 1}, // not the "abc"
+		{"a*c", 1},
+		{".*", 0},
+		{"[abc]", 0},
+		{"^abc", 0},
+		{"abc$", 0},
+	} {
+		if hits := ix.Search(tc.query, 0); len(hits) != tc.want {
+			t.Errorf("Search(%q) = %d hits, want %d: %+v", tc.query, len(hits), tc.want, hits)
+		}
+	}
+}

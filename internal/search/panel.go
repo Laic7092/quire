@@ -30,6 +30,10 @@ type Panel struct {
 	PageOf func(h Hit) (int, bool)
 
 	list ui.ListState
+	// shownQuery is the query the list was last positioned for. A new one
+	// starts the list at the top again: the rows are a different set, so the
+	// old scroll position names nothing in them.
+	shownQuery string
 }
 
 // View draws the search field, a status line, and one row per hit.
@@ -52,7 +56,14 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 			}
 		})
 
-		if line := p.statusText(); line != "" {
+		// The field has written what the reader typed back to Query, so the rest
+		// of the pass reads this frame's query, not the previous one.
+		p.resetScroll()
+		empty := strings.TrimSpace(p.Query) == ""
+		noHits := !empty && len(p.Hits) == 0
+		// A query with no hits words its status as the empty state's title, so
+		// the line under the field would say the same thing twice.
+		if line := p.statusText(); line != "" && !noHits {
 			ui.Row(c).Padding(0, 12, 6, 12).Children(func() {
 				ui.Text(c, line).FontSize(11).TextColor(t.TextMuted).SingleLine()
 			})
@@ -60,12 +71,21 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 		ui.Divider(c)
 
 		switch {
-		case strings.TrimSpace(p.Query) == "":
+		case empty:
 			widgets.Empty(c, locales.SearchEmptyTitle(), locales.SearchEmptyHint())
-		case len(p.Hits) == 0:
+		case noHits:
 			widgets.Empty(c, p.statusText(), locales.SearchNoHitsHint())
 		default:
-			p.list.Key = func(i int) any { return i }
+			p.list.Key = func(i int) any {
+				if i < 0 || i >= len(p.Hits) {
+					return i
+				}
+				// A row belongs to its hit, not to its place in the list, so a
+				// re-run of the same query keeps the reader's place among results
+				// that are still there.
+				h := p.Hits[i]
+				return [3]int{h.Chapter, int(h.Loc.Node), h.Loc.Offset}
+			}
 			ui.List(c, &p.list, len(p.Hits), func(i int) { p.row(c, i) }).Grow(1).Padding(2, 6)
 		}
 	})
@@ -74,6 +94,20 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 		p.OnSearch(p.Query)
 	}
 	return col
+}
+
+// resetScroll starts the list at the top when the query changed: the hits of
+// the previous query mean nothing to the new one, and the list would otherwise
+// keep the old scroll offset and open the new results in the middle.
+func (p *Panel) resetScroll() {
+	q := strings.TrimSpace(p.Query)
+	if q == p.shownQuery {
+		return
+	}
+	p.shownQuery = q
+	if q != "" {
+		p.list.ScrollTo(0, ui.Start)
+	}
 }
 
 // statusText is the line under the field: the host's status, or the count of
