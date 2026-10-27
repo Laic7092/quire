@@ -26,15 +26,20 @@ func (a *App) Title() string {
 }
 
 // Show opens side, replacing whatever panel was there. An empty side closes the
-// panel and remembers what was open.
+// panel and remembers what was open. Showing the panel that is already open only
+// scrolls it back to the reading place: there is nothing to remember, so it
+// costs no write and no save of the state file.
 func (a *App) Show(side string) {
+	was := a.Sidebar
 	switch side {
 	case SidebarToc, SidebarBookmarks, SidebarNotes, SidebarSearch:
 		a.Sidebar = side
 	default:
 		a.Sidebar = SidebarNone
 	}
-	a.persistSidebar()
+	if a.Sidebar != was {
+		a.persistSidebar()
+	}
 	switch a.Sidebar {
 	case SidebarToc:
 		a.Toc.ScrollToCurrent()

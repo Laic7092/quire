@@ -860,6 +860,14 @@
   "@noteRemoved": {
     "description": "The status line after a note was deleted."
   },
+  "noteSaved": "Comment saved",
+  "@noteSaved": {
+    "description": "The status line after the reader saved a note's comment."
+  },
+  "noteSaveFailed": "Could not save the comment",
+  "@noteSaveFailed": {
+    "description": "The status line when saving a note's comment failed."
+  },
   "emptyPanel": "No panel is open",
   "@emptyPanel": {
     "description": "The message a panel shows when the host opened none."
@@ -875,6 +883,16 @@
       "error": {
         "type": "String",
         "example": "permission denied"
+      }
+    }
+  },
+  "stateRecovered": "The reading state was damaged; the old file is saved at {path}",
+  "@stateRecovered": {
+    "description": "Shown on the home screen when a damaged state file was backed up and replaced.",
+    "placeholders": {
+      "path": {
+        "type": "String",
+        "example": "/home/reader/.config/layx-reader/state.json.bak"
       }
     }
   },

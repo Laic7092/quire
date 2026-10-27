@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx-reader/internal/search"
 	"github.com/laix/layx-reader/internal/store"
 	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
@@ -421,5 +422,179 @@ func TestResumeAtScroll(t *testing.T) {
 	}
 	if page, how := b.Resume(layout); page != 0 || how != "" {
 		t.Errorf("paged resume on a scroll layout = %d, %q", page, how)
+	}
+}
+
+// A relayout builds a new index of the same book, and the query the reader
+// typed still belongs to it: the results come back instead of the panel going
+// empty under a word it never answered.
+func TestSetIndexSearchesAgain(t *testing.T) {
+	bk, err := book.Open(filepath.Join("..", "book", "testdata", "samples", "aq-zhuan.epub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := bk.DocumentSized(reader.DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := search.NewIndex(bk, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(newStore(t))
+	a.SetIndex(ix)
+	a.Search.Query = "阿"
+	a.Search.OnSearch("阿")
+	if len(a.Search.Hits) == 0 {
+		t.Fatalf("searching the sample found nothing: %q", a.Search.Status)
+	}
+	want := a.Search.Status
+
+	a.SetIndex(ix) // the relayout's fresh index of the same document
+	if len(a.Search.Hits) == 0 {
+		t.Errorf("the results vanished when the index was replaced: %q", a.Search.Status)
+	}
+	if got := a.Search.Status; got != want {
+		t.Errorf("status = %q after the relayout, want %q", got, want)
+	}
+
+	// An empty field has nothing to run again, and a book with no index says so.
+	a.Search.Query = "  "
+	a.SetIndex(ix)
+	if len(a.Search.Hits) != 0 || a.Search.Status != "" {
+		t.Errorf("an empty query searched: %d hits, %q", len(a.Search.Hits), a.Search.Status)
+	}
+	a.Search.Query = "阿"
+	a.SetIndex(nil)
+	if a.Search.Status != locales.SearchNoIndex() {
+		t.Errorf("status = %q without an index, want %q", a.Search.Status, locales.SearchNoIndex())
+	}
+}
+
+// A page-shaped refresh on a scrolling column names no place at all: nothing is
+// marked as the row standing at the reading position, rather than whatever a
+// zero location resolves to.
+func TestRefreshOnAScrollLayoutMarksNothing(t *testing.T) {
+	a, bk, _, _ := bookmarkFixture(t)
+	doc, err := bk.DocumentSized(reader.DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fontPath, err := reader.FindFont("")
+	if err != nil {
+		t.Skipf("no system font: %v", err)
+	}
+	fonts, err := reader.OpenFont(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scroll, err := reader.BuildLayout(context.Background(), doc, fonts, 480, 600,
+		reader.Options{FontSize: reader.DefaultFontSize, Scroll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.RefreshAt(bk, scroll, mustLoc(t, scroll, 0))
+	if !a.BookmarkHere() {
+		t.Fatal("the top of the column was not bookmarked")
+	}
+	if !a.Bookmarks.Entries[0].Current {
+		t.Errorf("the row at the reading place is not current: %+v", a.Bookmarks.Entries[0])
+	}
+
+	a.Refresh(bk, scroll, 0)
+	if a.hasLoc {
+		t.Errorf("a page-shaped refresh on a scroll layout claims a place: %+v", a.loc)
+	}
+	for _, e := range a.Bookmarks.Entries {
+		if e.Current {
+			t.Errorf("row %q is marked current after a refresh that names no place", e.Title)
+		}
+	}
+}
+
+// mustLoc is the location at the top offset y of a layout, for the fixtures.
+func mustLoc(t *testing.T, layout *render.Layout, y float32) render.Location {
+	t.Helper()
+	loc, ok := layout.LocationAt(y)
+	if !ok {
+		t.Fatalf("no location at %.0f", y)
+	}
+	return loc
+}
+
+// Closing the book drops what belonged to it: the rows, the query, the hits and
+// the index, so the next book starts from an empty panel and never shows, jumps
+// to or saves into the one before it.
+func TestClosingTheBookClearsThePanels(t *testing.T) {
+	a, bk, layout, _ := bookmarkFixture(t)
+	a.Refresh(bk, layout, 0)
+	from, to := passageOn(t, layout, 0)
+	if !a.BookmarkHere() {
+		t.Fatal("the page was not bookmarked")
+	}
+	if _, ok := a.AddNote(from, to, "一段文字"); !ok {
+		t.Fatal("AddNote stored nothing")
+	}
+	a.Search.Query = "阿"
+	doc, err := bk.DocumentSized(reader.DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := search.NewIndex(bk, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.SetIndex(ix)
+	a.Search.OnSearch("阿")
+	if len(a.Search.Hits) == 0 || len(a.Bookmarks.Entries) == 0 || len(a.Notes.Entries) == 0 {
+		t.Fatal("the fixture holds nothing to clear")
+	}
+
+	a.Refresh(nil, nil, 0) // the host's closeBook
+
+	if a.BookKey != "" {
+		t.Errorf("BookKey = %q after closing the book", a.BookKey)
+	}
+	if a.Index != nil {
+		t.Error("the index of the closed book is still published")
+	}
+	if len(a.Bookmarks.Entries) != 0 || len(a.Notes.Entries) != 0 || len(a.Toc.Entries) != 0 {
+		t.Errorf("panels still list rows: %d bookmarks, %d notes, %d contents",
+			len(a.Bookmarks.Entries), len(a.Notes.Entries), len(a.Toc.Entries))
+	}
+	if a.Notes.SelectedID() != "" || a.Notes.Draft != "" {
+		t.Errorf("a note is still chosen: %q, draft %q", a.Notes.SelectedID(), a.Notes.Draft)
+	}
+	if a.Search.Query != "" || len(a.Search.Hits) != 0 || a.Search.Status != "" {
+		t.Errorf("the search survived the book: query %q, %d hits, %q",
+			a.Search.Query, len(a.Search.Hits), a.Search.Status)
+	}
+	if a.BookmarkHere() {
+		t.Error("BookmarkHere bookmarked with no book open")
+	}
+	if _, ok := a.AddNote(from, to, "文字"); ok {
+		t.Error("AddNote stored a note with no book open")
+	}
+}
+
+// A book whose file is there but is no longer a book this reader can describe —
+// a truncated download, a directory where a book was — keeps its row too, so the
+// shelf never loses a book quietly.
+func TestShelfListsABookItCannotDescribe(t *testing.T) {
+	st := newStore(t)
+	path := filepath.Join(t.TempDir(), "broken.epub")
+	if err := os.WriteFile(path, []byte("not an archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+	// Opening it from the shelf remembers it before the host reads the file,
+	// so the store has the book even though the shelf cannot describe it yet.
+	a.open(path)
+	a.ReloadShelf()
+	if len(a.Library.Entries) != 1 {
+		t.Fatalf("the shelf lists %d rows, want the book it cannot describe", len(a.Library.Entries))
+	}
+	if got := a.Library.Entries[0]; !samePath(got.Path, path) || got.Title != "broken" {
+		t.Errorf("row %+v, want the remembered book under its store title", got)
 	}
 }

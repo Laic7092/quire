@@ -85,9 +85,13 @@ type app struct {
 	layPaper pagePaper
 	// theme is the paper being read on; "" follows the system's appearance
 	// until the reader picks one.
-	theme     reader.Theme
-	themeSys  bool
-	status    string
+	theme    reader.Theme
+	themeSys bool
+	status   string
+	statusAt time.Time
+	// notice is a non-fatal message the home screen shows, such as a recovered
+	// state file. Unlike status it is not an error and stays in normal ink.
+	notice    string
 	file      string
 	startPath string
 
@@ -323,13 +327,19 @@ func (a *app) turnTarget(page, delta int) int {
 		return page
 	}
 	n := a.layout.PageCount()
+	if n <= 0 {
+		return page
+	}
 	step := a.pageStep()
 	next := page + delta*step
 	if next < 0 {
 		next = 0
 	}
-	if next >= n {
-		next = n - step
+	if next > n-1 {
+		// The last spread starts at the book's last page: a book with an odd
+		// number of pages ends on a single page, and keeping the pairs aligned
+		// there would send a forward turn backwards.
+		next = n - 1
 	}
 	return a.snapPage(max(next, 0))
 }
@@ -403,13 +413,7 @@ func (a *app) gotoPage(page int) {
 	if a.layout == nil || a.scrolling() {
 		return
 	}
-	if page < 0 {
-		page = 0
-	}
-	if n := a.layout.PageCount(); page >= n {
-		page = n - 1
-	}
-	a.page = a.snapPage(page)
+	a.page = a.snapPage(clampPage(page, a.layout.PageCount()))
 	a.showCover = false
 	a.turning = nil
 	a.afterPage()
@@ -539,6 +543,27 @@ func (a *app) setTurn(t reader.Turn) {
 	}
 	a.opts.Turn = t
 	a.savePrefs()
+}
+
+// say puts a short-lived message in the folio: the answer to an action the
+// reader just took, such as a bookmark or a saved comment. Errors stay in
+// status and are drawn by the toolbar; this is the success path.
+func (a *app) say(msg string) {
+	a.status = msg
+	a.statusAt = a.clock()
+}
+
+// transientStatus is the message a recent action left for the folio, or ""
+// once it has had its time. The folio then goes back to the page number instead
+// of keeping an answer to a question the reader has moved on from.
+func (a *app) transientStatus() string {
+	if a.failed || a.status == "" || a.statusAt.IsZero() {
+		return ""
+	}
+	if a.clock().Sub(a.statusAt) > 2500*time.Millisecond {
+		return ""
+	}
+	return a.status
 }
 
 // savePrefs writes the reading settings to the store.
@@ -795,7 +820,7 @@ func (a *app) ensureLayout(w, h float32) {
 						if y, ok := layout.OffsetOf(loc); ok {
 							a.scrollY = y
 							a.resumeNote = resumeScrollNote(layout, loc, how)
-							a.status = a.resumeNote
+							a.say(a.resumeNote)
 						}
 					}
 				}
@@ -809,7 +834,7 @@ func (a *app) ensureLayout(w, h float32) {
 					if page, how := a.pan.Resume(layout); how != "" {
 						a.page = a.snapPage(page)
 						a.resumeNote = locales.ResumePage(page+1, resumeHow(how))
-						a.status = a.resumeNote
+						a.say(a.resumeNote)
 					}
 				}
 			}
@@ -824,7 +849,7 @@ func (a *app) ensureLayout(w, h float32) {
 					if loc, ok := a.currentLoc(); ok {
 						a.scrollChapter = loc.Chapter
 						a.pan.RefreshAt(a.book, layout, loc)
-						a.pan.RecordAt(layout, loc)
+						a.recordScroll(layout, loc)
 					} else {
 						a.pan.Refresh(a.book, layout, 0)
 					}
@@ -1106,6 +1131,10 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		a.layScroll = false
 		a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
 		a.scrollGoal, a.scrollAt = 0, time.Time{}
+		// The place a pending mode switch meant to restore names a node of the
+		// book before this one; this book resumes from the store instead.
+		a.jumpAt = false
+		a.hoverLink = false
 		if a.pan != nil {
 			a.pan.Opened(b, path)
 			a.pan.Refresh(b, nil, 0)
@@ -1324,12 +1353,14 @@ func main() {
 		}
 	}
 	var st *store.Store
+	recovered := ""
 	if statePath != "" {
 		s, err := store.Open(statePath)
 		if err != nil {
 			log.Println(err)
 		} else {
 			st = s
+			recovered = s.Recovered()
 		}
 	}
 
@@ -1342,6 +1373,10 @@ func main() {
 		pan:       appstate.New(st),
 	}
 	a.goalBooks, a.goalDays = defaultGoalBooks, defaultGoalDays
+	if recovered != "" {
+		a.notice = locales.StateRecovered(recovered)
+		log.Printf("store: damaged state backed up to %s", recovered)
+	}
 	// The window opens on Books' own reading paper, the graphite one; the
 	// display settings switch it to any of the other five.
 	a.theme = reader.ThemeQuiet
@@ -1379,6 +1414,7 @@ func main() {
 	a.pan.Open = a.openPath
 	a.pan.Jump = a.gotoLoc
 	a.pan.OnHits = a.refreshMarks
+	a.wireNoteActions()
 	a.pan.OnNotes = a.refreshMarks
 	a.pan.Post = func(fn func()) {
 		if win := a.winShared.Load(); win != nil {

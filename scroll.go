@@ -655,7 +655,28 @@ func (a *app) afterScroll() {
 		a.scrollChapter = loc.Chapter
 		a.pan.RefreshAt(a.book, a.layout, loc)
 	}
-	a.pan.RecordAt(a.layout, loc)
+	a.recordScroll(a.layout, loc)
+}
+
+// atScrollEnd reports whether the column shows the end of the flow. maxScroll
+// is the largest offset the column can stand at; a flow shorter than the
+// viewport is at its end from the start.
+func (a *app) atScrollEnd() bool {
+	max := a.maxScroll()
+	return max <= 0.5 || a.scrollY >= max-0.5
+}
+
+// recordScroll writes the current place down, marking the book finished only
+// when the column actually reached the end. Scrolling back clears the mark.
+func (a *app) recordScroll(layout *render.Layout, loc render.Location) {
+	if a.pan == nil {
+		return
+	}
+	if a.atScrollEnd() {
+		a.pan.RecordAtEnd(layout, loc)
+		return
+	}
+	a.pan.RecordAt(layout, loc)
 }
 
 // currentLoc is the reading position in the layout's own coordinates: the top

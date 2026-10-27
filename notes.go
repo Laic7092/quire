@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/appstate"
+	"github.com/laix/layx-reader/internal/notes"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/locales"
 )
@@ -24,7 +25,28 @@ func (a *app) addNoteFromSelection() {
 		return
 	}
 	a.pan.Show(appstate.SidebarNotes)
-	a.status = locales.NoteAdded()
+	a.say(locales.NoteAdded())
+}
+
+// wireNoteActions lets the notes panel report the result of saving or deleting a
+// note in the same folio line as the rest of the reader's actions. appstate wires
+// the operations themselves; this only adds the visible answer.
+func (a *app) wireNoteActions() {
+	if a.pan == nil {
+		return
+	}
+	a.pan.Notes.OnSave = func(e notes.Entry, comment string) {
+		if a.pan.SaveNote(e.ID, comment) {
+			a.say(locales.NoteSaved())
+			return
+		}
+		a.say(locales.NoteSaveFailed())
+	}
+	a.pan.Notes.OnRemove = func(e notes.Entry) {
+		if a.pan.RemoveNote(e.ID) {
+			a.say(locales.NoteRemoved())
+		}
+	}
 }
 
 // refreshNoteMarks rebuilds the rectangles of every note for the current

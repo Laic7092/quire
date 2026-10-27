@@ -2264,6 +2264,34 @@ func (msgs Messages) NoteRemoved() string {
 	return Catalog.Format(msgs.locale, "noteRemoved", nil)
 }
 
+// NoteSaved says "Comment saved"
+// in the language the app shows.
+//
+// The status line after the reader saved a note's comment.
+func NoteSaved() string { return In(i18n.Locale()).NoteSaved() }
+
+// NoteSaved says "Comment saved"
+// in the language of msgs.
+//
+// The status line after the reader saved a note's comment.
+func (msgs Messages) NoteSaved() string {
+	return Catalog.Format(msgs.locale, "noteSaved", nil)
+}
+
+// NoteSaveFailed says "Could not save the comment"
+// in the language the app shows.
+//
+// The status line when saving a note's comment failed.
+func NoteSaveFailed() string { return In(i18n.Locale()).NoteSaveFailed() }
+
+// NoteSaveFailed says "Could not save the comment"
+// in the language of msgs.
+//
+// The status line when saving a note's comment failed.
+func (msgs Messages) NoteSaveFailed() string {
+	return Catalog.Format(msgs.locale, "noteSaveFailed", nil)
+}
+
 // EmptyPanel says "No panel is open"
 // in the language the app shows.
 //
@@ -2304,6 +2332,22 @@ func ShelfScanFailed(error string) string { return In(i18n.Locale()).ShelfScanFa
 // The shelf's status line when the scan failed.
 func (msgs Messages) ShelfScanFailed(error string) string {
 	return Catalog.Format(msgs.locale, "shelfScanFailed", map[string]any{"error": error})
+}
+
+// StateRecovered says "The reading state was damaged; the old file is saved at {path}"
+// in the language the app shows.
+//
+// Shown on the home screen when a damaged state file was backed up and
+// replaced.
+func StateRecovered(path string) string { return In(i18n.Locale()).StateRecovered(path) }
+
+// StateRecovered says "The reading state was damaged; the old file is saved at {path}"
+// in the language of msgs.
+//
+// Shown on the home screen when a damaged state file was backed up and
+// replaced.
+func (msgs Messages) StateRecovered(path string) string {
+	return Catalog.Format(msgs.locale, "stateRecovered", map[string]any{"path": path})
 }
 
 // SearchNoIndex says "The index is not ready yet"

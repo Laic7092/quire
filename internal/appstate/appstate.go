@@ -93,6 +93,11 @@ type App struct {
 	// book is the book the panels were last refreshed for, nil when none is
 	// open; the bookmark rows take their chapter names from it.
 	book *book.Book
+	// placed is the store key of the book the layout and the rows were resolved
+	// against. It differs from BookKey between opening a book and refreshing for
+	// its first layout, which is exactly when an annotation must not be made:
+	// the layout still in hand describes the book before it.
+	placed string
 	// loc is the place the panels were last refreshed for, and hasLoc whether
 	// that refresh had a layout to read one from. The bookmarks panel marks the
 	// row standing there.
@@ -207,23 +212,23 @@ func (a *App) ReloadShelf() {
 	a.async(func() func() {
 		entries := make([]library.Entry, 0, len(books))
 		for _, b := range books {
-			if _, err := os.Stat(b.Path); err != nil {
-				// The file is gone — moved, deleted, or on a disk that is not
-				// mounted — so it keeps the row the store remembers under the
-				// name it had: the reader sees what is missing instead of a
-				// quietly shorter shelf, and opening it reports the error.
-				entries = append(entries, library.Entry{
-					Path:     b.Path,
-					Title:    b.Title,
-					Format:   b.Format,
-					Size:     b.Size,
-					Modified: b.Modified,
-				})
-				continue
-			}
 			if e, ok := library.Meta(b.Path); ok {
 				entries = append(entries, e)
+				continue
 			}
+			// The file is gone — moved, deleted, or on a disk that is not
+			// mounted — or it is no longer a book this reader can describe: a
+			// truncated download, a directory where a book was. Either way it
+			// keeps the row the store remembers under the name it had, so the
+			// reader sees what is broken instead of a quietly shorter shelf, and
+			// opening it reports the error.
+			entries = append(entries, library.Entry{
+				Path:     b.Path,
+				Title:    b.Title,
+				Format:   b.Format,
+				Size:     b.Size,
+				Modified: b.Modified,
+			})
 		}
 		return func() {
 			if id != a.shelfID {
@@ -305,14 +310,15 @@ func shelfCount(n int) string {
 // Refresh republishes the panels for a new layout, book or page. Hosts call it
 // after a build, after a relayout and after every page turn. It is the paged
 // form; in a scroll layout use RefreshAt, which names the place by location.
+//
+// Refreshing with no book and no layout closes the book: the rows, the index
+// and the query belonged to it and are dropped.
 func (a *App) Refresh(bk *book.Book, layout *render.Layout, page int) {
-	loc := render.Location{}
+	loc, placed := render.Location{}, false
 	if layout != nil {
-		if l, ok := layout.LocationOfPage(page); ok {
-			loc = l
-		}
+		loc, placed = layout.LocationOfPage(page)
 	}
-	a.refreshAt(bk, layout, loc, page)
+	a.refreshAt(bk, layout, loc, placed, page)
 }
 
 // RefreshAt is Refresh for a reading position: the page (when the layout has
@@ -325,14 +331,21 @@ func (a *App) RefreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 			page = n
 		}
 	}
-	a.refreshAt(bk, layout, loc, page)
+	a.refreshAt(bk, layout, loc, layout != nil, page)
 }
 
-// refreshAt rebuilds the panels from the layout and the place read to.
-func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Location, page int) {
+// refreshAt rebuilds the panels from the layout and the place read to. hasLoc
+// reports whether loc is a place of this layout at all: a blank page or a
+// layout that names no place leaves no row standing at the reading position,
+// rather than matching whatever a zero location resolves to.
+func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Location, hasLoc bool, page int) {
+	if bk == nil && layout == nil {
+		a.clearBook()
+	}
 	a.layout, a.page = layout, page
 	a.book = bk
-	a.loc, a.hasLoc = loc, layout != nil
+	a.placed = a.BookKey
+	a.loc, a.hasLoc = loc, hasLoc && layout != nil
 	a.Toc.Entries = toc.BuildAt(bk, layout, loc)
 	if len(a.Toc.Entries) > 0 {
 		a.Toc.SelectCurrent()
@@ -341,9 +354,34 @@ func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 	a.rebuildNotes(bk)
 }
 
+// clearBook drops everything the panels knew about a book that is no longer
+// open: its rows, the layout and place they were resolved against, the index
+// its hits were found in and the query that made them. Opening a book and
+// closing one both start from here, so neither a stale row nor a hit of the
+// book before can be shown, jumped to or saved into this one.
+func (a *App) clearBook() {
+	a.BookKey, a.placed = "", ""
+	a.book, a.layout = nil, nil
+	a.loc, a.hasLoc, a.page = render.Location{}, false, 0
+	a.Index = nil
+	a.Toc.Entries, a.Toc.Selected = nil, -1
+	a.Bookmarks.Entries, a.Bookmarks.Selected = a.Bookmarks.Entries[:0], -1
+	a.Notes.Entries, a.Notes.Selected = a.Notes.Entries[:0], -1
+	a.Notes.Draft = ""
+	a.Search.Query, a.Search.Hits = "", nil
+	a.Search.Selected, a.Search.Status = -1, ""
+	// A search still running belongs to the book that is going away.
+	a.searchID++
+	a.hitsChanged()
+}
+
 // SetIndex publishes a freshly built index. The host must call it with the
 // document the next Refresh's layout was built from, or hits resolve to the
 // wrong page: a new document means a new index.
+//
+// A relayout builds a new index of the same book, so the query the reader typed
+// still belongs to it: it runs again against the new index instead of leaving
+// the panel empty under a word it never answered.
 func (a *App) SetIndex(ix *search.Index) {
 	a.Index = ix
 	a.Search.Hits = nil
@@ -351,6 +389,9 @@ func (a *App) SetIndex(ix *search.Index) {
 	a.Search.Status = ""
 	a.searchID++
 	a.hitsChanged()
+	if strings.TrimSpace(a.Search.Query) != "" {
+		a.search(a.Search.Query)
+	}
 }
 
 // Opened records bk as the open book, remembers it in the store and returns its
@@ -361,12 +402,11 @@ func (a *App) Opened(bk *book.Book, path string) string {
 	}
 	key := a.remember(path, bk.Title)
 	a.upsertShelf(path)
+	// The rows, the index and the query on screen belong to the book that was
+	// open, not to this one: the host refreshes the panels after the first
+	// layout, and until then nothing may be bookmarked or annotated.
+	a.clearBook()
 	a.BookKey = key
-	a.Search.Query = ""
-	a.Search.Hits = nil
-	a.Search.Status = ""
-	a.searchID++
-	a.hitsChanged()
 	return key
 }
 
@@ -417,6 +457,18 @@ func (a *App) RecordPage(layout *render.Layout) {
 // RecordAt saves the reading location in either mode: a paged host records the
 // position of the page, a scroll host the position at the top of the viewport.
 func (a *App) RecordAt(layout *render.Layout, loc render.Location) {
+	a.recordAt(layout, loc, false)
+}
+
+// RecordAtEnd is RecordAt for a scrolling host that has reached the end of the
+// flow. The top of the viewport is then one screen short of the end, so the
+// position is marked finished explicitly; without this the shelf could never
+// show the book as read.
+func (a *App) RecordAtEnd(layout *render.Layout, loc render.Location) {
+	a.recordAt(layout, loc, true)
+}
+
+func (a *App) recordAt(layout *render.Layout, loc render.Location, finished bool) {
 	if a.Store == nil || a.BookKey == "" || layout == nil {
 		return
 	}
@@ -424,6 +476,7 @@ func (a *App) RecordAt(layout *render.Layout, loc render.Location) {
 	if !ok {
 		return
 	}
+	p.Finished = finished
 	a.record(p)
 }
 

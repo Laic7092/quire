@@ -47,7 +47,7 @@ func (a *app) pagesOnSheet() int {
 	if a.layScroll {
 		return 1
 	}
-	if a.opts.Spread && a.areaW >= 2*reader.SpreadMinWidth {
+	if a.opts.Spread && a.areaW > 2*pagePadding && splitSheet(a.areaW-2*pagePadding) {
 		return 2
 	}
 	return 1
@@ -65,6 +65,22 @@ func (a *app) snapPage(page int) int {
 	return page
 }
 
+// clampPage keeps a page inside a book of n pages, and a book with no pages at
+// its first one: a location the reader jumps to may name any page, and an empty
+// book must not leave the folio at page -1.
+func clampPage(page, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return min(max(page, 0), n-1)
+}
+
+// splitSheet reports whether avail — the width the pages may use, the area less
+// its two margins — holds two pages of at least reader.SpreadMinWidth. Both the
+// sheet's width and the count of pages on it come from this one answer, so a
+// spread never shows two pages narrower than a page may be.
+func splitSheet(avail float32) bool { return avail >= 2*reader.SpreadMinWidth }
+
 // sheetSize is the size one page is laid out at for the layout opts ask for: a
 // column, half a spread, or a whole single page, inside the page area the last
 // frame measured. w is the box the sheet fills today, which is the box the
@@ -77,7 +93,7 @@ func (a *app) sheetSize(w, h float32, opts reader.Options) (float32, float32) {
 		avail = a.areaW - 2*pagePadding
 	}
 	pages := 1
-	if !opts.Scroll && opts.Spread && a.areaW >= 2*reader.SpreadMinWidth {
+	if !opts.Scroll && opts.Spread && splitSheet(avail) {
 		pages = 2
 	}
 	box := min(avail, pageMaxWidth*float32(pages))

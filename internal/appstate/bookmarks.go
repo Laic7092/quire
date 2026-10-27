@@ -113,29 +113,42 @@ func sortBookmarks(rows []bookmarks.Entry) {
 // which is what lights the toolbar's ribbon. It compares the rows the panel
 // already resolved, so it costs no store lock during a frame.
 func (a *App) Bookmarked(loc render.Location) bool {
-	if a.layout == nil {
+	layout := a.currentLayout()
+	if layout == nil {
 		return false
 	}
 	for _, e := range a.Bookmarks.Entries {
-		if e.HasLoc && samePlace(a.layout, e.Loc, loc) {
+		if e.HasLoc && samePlace(layout, e.Loc, loc) {
 			return true
 		}
 	}
 	return false
 }
 
+// currentLayout is the layout the panels were refreshed with, when it still
+// describes the book that is open. Between opening a book and refreshing for
+// its first layout it does not: the layout in hand is the one before it, and a
+// row resolved against it would be stored at a place of another book.
+func (a *App) currentLayout() *render.Layout {
+	if a.layout == nil || a.placed != a.BookKey {
+		return nil
+	}
+	return a.layout
+}
+
 // BookmarkHere bookmarks the reading position, unless it is bookmarked
 // already. The panel's add control calls it; it reports whether a bookmark was
 // made.
 func (a *App) BookmarkHere() bool {
+	layout := a.currentLayout()
 	loc, ok := a.readingLoc()
-	if !ok || a.layout == nil || a.Store == nil || a.BookKey == "" {
+	if !ok || layout == nil || a.Store == nil || a.BookKey == "" {
 		return false
 	}
 	if _, exists := a.bookmarkAt(loc); exists {
 		return false
 	}
-	add, ok := store.PositionAt(a.layout, loc)
+	add, ok := store.PositionAt(layout, loc)
 	if !ok {
 		return false
 	}
@@ -146,35 +159,41 @@ func (a *App) BookmarkHere() bool {
 }
 
 // ToggleBookmark makes the reading position a bookmark, or drops the bookmark
-// standing there, and reports whether the place is bookmarked afterwards. The
-// toolbar's ribbon calls it.
-func (a *App) ToggleBookmark(loc render.Location) bool {
-	if a.layout == nil || a.Store == nil || a.BookKey == "" {
-		return false
+// standing there. It reports whether the place is bookmarked afterwards and
+// whether the store changed: a click that could not be acted on (no layout for
+// this book yet, no store) changes nothing and must not claim a bookmark was
+// removed. The toolbar's ribbon calls it.
+func (a *App) ToggleBookmark(loc render.Location) (bookmarked, changed bool) {
+	layout := a.currentLayout()
+	if layout == nil || a.Store == nil || a.BookKey == "" {
+		return false, false
 	}
 	if old, exists := a.bookmarkAt(loc); exists {
-		a.RemoveBookmark(old.ID)
-		return false
+		if !a.RemoveBookmark(old.ID) {
+			return true, false
+		}
+		return false, true
 	}
-	add, ok := store.PositionAt(a.layout, loc)
+	add, ok := store.PositionAt(layout, loc)
 	if !ok {
-		return false
+		return false, false
 	}
 	a.Store.AddBookmark(a.BookKey, store.Bookmark{Position: add})
 	a.Store.SaveSoon(0)
 	a.rebuildBookmarks(a.book)
-	return true
+	return true, true
 }
 
 // bookmarkAt returns the bookmark standing at loc. It reads the store, not the
 // rows: adding and removing are rare one-off actions, and a page turn between
 // two of them must not leave a stale copy of the rows in the way.
 func (a *App) bookmarkAt(loc render.Location) (store.Bookmark, bool) {
-	if a.Store == nil || a.BookKey == "" || a.layout == nil {
+	layout := a.currentLayout()
+	if a.Store == nil || a.BookKey == "" || layout == nil {
 		return store.Bookmark{}, false
 	}
 	for _, b := range a.Store.BookmarksOf(a.BookKey) {
-		if p, how := store.Locate(a.layout, b.Position); how != "none" && samePlace(a.layout, p, loc) {
+		if p, how := store.Locate(layout, b.Position); how != "none" && samePlace(layout, p, loc) {
 			return b, true
 		}
 	}
@@ -182,17 +201,44 @@ func (a *App) bookmarkAt(loc render.Location) (store.Bookmark, bool) {
 }
 
 // RemoveBookmark drops the bookmark with id and republishes the panel. It
-// reports whether the row was there.
+// reports whether the row was there. The row that takes its place is chosen, so
+// a reader deleting several rows keeps a hand on the list and the panel does
+// not fall back to none after every delete.
 func (a *App) RemoveBookmark(id string) bool {
 	if a.Store == nil || a.BookKey == "" || id == "" {
 		return false
 	}
+	index := indexOfBookmark(a.Bookmarks.Entries, id)
+	chosen := a.Bookmarks.SelectedID() == id
 	if !a.Store.RemoveBookmark(a.BookKey, id) {
 		return false
 	}
 	a.Store.SaveSoon(0)
 	a.rebuildBookmarks(a.book)
+	if chosen {
+		a.selectBookmarkAt(index)
+	}
 	return true
+}
+
+// selectBookmarkAt chooses the row at index i, clamped to the rows left: the
+// one that moved up into the deleted row's place, or the last one.
+func (a *App) selectBookmarkAt(i int) {
+	if i < 0 || len(a.Bookmarks.Entries) == 0 {
+		return
+	}
+	a.Bookmarks.Selected = min(i, len(a.Bookmarks.Entries)-1)
+}
+
+// indexOfBookmark is the row index of the bookmark with id, -1 when the panel
+// does not list it.
+func indexOfBookmark(rows []bookmarks.Entry, id string) int {
+	for i, e := range rows {
+		if e.ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // readingLoc is the place the host is reading now: the host's own idea of it

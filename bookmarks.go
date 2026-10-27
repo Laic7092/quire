@@ -15,11 +15,13 @@ func (a *app) bookmarkHere() {
 	if !a.pan.BookmarkHere() {
 		return
 	}
-	a.status = locales.BookmarkAdded()
+	a.say(locales.BookmarkAdded())
 }
 
 // toggleBookmark is the round ribbon in the title bar and ⌘D: it bookmarks the
-// reading position, or drops the bookmark that is already there.
+// reading position, or drops the bookmark that is already there. A click the
+// reader's book cannot answer — no layout yet, no place to record — leaves the
+// status line alone instead of reporting a removal that did not happen.
 func (a *app) toggleBookmark() {
 	if a.pan == nil || a.showCover {
 		return
@@ -28,11 +30,15 @@ func (a *app) toggleBookmark() {
 	if !ok {
 		return
 	}
-	if a.pan.ToggleBookmark(loc) {
-		a.status = locales.BookmarkAdded()
+	bookmarked, changed := a.pan.ToggleBookmark(loc)
+	if !changed {
 		return
 	}
-	a.status = locales.BookmarkRemoved()
+	if bookmarked {
+		a.say(locales.BookmarkAdded())
+		return
+	}
+	a.say(locales.BookmarkRemoved())
 }
 
 // bookmarkedAt reports whether the reading position has a bookmark, which is
