@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	ot "github.com/go-text/typesetting/font/opentype"
-	"github.com/laix/layx-raster"
+	"github.com/laix/layx/raster"
 	"github.com/laix/layx/render/paint"
 )
 
@@ -21,7 +21,7 @@ import (
 // The atlas holds white with the coverage in its alpha, so its colours follow
 // the run's tint and a theme or a fade change rebuilds nothing.
 //
-// The coverage itself comes from github.com/laix/layx-raster: its Coverage
+// The coverage itself comes from github.com/laix/layx/raster: its Coverage
 // draws the outline once, exactly, and the result is copied into the layer.
 // That is the same rasterizer the headless page renderer uses, so a glyph on
 // screen and a glyph in a PNG are the same pixels. A warm frame is a lookup
@@ -239,22 +239,26 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	iy, py := glyphPhase(gy)
 	key := glyphKey{face: gf, gid: gid, size: size, dpr: dpr, phase: uint8(px | py<<2), tone: tone, bold: bold}
 	if slot, ok := a.index[key]; ok {
+		// A blank is a hit too: the glyph was looked at once and found to have
+		// no ink at this phase, and that answer is what the atlas keeps.
 		if slot != nil {
 			a.touch(slot.layer)
-			if a.stats != nil {
-				a.stats.Lookups++
-				a.stats.Hits++
-			}
+		}
+		if a.stats != nil {
+			a.stats.Lookups++
+			a.stats.Hits++
 		}
 		return slot, ix, iy
+	}
+	// Every call is one lookup, whether it is served from the atlas or has to
+	// rasterize; a glyph with no ink is a miss whose answer is a blank.
+	if a.stats != nil {
+		a.stats.Lookups++
 	}
 	out := gf.outline(gid)
 	if out == nil || len(out.segs) == 0 {
 		a.index[key] = nil // a blank: no ink to draw, at any phase
 		return nil, ix, iy
-	}
-	if a.stats != nil {
-		a.stats.Lookups++
 	}
 	// The outline in device pixels, from the glyph's origin: y down, as the
 	// screen has it.

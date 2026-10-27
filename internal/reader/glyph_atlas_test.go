@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-raster"
+	"github.com/laix/layx/raster"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
@@ -380,7 +380,7 @@ func TestTextToneMakesTheEdgesInkier(t *testing.T) {
 // and the ink stay where they are, the edges between them grow, and a pale ink —
 // a night paper's — gets no contrast on top of the growth, since what a dark page
 // needs is the growth and not more weight. The curve itself lives in
-// layx-raster; what this pins down is the policy that picks it.
+// layx/raster; what this pins down is the policy that picks it.
 func TestTextToneCurve(t *testing.T) {
 	tc := &toneCache{}
 	dark := tc.toneFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 17, false)
@@ -498,4 +498,107 @@ func TestGlyphCoverageIgnoresWhatCameBefore(t *testing.T) {
 		t.Fatalf("a glyph rasterized after another differs in %d of %d pixels from one drawn first", sum, len(got))
 	}
 	_ = l
+}
+
+// The atlas keeps its memory under its budget by letting go of whole layers, the
+// least recently used first, and it must let go of the keys too: an index entry
+// whose layer is gone is a slot pointing at a bitmap nothing owns any more.
+func TestGlyphAtlasEvictsTheLeastRecentlyUsed(t *testing.T) {
+	perLayer := glyphLayerW * glyphLayerH * 4
+	want := glyphAtlasBudget / perLayer // the layers the budget holds
+	if want < 2 {
+		t.Fatalf("the budget holds %d layers, too few to evict", want)
+	}
+	a := &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
+	opened := 0
+	add := func() *glyphLayer {
+		l := a.newLayer()
+		opened++
+		key := glyphKey{gid: uint32(opened)}
+		l.keys = append(l.keys, key)
+		a.index[key] = &glyphSlot{layer: l}
+		return l
+	}
+	var layers []*glyphLayer
+	for i := 0; i < want; i++ {
+		layers = append(layers, add())
+	}
+	if len(a.layers) != want || a.bytes != want*perLayer {
+		t.Fatalf("%d layers, %d bytes; want %d and %d", len(a.layers), a.bytes, want, want*perLayer)
+	}
+	// Use the oldest layer, as a frame that draws a glyph from it would: it is
+	// no longer the next to go.
+	a.touch(layers[0])
+	for i := 0; i < 2; i++ {
+		add()
+	}
+	if len(a.layers) != want {
+		t.Fatalf("%d layers after opening two more, want the budget's %d", len(a.layers), want)
+	}
+	if a.bytes != want*perLayer {
+		t.Errorf("%d bytes held, want %d", a.bytes, want*perLayer)
+	}
+	if !slices.Contains(a.layers, layers[0]) {
+		t.Error("the layer used last was let go while older ones stayed")
+	}
+	if slices.Contains(a.layers, layers[1]) || slices.Contains(a.layers, layers[2]) {
+		t.Error("the two least recently used layers were kept")
+	}
+	if got := len(a.index); got != want {
+		t.Errorf("the index holds %d glyphs for %d layers, want one each: an evicted layer must drop its keys", got, want)
+	}
+	for key, slot := range a.index {
+		if slot == nil {
+			t.Errorf("%+v is indexed without a slot", key)
+			continue
+		}
+		if !slices.Contains(a.layers, slot.layer) {
+			t.Errorf("%+v points at a layer the atlas no longer holds", key)
+		}
+	}
+	// The layer being filled is never the one let go, so a glyph can never evict
+	// the neighbour it was packed with.
+	if n := len(a.layers); n > 0 && a.layers[n-1] == nil {
+		t.Error("the layer being filled was let go")
+	}
+}
+
+// A glyph looked at and found to have no ink is a hit of the atlas like any
+// other: it needed no rasterizing the second time, which is what HitRate says.
+func TestGlyphAtlasCountsBlankHits(t *testing.T) {
+	path, err := FindFont("")
+	if err != nil {
+		t.Skipf("no font available: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := NewUIPainter(nil, nil)
+	gf := up.glyphFace(&paint.Font{Data: data})
+	if gf == nil {
+		t.Fatal("the face did not parse")
+	}
+	upem := float32(gf.face.Upem())
+	a := up.atlas()
+	var stats GlyphStats
+	a.stats = &stats
+	// A space is a glyph with nothing to draw: the atlas keeps that answer as a
+	// blank slot, one per phase, so it never asks the outline again.
+	gid, ok := gf.face.NominalGlyph(' ')
+	if !ok {
+		t.Skip("the face has no space")
+	}
+	for i := 0; i < 3; i++ {
+		slot, _, _ := a.slot(gf, uint32(gid), 17, 2, 10.25, 20.5, upem, nil, false)
+		if slot != nil {
+			t.Skipf("a space has ink in this face: %+v", slot)
+		}
+	}
+	if stats.Lookups != 3 || stats.Hits != 2 || stats.Rasters != 0 {
+		t.Errorf("lookups %d hits %d rasters %d, want 3, 2 and 0", stats.Lookups, stats.Hits, stats.Rasters)
+	}
+	if got := stats.HitRate(); math.Abs(got-2.0/3) > 1e-9 {
+		t.Errorf("hit rate %.3f, want %.3f", got, 2.0/3)
+	}
 }

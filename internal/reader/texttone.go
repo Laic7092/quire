@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/laix/layx-raster"
+	"github.com/laix/layx/raster"
 	"github.com/laix/layx/render/paint"
 )
 
 // Text reaches the screen here through a glyph atlas and reaches an exported PNG
-// through layx-raster's DrawGlyphs, not through the toolkit's own glyph pipeline,
+// through layx/raster's DrawGlyphs, not through the toolkit's own glyph pipeline,
 // and the toolkit's pipeline does not print the same page. The toolkit's
 // Windows path blends a glyph's coverage with DirectWrite's enhanced contrast;
 // its macOS and Linux paths draw masks the system's own printer has already

@@ -1,6 +1,6 @@
 // Command bookshot renders one page of a book to a PNG without opening a
 // window. It is the reader's headless path - book → render.Document → layout →
-// layx-raster surface - so a machine without a display (CI, a server, a bug
+// layx/raster surface - so a machine without a display (CI, a server, a bug
 // report) can still produce the page the reader would show.
 //
 //	go run ./cmd/bookshot -book internal/book/testdata/samples/aq-zhuan.epub -out page.png

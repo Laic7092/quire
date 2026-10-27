@@ -8,7 +8,7 @@ import (
 	_ "image/png"  // DecodeImage
 	"math"
 
-	"github.com/laix/layx-raster"
+	"github.com/laix/layx/raster"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 	_ "golang.org/x/image/bmp"  // DecodeImage
@@ -16,7 +16,7 @@ import (
 )
 
 // DecodeImage decodes an encoded page image from Book.Build into the
-// image.Image form layx-raster registers. It accepts the formats the reader
+// image.Image form layx/raster registers. It accepts the formats the reader
 // accepts: PNG, JPEG, GIF (its first frame), WebP and BMP.
 //
 // Unlike MyGo's decoder this does not apply a JPEG's EXIF orientation. Page
@@ -31,7 +31,7 @@ func DecodeImage(data []byte) (image.Image, error) {
 }
 
 // PageRenderer rasterizes paged and scrolling output offscreen through
-// github.com/laix/layx-raster, without MyGo, a window or a GPU. It is the
+// github.com/laix/layx/raster, without MyGo, a window or a GPU. It is the
 // headless sibling of UIPainter: the app still draws through the native painter,
 // while a tool, a test or an exporter uses this to get pixels. Nothing here lays
 // out or re-derives style - the page coordinates and the palette are already
@@ -42,7 +42,7 @@ func DecodeImage(data []byte) (image.Image, error) {
 // decoded once and re-registered if the surface has to grow for another page.
 //
 // Draw on one goroutine. The renderer is not safe for concurrent use, which
-// matches layx-raster itself.
+// matches layx/raster itself.
 type PageRenderer struct {
 	surface *raster.Rasterizer
 	images  map[paint.ImageID]image.Image
@@ -106,7 +106,10 @@ func (p *PageRenderer) DrawTile(tile *render.Tile, scale float32) *image.RGBA {
 }
 
 func (p *PageRenderer) render(width, height, scale float32, draw func(paint.Painter)) *image.RGBA {
-	if !(scale > 0) {
+	// A ratio that is not a real positive number is 1: an export asked for at an
+	// impossible ratio draws the page at 1x, where a NaN or an infinite one used
+	// to come out as an empty image — a file with no page in it.
+	if !finite(scale) || scale <= 0 {
 		scale = 1
 	}
 	w := int(math.Ceil(float64(width) * float64(scale)))
