@@ -112,3 +112,32 @@ func TestBookmarkPanelJumpsAndDeletes(t *testing.T) {
 		t.Errorf("store still holds %d bookmarks", len(got))
 	}
 }
+
+// A bookmark command the open book cannot answer keeps the status line as it
+// was: a toggle that changed nothing must not read as a removal.
+func TestBookmarkToggleWithoutAStoreKeepsTheStatus(t *testing.T) {
+	a := newWindow(t)
+	a.pan.Reading = a.currentLoc
+	loc, ok := a.currentLoc()
+	if !ok {
+		t.Fatal("no reading place")
+	}
+	if bookmarked, changed := a.pan.ToggleBookmark(loc); !bookmarked || !changed {
+		t.Fatalf("the toggle on a live window = %v %v, want a bookmark made", bookmarked, changed)
+	}
+	if bookmarked, changed := a.pan.ToggleBookmark(loc); bookmarked || !changed {
+		t.Fatalf("the second toggle = %v %v, want it removed", bookmarked, changed)
+	}
+
+	// Without a store there is nowhere to keep the bookmark, so the command
+	// changes nothing and says nothing.
+	a.pan.Store = nil
+	a.status = "unchanged"
+	a.toggleBookmark()
+	if a.status != "unchanged" {
+		t.Errorf("status = %q after a toggle that could not act, want it untouched", a.status)
+	}
+	if a.bookmarkedAt() {
+		t.Error("the ribbon claims the page is bookmarked without a store")
+	}
+}

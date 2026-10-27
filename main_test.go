@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -289,4 +290,71 @@ func findMenuItem(items []*mygo.MenuItem, label string) *mygo.MenuItem {
 		}
 	}
 	return nil
+}
+
+// A page is clamped into the book whenever one is named from outside: a location
+// past the end is the last page, and a book with no pages keeps the folio at its
+// first page rather than at page -1.
+func TestPageClampStaysInsideTheBook(t *testing.T) {
+	cases := []struct{ page, n, want int }{
+		{0, 0, 0},  // an empty book
+		{-3, 0, 0}, // and one named from outside it
+		{7, 0, 0},  //
+		{-1, 5, 0}, // before the first page
+		{4, 5, 4},  // the last page
+		{9, 5, 4},  // past the end
+		{0, 1, 0},  // a one-page book
+	}
+	for _, c := range cases {
+		if got := clampPage(c.page, c.n); got != c.want {
+			t.Errorf("clampPage(%d of %d) = %d, want %d", c.page, c.n, got, c.want)
+		}
+	}
+}
+
+// Closing a book forgets the places that name the book being left: a mode
+// switch's pending jump and the pointer's hover on a link belong to its pages, not
+// to the library or to the next book opened.
+func TestClosingABookForgetsItsPlaces(t *testing.T) {
+	a := newWindow(t)
+	a.jumpLoc, a.jumpAt = render.Location{Chapter: 3}, true
+	a.hoverLink = true
+	a.closeBook()
+	if a.jumpAt {
+		t.Error("the pending jump outlived the book it names")
+	}
+	if a.hoverLink {
+		t.Error("the link hover outlived the page it was on")
+	}
+}
+
+// A damaged state file is backed up rather than silently replaced, and the home
+// screen says where the old copy went.
+func TestHomeShowsARecoveredStateNotice(t *testing.T) {
+	notice := locales.StateRecovered("/tmp/state.json.bak")
+	a := &app{opts: reader.DefaultOptions(), instant: true, notice: notice}
+	tt := ui.NewTester(a.view, 900, 700)
+	if !tt.HasText(notice) {
+		t.Errorf("home screen does not show %q: %q", notice, tt.Texts())
+	}
+}
+
+// An action's confirmation lives in the folio for a moment and then gives the
+// page number back; it does not stay there for the rest of the book.
+func TestTransientStatusExpires(t *testing.T) {
+	now := time.Unix(1000, 0)
+	a := &app{now: func() time.Time { return now }}
+	a.say("Bookmark added")
+	if got := a.transientStatus(); got != "Bookmark added" {
+		t.Errorf("just after the action: %q, want the message", got)
+	}
+	now = now.Add(3 * time.Second)
+	if got := a.transientStatus(); got != "" {
+		t.Errorf("after three seconds: %q, want the folio back", got)
+	}
+	a.failed = true
+	a.say("still not shown as a toast")
+	if got := a.transientStatus(); got != "" {
+		t.Errorf("an error is drawn by the toolbar, not the folio: %q", got)
+	}
 }

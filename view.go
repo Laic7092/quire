@@ -174,7 +174,7 @@ func (a *app) keys(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyB) {
 		a.toggleSidebar()
 	}
-	if a.pan != nil {
+	if a.pan != nil && a.book != nil {
 		if c.Shortcut(ui.Cmd, ui.KeyF) {
 			a.pan.Show(appstate.SidebarSearch)
 		}
@@ -205,6 +205,11 @@ func (a *app) keys(c *ui.Context) {
 		a.chooseFile()
 	}
 	if a.book == nil {
+		// The library's own search: ⌘F opens the field, as its row in the
+		// source list does.
+		if c.Shortcut(ui.Cmd, ui.KeyF) {
+			a.libSearch = true
+		}
 		return
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyD) {
@@ -246,7 +251,10 @@ func (a *app) keys(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyMinus) || c.Shortcut(0, ui.KeyMinus) {
 		a.changeFont(-1)
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyEqual) || c.Shortcut(0, ui.KeyEqual) {
+	// The larger size is the equal key, which most layouts type "+" with:
+	// Shift, and on some desktops Cmd as well, are the same command.
+	if c.Shortcut(ui.Cmd, ui.KeyEqual) || c.Shortcut(ui.Shift|ui.Cmd, ui.KeyEqual) ||
+		c.Shortcut(0, ui.KeyEqual) || c.Shortcut(ui.Shift, ui.KeyEqual) {
 		a.changeFont(1)
 	}
 }
@@ -542,6 +550,10 @@ func (a *app) home(c *ui.Context, t *ui.Theme, m homeMetrics) {
 			ui.Column(c).FillWidth().Padding(6, m.padding, 0, m.padding).Children(func() {
 				ui.Text(c, a.homeTitle()).Font(serifHead).FontSize(26).FontWeight(700).
 					TextColor(t.Text)
+				if a.notice != "" {
+					ui.Text(c, a.notice).FontSize(12).TextColor(t.TextMuted).
+						MaxWidth(600).Padding(6, 0, 0, 0)
+				}
 				if a.book == nil && a.status != "" && a.failed {
 					ui.Text(c, a.status).FontSize(12).TextColor(t.Danger).MaxWidth(600).
 						Padding(6, 0, 0, 0)
@@ -927,7 +939,13 @@ func (a *app) readProgress(e library.Entry) float64 {
 		return 0
 	}
 	p, ok := a.st.Position(store.Key(e.Path, e.Size, e.Modified))
-	if !ok || p.Progress <= 0 {
+	if !ok {
+		return 0
+	}
+	if p.Completed() {
+		return 1
+	}
+	if p.Progress <= 0 {
 		return 0
 	}
 	return float64(p.Progress)
@@ -1041,6 +1059,10 @@ func (a *app) folio(c *ui.Context, t *ui.Theme) {
 			}
 			if hint := a.selectionHint(); hint != "" && !a.showCover {
 				ui.Text(c, hint).FontSize(10).TextColor(muted)
+				return
+			}
+			if msg := a.transientStatus(); msg != "" {
+				ui.Text(c, msg).FontSize(10).TextColor(muted).SingleLine().MaxWidth(320)
 				return
 			}
 			ui.Text(c, a.pageLabel()).FontSize(10).TextColor(muted)
@@ -1157,6 +1179,11 @@ func (a *app) closeBook() {
 	a.layScroll = false
 	a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
 	a.scrollGoal, a.scrollAt = 0, time.Time{}
+	// A place a mode switch meant to restore names a node of the book being
+	// closed, and a hand over a link is the last frame's page: neither belongs
+	// to the library or to the next book.
+	a.jumpAt = false
+	a.hoverLink = false
 	a.clearSelection()
 	a.hitQuads = nil
 	a.noteQuads = nil

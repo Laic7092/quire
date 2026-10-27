@@ -698,6 +698,79 @@ func TestTheSheetWaitsForThePageArea(t *testing.T) {
 	}
 }
 
+// "+" is Shift and the equal key on most layouts, and it is the same command as
+// "=": both make the type larger, and "-" makes it smaller. A size already at
+// the end of its range stays there.
+func TestFontKeysTakeThePlusKey(t *testing.T) {
+	a := newWindow(t)
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	base := a.opts.FontSize
+
+	tt.Key(ui.Shift, ui.KeyEqual)
+	tt.Frame()
+	if a.opts.FontSize != base+1 {
+		t.Errorf("Shift+= left the size at %g, want %g", a.opts.FontSize, base+1)
+	}
+	tt.Key(0, ui.KeyMinus)
+	tt.Frame()
+	if a.opts.FontSize != base {
+		t.Errorf("minus left the size at %g, want %g", a.opts.FontSize, base)
+	}
+	tt.Key(0, ui.KeyEqual)
+	tt.Frame()
+	if a.opts.FontSize != base+1 {
+		t.Errorf("= left the size at %g, want %g", a.opts.FontSize, base+1)
+	}
+
+	a.opts.FontSize = reader.MaxFontSize
+	a.syncSettingsFields()
+	tt.Key(ui.Shift, ui.KeyEqual)
+	tt.Frame()
+	if a.opts.FontSize != reader.MaxFontSize {
+		t.Errorf("the size went to %g past its maximum %d", a.opts.FontSize, reader.MaxFontSize)
+	}
+}
+
+// The library's own search opens on ⌘F, and the reader's floating panels are not
+// opened from the library, where there is no page for them to lie over.
+func TestLibrarySearchOpensOnCmdF(t *testing.T) {
+	a := &app{opts: reader.DefaultOptions(), instant: true, pan: appstate.New(nil)}
+
+	tt := ui.NewTester(a.view, 900, 700)
+	tt.Frame()
+	if a.libSearch {
+		t.Fatal("the library opened with its search showing")
+	}
+
+	// The reader's panels are the book's: ⌘T and ⌘F from the library must not
+	// leave one waiting behind the shelf, to open over the next book.
+	tt.Key(ui.Cmd, ui.KeyT)
+	tt.Frame()
+	if a.pan.Showing() {
+		t.Fatalf("⌘T opened the reader's %q panel over the library", a.pan.Sidebar)
+	}
+
+	tt.Key(ui.Cmd, ui.KeyF)
+	tt.Frame()
+	if !a.libSearch {
+		t.Fatalf("⌘F did not open the library's search: %q", tt.Texts())
+	}
+	if a.pan.Showing() {
+		t.Errorf("⌘F opened the reader's %q panel over the library", a.pan.Sidebar)
+	}
+
+	// The field it opens takes a query.
+	if err := tt.Click(locales.LibrarySearchLabel()); err != nil {
+		t.Fatalf("the search field: %v (%q)", err, tt.Texts())
+	}
+	tt.Type("aq")
+	tt.Frame()
+	if a.libQuery != "aq" {
+		t.Errorf("the query is %q after typing, want %q", a.libQuery, "aq")
+	}
+}
+
 // An open book: two pages side by side on a wide window, and a turn that moves
 // by the pair, as Books pages an open book.
 func TestSpreadShowsTwoPagesAndTurnsByThePair(t *testing.T) {
@@ -746,6 +819,53 @@ func TestSpreadShowsTwoPagesAndTurnsByThePair(t *testing.T) {
 	}
 	if p, ok := a.layout.PageOf(right); !ok || p != a.page+1 {
 		t.Errorf("the right half hits page %d, want %d", p, a.page+1)
+	}
+}
+
+// A book whose pages do not pair up ends on a single page: End turns to it, and a
+// forward turn there stays put instead of stepping back to the pair before it.
+func TestLastPageOfAnOddBookTurnsNoFurther(t *testing.T) {
+	a := newWindow(t)
+	a.opts.Spread = true
+	sw := float32(340) // a half sheet whose page count is odd
+	sh := float32(500)
+	two, err := reader.BuildLayout(context.Background(), a.doc, a.fonts, sw, sh,
+		reader.Options{FontSize: reader.DefaultFontSize, Spread: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.PageCount()%2 == 0 || two.PageCount() < 3 {
+		t.Skipf("the sample book lays out in %d pages", two.PageCount())
+	}
+	a.areaW = 2 * sw
+	a.layout = two
+	a.pan.Refresh(a.book, two, 0)
+
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	last := two.PageCount() - 1
+	tt.Key(0, ui.KeyEnd)
+	tt.Frame()
+	if a.page != last {
+		t.Fatalf("End left the reader on page %d, want the last one %d", a.page, last)
+	}
+
+	// Turning forward at the end is not a turn: the page stays, and above all it
+	// does not slide back to the pair before the last page.
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	if a.page != last {
+		t.Errorf("a forward turn at the last page %d moved to %d", last, a.page)
+	}
+	if a.canTurn(1) {
+		t.Errorf("the last page %d still reports a page to turn to", last)
+	}
+
+	// And a turn back from it goes to the pair before.
+	tt.Key(0, ui.KeyLeft)
+	tt.Frame()
+	if want := last - 2; a.page != want {
+		t.Errorf("a turn back from the last page %d went to %d, want %d", last, a.page, want)
 	}
 }
 
@@ -1234,5 +1354,70 @@ func TestClickTurnsAndDragSelects(t *testing.T) {
 	tt.Release(body.X+body.W*3/4+2, body.Y+220+2)
 	if a.page == on {
 		t.Errorf("a click with a 2 DIP wobble did not turn the page at %d", on)
+	}
+}
+
+// The cover is the book's own front page: a click on it opens the book at the
+// place the reader left, and does not turn a page or start a selection.
+func TestClickOnTheCoverOpensTheBook(t *testing.T) {
+	a := newWindow(t)
+	a.showCover = true
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	if !tt.HasText(locales.PageLabelCover()) {
+		t.Fatalf("the cover is not on the sheet: %q", tt.Texts())
+	}
+	sheet, ok := tt.Find(locales.PageLabel())
+	if !ok {
+		t.Fatalf("no sheet to click: %q", tt.Texts())
+	}
+	page := a.page
+	tt.ClickAt(sheet.X+sheet.W/2, sheet.Y+sheet.H/2)
+	if a.showCover {
+		t.Error("the cover stayed after a click on it")
+	}
+	if a.page != page {
+		t.Errorf("the click moved the page from %d to %d", page, a.page)
+	}
+	if len(a.selQuads) > 0 {
+		t.Error("the click on the cover selected text")
+	}
+	if want := locales.PageLabelPages(page+1, a.layout.PageCount()); !tt.HasText(want) {
+		t.Errorf("the folio does not show %q after the cover: %q", want, tt.Texts())
+	}
+}
+
+// The sheet turns into a single page exactly where two pages would each be
+// narrower than the narrowest readable page: the count of pages on it and their
+// width come from the same sum, so a spread never hands the layout a page below
+// reader.SpreadMinWidth and the setting holds at the boundary.
+func TestTheSheetSplitsWhereAPageStopsFitting(t *testing.T) {
+	a := newWindow(t)
+	a.opts.Spread = true
+	narrowest := float32(2*reader.SpreadMinWidth + 2*pagePadding)
+	cases := []struct {
+		area  float32
+		pages int
+	}{
+		{narrowest - 1, 1},
+		{narrowest, 2},
+		{narrowest + 40, 2},
+	}
+	for _, c := range cases {
+		a.areaW = c.area
+		if got := a.pagesOnSheet(); got != c.pages {
+			t.Errorf("a page area of %.0f DIPs holds %d pages, want %d", c.area, got, c.pages)
+		}
+		sw, _ := a.sheetSize(0, 500, a.opts)
+		if c.pages == 2 {
+			if sw < reader.SpreadMinWidth {
+				t.Errorf("a %.0f DIP page area gives two pages of %.1f, under the %d a page may be",
+					c.area, sw, reader.SpreadMinWidth)
+			}
+			continue
+		}
+		if want := c.area - 2*pagePadding; sw != want {
+			t.Errorf("a single sheet in a %.0f DIP area is %.1f wide, want %.1f", c.area, sw, want)
+		}
 	}
 }

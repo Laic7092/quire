@@ -46,7 +46,17 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		}
 		return true
 	case ui.InputPointerDown:
-		if ev.Button != 0 || a.showCover || a.layout == nil {
+		if ev.Button != 0 {
+			return false
+		}
+		if a.showCover {
+			// The cover is the book's own front page: a press on it opens the
+			// book where the reader left off, as the first turn does. It is not
+			// a selection, so the press is taken and the release ignored.
+			a.showCover = false
+			return true
+		}
+		if a.layout == nil {
 			return false
 		}
 		a.stopScroll()
@@ -270,7 +280,7 @@ func searchLabel(text string) string {
 // set of results or notes arrives, never while drawing.
 func (a *app) refreshMarks() {
 	a.hitQuads = nil
-	if a.layout == nil || a.pan == nil || a.pan.Index == nil {
+	if a.layout == nil || a.pan == nil || a.pan.Index == nil || a.pan.Index.Stale(a.layout.Document()) {
 		a.refreshNoteMarks()
 		return
 	}

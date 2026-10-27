@@ -11,10 +11,12 @@ import (
 )
 
 // coverKey identifies a decoded cover: a book re-downloaded or edited gets a new
-// key, so the shelf does not show the old picture.
+// key, so the shelf does not show the old picture. The modification time is part
+// of it, so a file replaced by one of the same size is read again too.
 type coverKey struct {
-	path string
-	size int64
+	path     string
+	size     int64
+	modified time.Time
 }
 
 // coverBitmap returns the decoded cover of e, decoding it the first time and keeping
@@ -27,7 +29,7 @@ func (a *app) coverBitmap(e library.Entry) *ui.Bitmap {
 	if a.covers == nil {
 		a.covers = map[coverKey]*ui.Bitmap{}
 	}
-	key := coverKey{path: e.Path, size: e.Size}
+	key := coverKey{path: e.Path, size: e.Size, modified: e.Modified}
 	if b, ok := a.covers[key]; ok {
 		return b
 	}

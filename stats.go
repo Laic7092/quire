@@ -72,7 +72,7 @@ func (a *app) readingStats(now time.Time) readingStats {
 	finished := map[string]bool{}
 	for _, b := range state.Books {
 		p, ok := state.Positions[b.Key]
-		if !ok || p.Progress < 1 {
+		if !ok || !p.Completed() {
 			continue
 		}
 		// A book revised on disk has a new key but the same path: it is still
