@@ -452,3 +452,93 @@ func TestLocateScrollRoundTrip(t *testing.T) {
 		t.Errorf("PageFor on a scroll layout = %d, %q", page, how)
 	}
 }
+
+// TestPositionForSingleChapterBook covers the book that has one chapter, which
+// is what a short TXT is. Every page of it belongs to chapter 0, so the old
+// page-slot probe — derived from "the first page of a chapter that does not
+// start on page 0" — could measure nothing and answered false for every page:
+// no page turn of such a book was ever recorded, so it neither resumed where it
+// was left nor showed any progress on the shelf.
+func TestPositionForSingleChapterBook(t *testing.T) {
+	fonts := testFonts(t)
+	l := testLayout(t, testBook(t, 1, 18), fonts, 18)
+	if starts := l.ChapterPages(); len(starts) != 1 || starts[0] != 0 {
+		t.Fatalf("chapter pages = %v, want one chapter starting on page 0", starts)
+	}
+	pages := l.PageCount()
+	if pages < 2 {
+		t.Fatalf("page count = %d, the probe needs a multi-page chapter", pages)
+	}
+	for page := 0; page < pages; page++ {
+		p, ok := PositionFor(l, page)
+		if !ok {
+			t.Fatalf("PositionFor(%d) reported the page as unreachable", page)
+		}
+		if got, how := PageFor(l, p); got != page || how != "node" {
+			t.Errorf("page %d round-trips to (%d, %q)", page, got, how)
+		}
+		if p.Progress < 0 || p.Progress > 1 {
+			t.Errorf("page %d recorded progress %v", page, p.Progress)
+		}
+		if page > 0 && p.Progress <= 0 {
+			t.Errorf("page %d is past the start of the book but recorded no progress", page)
+		}
+	}
+
+	// The page slot is the whole viewport minus its margins: a probe into a page
+	// must not land in its neighbour.
+	if h, ok := pageSlotHeight(l); !ok || h != l.PageContentHeight() {
+		t.Errorf("pageSlotHeight = %v, %v", h, ok)
+	}
+	if _, ok := PositionFor(l, pages); ok {
+		t.Errorf("PositionFor accepted page %d of %d", pages, pages)
+	}
+	if _, ok := PositionFor(l, -1); ok {
+		t.Error("PositionFor accepted page -1")
+	}
+}
+
+// The last page is the end of the book even though Progress names its top and
+// is therefore below 1. Every other page is not finished.
+func TestPositionForMarksTheLastPageFinished(t *testing.T) {
+	fonts := testFonts(t)
+	l := testLayout(t, testBook(t, 3, 18), fonts, 18)
+	if l.PageCount() < 2 {
+		t.Skip("the synthetic book fits on one page")
+	}
+	for page := 0; page < l.PageCount(); page++ {
+		p, ok := PositionFor(l, page)
+		if !ok {
+			t.Fatalf("PositionFor(%d) failed", page)
+		}
+		want := page == l.PageCount()-1
+		if p.Finished != want {
+			t.Errorf("page %d Finished = %v, want %v", page, p.Finished, want)
+		}
+		if p.Completed() != want {
+			t.Errorf("page %d Completed = %v, want %v", page, p.Completed(), want)
+		}
+	}
+}
+
+// Positions written before Finished existed are read from Progress; a book on
+// its last page left it just under 1.
+func TestCompletedReadsOldPositions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		p    Position
+		want bool
+	}{
+		{"zero", Position{}, false},
+		{"start", Position{Progress: 0.001}, false},
+		{"half", Position{Progress: 0.5}, false},
+		{"just below", Position{Progress: 0.994}, false},
+		{"threshold", Position{Progress: 0.995}, true},
+		{"one", Position{Progress: 1}, true},
+		{"marked", Position{Progress: 0.5, Finished: true}, true},
+	} {
+		if got := tc.p.Completed(); got != tc.want {
+			t.Errorf("%s: Completed() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

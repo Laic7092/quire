@@ -89,12 +89,10 @@ func PageFor(l *render.Layout, p Position) (page int, how string) {
 
 // PositionFor records page as a Position, the inverse of PageFor.
 //
-// layx has no "top of page" accessor, so the page slot is rebuilt from the
-// chapter geometry: contentHeight is ChapterContentTop(chapter)/firstPage for
-// any chapter that does not start on page 0, and the probe is taken one pixel
-// into the slot. If that resolves to another page the page is treated as
-// unreachable (a blank page) and the call reports false; the caller should keep
-// the previous position instead of recording a wrong one.
+// A page slot is a viewport tall, so the probe is taken a little way into the
+// slot of page (see pageSlotHeight). If the probe resolves to another page the
+// page is treated as unreachable (a blank page) and the call reports false; the
+// caller should keep the previous position instead of recording a wrong one.
 func PositionFor(l *render.Layout, page int) (Position, bool) {
 	if l == nil || page < 0 || page >= l.PageCount() {
 		return Position{}, false
@@ -112,7 +110,14 @@ func PositionFor(l *render.Layout, page int) (Position, bool) {
 		if n, ok := l.PageOf(loc); !ok || n != page {
 			continue
 		}
-		return positionOf(l, loc)
+		p, ok := positionOf(l, loc)
+		if !ok {
+			continue
+		}
+		// The last page is the end of the book even though Progress names its
+		// top and is therefore below 1.
+		p.Finished = page >= l.PageCount()-1
+		return p, true
 	}
 	return Position{}, false
 }
@@ -221,27 +226,19 @@ func positionOf(l *render.Layout, loc render.Location) (Position, bool) {
 	return p, true
 }
 
-// pageSlotHeight recovers the paged content height (viewport height minus the
-// top and bottom margins). render does not expose it, but ChapterContentTop
-// returns firstPage*contentHeight, so any chapter that does not start on page 0
-// gives the height back.
+// pageSlotHeight is the height of one page slot: the viewport height minus the
+// page's top and bottom margins, which is exactly what render reports as
+// PageContentHeight. It used to be recovered from ChapterContentTop, which
+// silently failed for every layout whose only chapter starts on page 0 — a
+// single-chapter book, which is what a short TXT is — so its position was never
+// recorded.
 func pageSlotHeight(l *render.Layout) (float32, bool) {
-	starts := l.ChapterPages()
-	if len(starts) == 0 {
+	if l == nil {
 		return 0, false
 	}
-	for i := len(starts) - 1; i >= 0; i-- {
-		if starts[i] <= 0 {
-			continue
-		}
-		top, ok := l.ChapterContentTop(i)
-		if !ok || top <= 0 {
-			continue
-		}
-		h := top / float32(starts[i])
-		if h > 0 {
-			return h, true
-		}
+	h := l.PageContentHeight()
+	if h <= 0 {
+		return 0, false
 	}
-	return 0, false
+	return h, true
 }

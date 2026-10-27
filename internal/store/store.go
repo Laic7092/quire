@@ -6,9 +6,13 @@
 // other than the single debounce timer behind SaveSoon.
 //
 // On-disk format: one State value, indented JSON, schema Version 1. Missing
-// files are not an error (a fresh install has no state); a corrupt file is
-// copied to "<path>.bak" and replaced by an empty State so that a broken write
-// never costs the user the whole shelf on the next launch.
+// files are not an error (a fresh install has no state). A file that cannot be
+// read as this document — invalid or truncated JSON, a value that is not an
+// object, or a schema written by a newer version — is copied to "<path>.bak"
+// and the parts of it that still parse are kept, so a broken write costs the
+// user the tail of their shelf at worst, never all of it. Store.Recovered
+// reports that backup so a host can say what happened instead of pretending the
+// shelf was empty.
 //
 // Concurrency: every method is safe for concurrent use. Update, SetPosition
 // and TouchBook mutate the in-memory state under a lock; Save, Flush and the
@@ -59,12 +63,23 @@ type Book struct {
 // are exact within one built Document, Anchor is stable across rebuilds (when
 // the builder provides one) and Progress is the last-resort fallback.
 type Position struct {
-	Chapter  int       `json:"chapter"`
-	Node     uint32    `json:"node"`   // render.NodeID; 0 means "not recorded"
-	Anchor   uint32    `json:"anchor"` // render.AnchorID; 0 means NoAnchor
-	Offset   int       `json:"offset"` // rune offset inside Node
-	Progress float32   `json:"progress"`
+	Chapter  int     `json:"chapter"`
+	Node     uint32  `json:"node"`   // render.NodeID; 0 means "not recorded"
+	Anchor   uint32  `json:"anchor"` // render.AnchorID; 0 means NoAnchor
+	Offset   int     `json:"offset"` // rune offset inside Node
+	Progress float32 `json:"progress"`
+	// Finished marks the last page (or the end of a scroll flow) as read.
+	// Progress cannot: it names the top of the last page and so stays below 1.
+	Finished bool      `json:"finished,omitempty"`
 	Updated  time.Time `json:"updated"`
+}
+
+// Completed reports whether the position is the end of the book. Positions
+// written before Finished existed are read from Progress, which a reader on the
+// last page left just under 1; the threshold also covers scroll mode, where the
+// top of the viewport is one screen short of the flow's end.
+func (p Position) Completed() bool {
+	return p.Finished || p.Progress >= 0.995
 }
 
 // Bookmark is a place in a book that the reader kept. Position carries the
@@ -177,6 +192,8 @@ type Store struct {
 	closed  bool
 	timer   *time.Timer
 	lastErr error
+	// recovered is "<path>.bak" when Open could not use the file as it was.
+	recovered string
 
 	// writes counts completed saves. Tests use it to prove that SaveSoon
 	// coalesces; it is meaningless outside tests.
@@ -184,9 +201,10 @@ type Store struct {
 }
 
 // Open reads path. A missing or empty file yields an empty State; a file that
-// is not valid JSON is copied to path+".bak" and replaced by an empty State.
-// Both are reported as success: a fresh install and a damaged file are states
-// the reader must start in, not errors.
+// cannot be used as it stands is copied to path+".bak", and every part of it
+// that still parses becomes the state, so a damaged file degrades to a shorter
+// shelf instead of an empty one. Both are reported as success: a fresh install
+// and a damaged file are states the reader must start in, not errors.
 func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("store: empty path")
@@ -199,19 +217,142 @@ func Open(path string) (*Store, error) {
 	case err != nil:
 		return nil, fmt.Errorf("store: read %s: %w", path, err)
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(data, utf8BOM))
+	if len(trimmed) == 0 {
 		return s, nil
 	}
-	var st State
-	if err := json.Unmarshal(data, &st); err != nil {
-		if berr := backup(path, data); berr != nil {
-			return nil, fmt.Errorf("store: %s is not valid JSON (%v) and the backup failed: %w", path, err, berr)
+
+	st, err := decode(trimmed)
+	if err == nil {
+		// A file from a newer version is readable, but writing it back drops the
+		// fields this version does not know. Keep those in a backup first.
+		if st.Version > Version {
+			if berr := backup(path, data); berr != nil {
+				return nil, fmt.Errorf("store: %s is version %d, newer than %d, and the backup failed: %w",
+					path, st.Version, Version, berr)
+			}
+			s.recovered = path + ".bak"
 		}
+		normalize(&st)
+		s.state = st
 		return s, nil
 	}
-	normalize(&st)
-	s.state = st
+
+	if berr := backup(path, data); berr != nil {
+		return nil, fmt.Errorf("store: %s is not valid JSON (%v) and the backup failed: %w", path, err, berr)
+	}
+	s.recovered = path + ".bak"
+	if st, ok := salvage(trimmed); ok {
+		normalize(&st)
+		s.state = st
+	}
 	return s, nil
+}
+
+// errNotObject reports a document that is valid JSON but not a State: null, an
+// array, a number. There is nothing to salvage in one.
+var errNotObject = errors.New("store: not a state document")
+
+// utf8BOM is what an editor on another platform puts in front of a file it
+// rewrote. JSON does not allow it, but a state file is a user-visible file.
+var utf8BOM = []byte("\xef\xbb\xbf")
+
+// decode reads one state document. When the document is syntactically whole but
+// a single field has the wrong type, the error is returned together with a
+// partly filled State: the decoder keeps everything it could read, which is what
+// salvage falls back on so one bad field does not cost the whole shelf.
+func decode(data []byte) (State, error) {
+	var st State
+	if len(data) == 0 || data[0] != '{' {
+		return st, errNotObject
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// salvage reads as much of a damaged document as it can. A document whose only
+// fault is a bad field keeps every field that did parse; a truncated document is
+// closed and read again. It reports false when nothing at all could be used.
+func salvage(data []byte) (State, bool) {
+	st, err := decode(data)
+	if err == nil || hasContent(st) {
+		return st, true
+	}
+	repaired, ok := repairJSON(data)
+	if !ok {
+		return State{}, false
+	}
+	if st, err := decode(repaired); err == nil || hasContent(st) {
+		return st, true
+	}
+	return State{}, false
+}
+
+// repairJSON closes the strings and brackets a truncated document left open, so
+// the values written whole before the cut can still be read. It reports false
+// when the brackets do not nest, which means the damage is not a short tail.
+func repairJSON(data []byte) ([]byte, bool) {
+	var open []byte // the closers the document still owes, innermost last
+	inString, escaped := false, false
+	for _, c := range data {
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			open = append(open, '}')
+		case '[':
+			open = append(open, ']')
+		case '}', ']':
+			if len(open) == 0 || open[len(open)-1] != c {
+				return nil, false
+			}
+			open = open[:len(open)-1]
+		}
+	}
+	out := make([]byte, 0, len(data)+len(open)+2)
+	out = append(out, bytes.TrimRight(data, " \t\r\n")...)
+	if inString {
+		// The cut landed inside a string: closing it keeps the value readable.
+		// The scanner above already told us the last bytes are string content,
+		// so nothing may be trimmed or dropped from the tail before this.
+		out = append(out, '"')
+	} else if n := len(out); n > 0 && out[n-1] == ',' {
+		out = out[:n-1] // a value cut off after its comma
+	}
+	for i := len(open) - 1; i >= 0; i-- {
+		out = append(out, open[i])
+	}
+	return out, true
+}
+
+// hasContent reports whether st holds anything a reader would miss. It decides
+// whether a partly decoded document is worth keeping over an empty state.
+func hasContent(st State) bool {
+	return len(st.Books) > 0 || len(st.Positions) > 0 || len(st.Bookmarks) > 0 ||
+		len(st.Notes) > 0 || st.LastOpen != "" || st.Prefs != (Prefs{})
+}
+
+// Recovered returns the backup Open wrote because the state file could not be
+// used as it stood — invalid or truncated JSON, a document that is not a state,
+// or a schema from a newer version — and "" when the file opened clean. A host
+// can show it so a damaged shelf is visible instead of silently replaced.
+func (s *Store) Recovered() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recovered
 }
 
 // Path returns the file this store writes.
@@ -600,15 +741,17 @@ func (s *Store) RemoveNote(key, id string) bool {
 
 // samePlace reports whether two positions name the same point of a book. The
 // node and offset are exact and the anchor survives a rebuild, so either one
-// matching means the same place.
+// matching means the same place. An anchor is authoritative and globally
+// unique, so it matches on its own: the chapter a later layout resolved it to
+// may differ from the one recorded, and that must not split the place in two.
 func samePlace(a, b Position) bool {
+	if a.Anchor != 0 && a.Anchor == b.Anchor && a.Offset == b.Offset {
+		return true
+	}
 	if a.Chapter != b.Chapter {
 		return false
 	}
-	if a.Node != 0 && a.Node == b.Node && a.Offset == b.Offset {
-		return true
-	}
-	return a.Anchor != 0 && a.Anchor == b.Anchor && a.Offset == b.Offset
+	return a.Node != 0 && a.Node == b.Node && a.Offset == b.Offset
 }
 
 // newID returns a random bookmark or note identity: stable in the file, never
@@ -712,9 +855,9 @@ func emptyState() State {
 }
 
 func normalize(st *State) {
-	if st.Version < Version {
-		st.Version = Version
-	}
+	// Whatever is written back has this version's shape, whatever the file it was
+	// read from claimed; Open backed up a newer document before we got here.
+	st.Version = Version
 	if st.Positions == nil {
 		st.Positions = map[string]Position{}
 	}
@@ -724,6 +867,31 @@ func normalize(st *State) {
 	if st.Notes == nil {
 		st.Notes = map[string][]Note{}
 	}
+	st.Books = dedupeBooks(st.Books)
+}
+
+// dedupeBooks keeps one row per key, the most recently opened one. Two rows for
+// one key would make Recent list the same file twice and let TouchBook replace
+// only one of them; a damaged or hand-edited file is where they come from.
+func dedupeBooks(books []Book) []Book {
+	if len(books) < 2 {
+		return books
+	}
+	seen := make(map[string]int, len(books))
+	kept := books[:0]
+	for _, b := range books {
+		if b.Key != "" {
+			if i, ok := seen[b.Key]; ok {
+				if b.LastOpened.After(kept[i].LastOpened) {
+					kept[i] = b
+				}
+				continue
+			}
+			seen[b.Key] = len(kept)
+		}
+		kept = append(kept, b)
+	}
+	return kept
 }
 
 func cloneState(st State) State {
@@ -750,9 +918,29 @@ func cloneState(st State) State {
 	return out
 }
 
-// backup copies a corrupt file next to itself so the user can attach it to a
+// resolveWritePath follows a chain of symlinks to the file the caller means,
+// including a link whose target does not exist yet: EvalSymlinks cannot resolve
+// that one, so the last hop is read directly. It gives up on a cycle.
+func resolveWritePath(path string) string {
+	for i := 0; i < 8; i++ {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved
+		}
+		target, err := os.Readlink(path)
+		if err != nil {
+			return path
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		path = target
+	}
+	return path
+}
+
+// backup copies a damaged file next to itself so the user can attach it to a
 // bug report. The original is left in place and is overwritten by the next
-// successful save.
+// successful save; the backup keeps the last damaged revision.
 func backup(path string, data []byte) error {
 	return writeAtomic(path+".bak", data)
 }
@@ -760,7 +948,12 @@ func backup(path string, data []byte) error {
 // writeAtomic writes data to path via a temp file in the same directory. A
 // crash or a full disk leaves either the old file or the new one, never a
 // truncated mix.
+//
+// A symlinked state file is written through rather than replaced: someone who
+// pointed state.json at a synced or versioned directory means the writes to land
+// there, and a rename over the link would quietly turn it into a plain file.
 func writeAtomic(path string, data []byte) error {
+	path = resolveWritePath(path)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

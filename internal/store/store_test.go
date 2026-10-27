@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -62,7 +63,9 @@ func TestOpenEmptyFile(t *testing.T) {
 
 func TestOpenCorruptJSONBacksUp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	corrupt := []byte(`{"version":1,"books":[{"key":"a",`)
+	// Damage in the middle, not a short tail: nothing can be salvaged, so the
+	// reader starts empty and the file is kept for inspection.
+	corrupt := []byte(`{"version":1,"books":[}not json at all`)
 	if err := os.WriteFile(path, corrupt, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +76,9 @@ func TestOpenCorruptJSONBacksUp(t *testing.T) {
 	defer s.Close()
 	if len(s.State().Books) != 0 {
 		t.Errorf("corrupt file produced a non-empty state")
+	}
+	if got := s.Recovered(); got != path+".bak" {
+		t.Errorf("Recovered() = %q, want the backup path", got)
 	}
 	bak, err := os.ReadFile(path + ".bak")
 	if err != nil {
@@ -572,4 +578,296 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// A state file cut short — a crash mid-write, a sync client, a disk that filled
+// up — used to leave the reader with an empty shelf and a .bak nobody opens. The
+// books written whole before the cut are still there, so they are recovered.
+func TestOpenTruncatedJSONSalvagesTheShelf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	full := `{"version":1,"books":[` +
+		`{"key":"k1","path":"/books/one.epub","title":"One"},` +
+		`{"key":"k2","path":"/books/two.epub","title":"Two"},` +
+		`{"key":"k3","path":"/books/three.epub","title":"Three"}],"positions":{},"prefs":{}}`
+	// Cut after the second book, as a power failure mid-write would leave it:
+	// the two books written whole are still there, the third never got there.
+	marker := `"title":"Two"},`
+	cut := full[:strings.Index(full, marker)+len(marker)]
+	if err := os.WriteFile(path, []byte(cut), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	books := s.State().Books
+	if len(books) != 2 || books[0].Key != "k1" || books[1].Key != "k2" {
+		t.Fatalf("salvaged books = %+v, want the two written whole", books)
+	}
+	if books[1].Title != "Two" {
+		t.Errorf("salvaged title = %q, want Two", books[1].Title)
+	}
+	if got := s.Recovered(); got != path+".bak" {
+		t.Errorf("Recovered() = %q, want %q", got, path+".bak")
+	}
+	if bak := string(mustRead(t, path+".bak")); bak != cut {
+		t.Errorf("backup = %q, want the damaged file verbatim", bak)
+	}
+
+	// Saving the salvaged state replaces the damaged file and the shelf keeps
+	// the recovered books.
+	s.Update(func(st *State) { st.Prefs.Theme = "sepia" })
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	if got := reopened.State(); len(got.Books) != 2 || got.Prefs.Theme != "sepia" {
+		t.Errorf("reopened state = %+v", got)
+	}
+	if got := reopened.Recovered(); got != "" {
+		t.Errorf("a clean file reported recovery %q", got)
+	}
+}
+
+// A file that holds a single bad field keeps everything else: one damaged
+// reading position must not cost the whole shelf.
+func TestOpenBadFieldKeepsTheRest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	doc := `{"version":1,"books":[{"key":"k1","path":"/a.epub","title":"A"}],` +
+		`"positions":{"k1":{"chapter":2,"progress":1e999}}}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if got := len(s.State().Books); got != 1 {
+		t.Fatalf("books = %d, want the one that parsed", got)
+	}
+	if s.Recovered() == "" {
+		t.Error("a partly decoded file reported no recovery")
+	}
+}
+
+// A document that is valid JSON but not a state (null, an array, a number) is
+// backed up instead of being mistaken for a fresh install.
+func TestOpenNonObjectIsBackedUp(t *testing.T) {
+	for _, doc := range []string{"null", "[]", "42"} {
+		path := filepath.Join(t.TempDir(), "state.json")
+		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open(%q): %v", doc, err)
+		}
+		if got := len(s.State().Books) + len(s.State().Positions); got != 0 {
+			t.Errorf("Open(%q) produced a non-empty state", doc)
+		}
+		if got := string(mustRead(t, path+".bak")); got != doc {
+			t.Errorf("Open(%q) backup = %q", doc, got)
+		}
+		if s.Recovered() == "" {
+			t.Errorf("Open(%q) reported no recovery", doc)
+		}
+		s.Close()
+	}
+}
+
+// A state file from a newer version is read, but its fields are not silently
+// dropped: the original is kept next to it before anything overwrites it.
+func TestOpenNewerSchemaBacksUpBeforeDowngrading(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	doc := `{"version":9,"books":[{"key":"k1","path":"/a.epub","title":"A"}],"collections":["to read"]}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if got := len(s.State().Books); got != 1 {
+		t.Fatalf("books = %d, want the newer file's shelf", got)
+	}
+	if got := s.Recovered(); got != path+".bak" {
+		t.Errorf("Recovered() = %q, want %q", got, path+".bak")
+	}
+	if bak := string(mustRead(t, path+".bak")); bak != doc {
+		t.Errorf("backup = %q, want the newer document verbatim", bak)
+	}
+
+	// What this version writes is this version's shape, so it says so; the
+	// newer fields live on in the backup.
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	var st State
+	if err := json.Unmarshal(mustRead(t, path), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Version != Version {
+		t.Errorf("written version = %d, want %d", st.Version, Version)
+	}
+}
+
+// Two rows for one book are collapsed on open: Recent would list the file twice
+// and TouchBook would only ever replace one of them.
+func TestOpenDedupesBookKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	doc := `{"version":1,"books":[` +
+		`{"key":"k","path":"/a.epub","title":"Old","lastOpened":"2020-01-01T00:00:00Z"},` +
+		`{"key":"k","path":"/a.epub","title":"New","lastOpened":"2021-01-01T00:00:00Z"},` +
+		`{"key":"","path":"","title":"nameless"}]}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	books := s.State().Books
+	if len(books) != 2 {
+		t.Fatalf("books = %+v, want the newest k plus the nameless row", books)
+	}
+	if books[0].Title != "New" {
+		t.Errorf("kept %q, want the most recently opened revision", books[0].Title)
+	}
+	if got := len(s.Recent(0)); got != 2 {
+		t.Errorf("Recent = %d rows, want 2", got)
+	}
+}
+
+// The anchor is the identifier that survives a rebuild, so it decides on its
+// own whether two positions are one place; the node number is only the faster
+// path and must not split a place in two.
+func TestSamePlace(t *testing.T) {
+	base := Position{Chapter: 1, Node: 7, Anchor: 70, Offset: 3}
+	if !samePlace(base, base) {
+		t.Error("a position is not the same place as itself")
+	}
+	// The same node and offset, no anchor: still one place.
+	if !samePlace(Position{Chapter: 1, Node: 7, Offset: 3}, Position{Chapter: 1, Node: 7, Offset: 3}) {
+		t.Error("the same node and offset are two places")
+	}
+	// The same anchor resolved into another chapter is one place: a revision of
+	// the book may move the chapter, not the anchor.
+	moved := Position{Chapter: 4, Anchor: 70, Offset: 3}
+	if !samePlace(base, moved) {
+		t.Error("an anchor that moved chapter was split into two places")
+	}
+	// The same chapter and node but another offset are two places.
+	if samePlace(base, Position{Chapter: 1, Node: 7, Anchor: 70, Offset: 4}) {
+		t.Error("two offsets in one node are one place")
+	}
+	// A node number means nothing in another chapter.
+	if samePlace(Position{Chapter: 1, Node: 7, Offset: 3}, Position{Chapter: 2, Node: 7, Offset: 3}) {
+		t.Error("the same node number in another chapter matched")
+	}
+	// Nothing recorded: never the same place, so two bare positions do not
+	// collapse into one bookmark.
+	if samePlace(Position{Chapter: 1}, Position{Chapter: 1}) {
+		t.Error("two positions with no node and no anchor matched")
+	}
+}
+
+// repairJSON is what turns a truncated document back into something readable.
+func TestRepairJSON(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string // "" means the damage is not a short tail
+	}{
+		{`{"a":1`, `{"a":1}`},
+		{`{"a":[1,2`, `{"a":[1,2]}`},
+		{`{"a":[{"b":1}`, `{"a":[{"b":1}]}`},
+		{`{"a":[{"b":1},`, `{"a":[{"b":1}]}`},
+		{`{"a":"half`, `{"a":"half"}`},
+		{`{"a":"a,`, `{"a":"a,"}`},
+		{`{"a":"x\"`, `{"a":"x\""}`},
+		{`{"a":1}}`, ``},
+		{`{"a":[}`, ``},
+		{`{"a":[1,2]}`, `{"a":[1,2]}`},
+	}
+	for _, tc := range cases {
+		got, ok := repairJSON([]byte(tc.in))
+		if tc.want == "" {
+			if ok {
+				t.Errorf("repairJSON(%q) = %q, want a refusal", tc.in, got)
+			}
+			continue
+		}
+		if !ok || string(got) != tc.want {
+			t.Errorf("repairJSON(%q) = %q, %v; want %q", tc.in, got, ok, tc.want)
+		}
+		if !json.Valid(got) {
+			t.Errorf("repaired %q is not valid JSON", tc.in)
+		}
+	}
+}
+
+// A byte-order mark in front of the document — what an editor from another
+// platform leaves behind — must not make the reader lose its shelf.
+func TestOpenToleratesBOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	doc := "\xef\xbb\xbf" + `{"version":1,"books":[{"key":"k1","path":"/a.epub","title":"A"}],"prefs":{"theme":"night"}}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	st := s.State()
+	if len(st.Books) != 1 || st.Prefs.Theme != "night" {
+		t.Errorf("state = %+v, want the file's shelf and preferences", st)
+	}
+	if got := s.Recovered(); got != "" {
+		t.Errorf("a readable file reported recovery %q", got)
+	}
+}
+
+// A state file someone symlinked into a synced or versioned directory keeps the
+// link: the writes follow it instead of replacing it with a plain file, which
+// would silently stop the directory from tracking the reader.
+func TestSaveFollowsASymlinkedStateFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "synced", "state.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "state.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(link)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	s.Update(func(st *State) { st.LastOpen = "through-the-link" })
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the symlink was replaced by a regular file (%v)", err)
+	}
+	var st State
+	if err := json.Unmarshal(mustRead(t, target), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.LastOpen != "through-the-link" {
+		t.Errorf("LastOpen at the link's target = %q", st.LastOpen)
+	}
 }
