@@ -19,7 +19,9 @@ const (
 	// maxTextBytes keeps one accidental huge file from exhausting memory.
 	maxTextBytes = 64 << 20
 	// maxChapterRunes bounds a single chapter when a text has no headings or
-	// one enormous block. A typical web novel chapter is a few thousand runes.
+	// one enormous block, and a single paragraph too: an export that lost its
+	// newlines must not become one page-long block. A typical web novel chapter
+	// is a few thousand runes.
 	maxChapterRunes = 20000
 	// maxHeadingRunes keeps a normal sentence that merely starts with 第…
 	// from being taken for a chapter title.
@@ -41,8 +43,10 @@ const (
 )
 
 var (
-	cnChapter = regexp.MustCompile(`^第[0-9０-９零〇一二三四五六七八九十百千万两]+[章节節回卷篇部集幕]`)
-	cnVolume  = regexp.MustCompile(`^[卷部篇][0-9０-９零〇一二三四五六七八九十百千万两]+`)
+	// Some exports space the number away from its marker ("第 1 章"), so the
+	// separator is optional on both sides.
+	cnChapter = regexp.MustCompile(`^第[ \x{3000}]*[0-9０-９零〇一二三四五六七八九十百千万两]+[ \x{3000}]*[章节節回卷篇部集幕]`)
+	cnVolume  = regexp.MustCompile(`^[卷部篇][ \x{3000}]*[0-9０-９零〇一二三四五六七八九十百千万两]+`)
 	enHeading = regexp.MustCompile(`(?i)^(chapter|volume|part|book)\s+([0-9]+|[ivxlcdm]+)\b`)
 
 	specialHeadings = []string{
@@ -57,14 +61,19 @@ var (
 func openText(file string) (*Book, error) {
 	info, err := os.Stat(file)
 	if err != nil {
-		return nil, fmt.Errorf("book: open %s: %w", file, err)
+		// The PathError already carries the path, so wrapping just its text
+		// keeps the message from naming the file twice.
+		return nil, fmt.Errorf("book: %w", err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("book: %s is a directory, not a book", file)
 	}
 	if info.Size() > maxTextBytes {
 		return nil, fmt.Errorf("book: %s is %d bytes, larger than the %d byte limit", file, info.Size(), maxTextBytes)
 	}
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("book: read %s: %w", file, err)
+		return nil, fmt.Errorf("book: %w", err)
 	}
 
 	text, encodingName := decodeText(data)
@@ -116,8 +125,9 @@ func textLanguage(text string) string {
 }
 
 // decodeText turns the file bytes into UTF-8. BOMs win; valid UTF-8 needs no
-// guessing; otherwise GB18030 and Big5 are both tried and the one that reads
-// as more common Chinese wins. GB18030 covers GBK and GB2312.
+// guessing; a UTF-16 file saved without a BOM is recognized by its NUL pattern;
+// otherwise GB18030 and Big5 are both tried and the one that reads as more
+// common Chinese wins. GB18030 covers GBK and GB2312.
 func decodeText(data []byte) (string, string) {
 	switch {
 	case bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}):
@@ -129,6 +139,18 @@ func decodeText(data []byte) (string, string) {
 	}
 	if utf8.Valid(data) {
 		return string(data), "UTF-8"
+	}
+
+	// Still guessing. A UTF-16 file without a BOM is invalid UTF-8 as soon as
+	// it holds one Chinese character, and a text book read as UTF-8 would be a
+	// page of tofu, so the NUL pattern is checked before the Chinese codecs.
+	if bigEndian, ok := sniffUTF16(data); ok {
+		if text := decodeUTF16(data, bigEndian); readsAsText(text) {
+			if bigEndian {
+				return text, "UTF-16BE"
+			}
+			return text, "UTF-16LE"
+		}
 	}
 
 	gb, gbErr := simplifiedchinese.GB18030.NewDecoder().Bytes(data)
@@ -154,6 +176,55 @@ func decodeText(data []byte) (string, string) {
 		return string(data), "UTF-8"
 	}
 	return best, bestName
+}
+
+// sniffUTF16 reports whether data looks like UTF-16 without a BOM and, if so,
+// which byte order it uses. Chinese UTF-8 and the Chinese codecs carry no NUL
+// byte, so a NUL means the bytes are a UTF-16 file: its high half is zero
+// wherever the text is ASCII, which makes the order readable from the parity of
+// the zeros. A character such as 一 (U+4E00) puts a zero at the other parity
+// too, so both orders are decoded and the one that reads as text wins.
+func sniffUTF16(data []byte) (bigEndian, ok bool) {
+	sample := data
+	if len(sample) > 4096 {
+		sample = sample[:4096] // a few lines are enough to tell
+	}
+	if bytes.IndexByte(sample, 0) < 0 {
+		return false, false
+	}
+	le, be := decodeUTF16(sample, false), decodeUTF16(sample, true)
+	leOK, beOK := readsAsText(le), readsAsText(be)
+	switch {
+	case leOK && !beOK:
+		return false, true
+	case beOK && !leOK:
+		return true, true
+	case leOK && beOK:
+		// Both decode to something printable; the one whose characters are the
+		// ones Chinese text is actually made of wins.
+		return scoreText(be) > scoreText(le), true
+	}
+	return false, false
+}
+
+// readsAsText reports whether a candidate decoding is text a reader can show:
+// letters, digits, punctuation and spaces, and none of the private-use and
+// unassigned code points a wrong UTF-16 guess produces.
+func readsAsText(text string) bool {
+	graphic, letters, total := 0, 0, 0
+	for _, r := range text {
+		if total++; total > 4000 {
+			break
+		}
+		switch {
+		case r == '\n' || r == '\r' || r == '\t' || unicode.IsGraphic(r):
+			graphic++
+		}
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			letters++
+		}
+	}
+	return graphic*20 >= total*19 && letters > 0
 }
 
 func decodeUTF16(data []byte, bigEndian bool) string {
@@ -194,10 +265,7 @@ func scoreText(s string) int {
 // splitText turns a whole text file into chapters of XHTML, so the rest of
 // the pipeline does not know the book was not an EPUB.
 func splitText(text string) []Chapter {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	text = strings.ReplaceAll(text, "\uFEFF", "")
-	text = strings.ReplaceAll(text, "\t", " ")
+	text = cleanText(text)
 
 	lines := strings.Split(text, "\n")
 	mode := detectParagraphMode(lines)
@@ -209,10 +277,14 @@ func splitText(text string) []Chapter {
 		base     string   // the heading of the logical chapter
 		part     int      // fragments of one logical chapter
 		runes    int
+		settled  bool // base's chapter has already been written
 	)
 
 	emit := func() {
-		if len(paras) == 0 && base == "" {
+		// A fragment that ended because it reached maxChapterRunes must not
+		// leave a second, empty chapter behind when the next heading flushes
+		// an already empty fragment.
+		if len(paras) == 0 && (base == "" || settled) {
 			return
 		}
 		title := base
@@ -226,6 +298,7 @@ func splitText(text string) []Chapter {
 		paras, runes = nil, 0
 		if base != "" {
 			part++
+			settled = true
 		}
 	}
 	// flushBlock turns the lines collected since the last blank line into
@@ -234,10 +307,15 @@ func splitText(text string) []Chapter {
 	// what makes a text book readable.
 	flushBlock := func() {
 		for _, p := range blockParagraphs(block, mode) {
-			paras = append(paras, p)
-			runes += utf8.RuneCountInString(p)
-			if runes >= maxChapterRunes {
-				emit()
+			// A single paragraph can be longer than a whole chapter (a scraped
+			// page saved without line breaks), so it is cut too: one page must
+			// never have to lay out an unbounded block.
+			for _, piece := range splitParagraph(p, maxChapterRunes) {
+				paras = append(paras, piece)
+				runes += utf8.RuneCountInString(piece)
+				if runes >= maxChapterRunes {
+					emit()
+				}
 			}
 		}
 		block = nil
@@ -252,7 +330,7 @@ func splitText(text string) []Chapter {
 		if looksLikeHeading(line) {
 			flushBlock()
 			emit()
-			base, part = line, 0
+			base, part, settled = headingTitle(line), 0, false
 			continue
 		}
 		block = append(block, raw)
@@ -260,6 +338,113 @@ func splitText(text string) []Chapter {
 	flushBlock()
 	emit()
 	return chapters
+}
+
+// cleanText normalizes a decoded file before it is split: CRLF and CR become
+// LF, a tab becomes a space, a stray BOM is dropped, and characters the XHTML
+// pipeline cannot carry are removed — an invalid UTF-8 byte left over from a
+// decoding that lost its guess, and the C0 controls (a NUL, a vertical tab)
+// that no font has a glyph for and that XML forbids outright.
+func cleanText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	var b strings.Builder
+	b.Grow(len(text))
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && size == 1 {
+			i++ // one invalid byte, dropped
+			continue
+		}
+		i += size
+		switch {
+		case r == '\uFEFF':
+			// a BOM that survived decoding, or one in the middle of the file
+		case r == '\n':
+			b.WriteByte('\n')
+		case r == '\t':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7F || r == '\uFFFE' || r == '\uFFFF':
+			// a control character: it has no glyph and breaks XML
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// splitParagraph cuts a paragraph longer than limit runes into pieces of at
+// most limit runes, preferring to end a piece right after sentence punctuation
+// so a page break falls between sentences rather than inside one. It returns
+// the paragraph unchanged when it already fits. The work is done on byte
+// offsets: a scraped file can be one huge line, and turning that into a []rune
+// would cost four times its size before a single page is laid out.
+func splitParagraph(p string, limit int) []string {
+	if limit <= 0 {
+		return []string{p}
+	}
+	pieceCount := utf8.RuneCountInString(p)
+	if pieceCount <= limit {
+		return []string{p}
+	}
+	out := make([]string, 0, pieceCount/limit+1)
+	var (
+		start   int // first byte of the piece being built
+		count   int // runes in it so far
+		endAt   int // the byte just past its last sentence end, or 0
+		endRune int // runes before endAt
+	)
+	push := func(at int) {
+		out = append(out, p[start:at])
+		start, count, endAt, endRune = at, 0, 0, 0
+	}
+	for i := 0; i < len(p); {
+		r, size := utf8.DecodeRuneInString(p[i:])
+		count++
+		if isSentenceEnd(r) {
+			endAt, endRune = i+size, count
+		}
+		if count < limit {
+			i += size
+			continue
+		}
+		at := i + size
+		if endAt > start && count-endRune <= limit/4 {
+			// A sentence ended just before the limit, so break there instead.
+			at = endAt
+		}
+		push(at)
+		i = at
+	}
+	if start < len(p) {
+		out = append(out, p[start:])
+	}
+	return out
+}
+
+// headingTitle is the heading as the table of contents shows it: trimmed, and
+// with the run of spaces a padded separator or a tab leaves behind collapsed to
+// one, since HTML would collapse them anyway but a TOC label does not.
+func headingTitle(line string) string {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, "  ") {
+		return line
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	space := false
+	for _, r := range line {
+		if r == ' ' {
+			if space {
+				continue
+			}
+			space = true
+		} else {
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // blockParagraphs turns the lines between two blank lines into paragraphs.
@@ -353,7 +538,7 @@ func endsParagraph(line string) bool {
 		switch {
 		case strings.ContainsRune("”’」』）】》\"'", r):
 			line = strings.TrimRight(line[:len(line)-size], " \t\u3000")
-		case strings.ContainsRune("。！？…‥.!?", r):
+		case isSentenceEnd(r):
 			return true
 		default:
 			return false
@@ -362,10 +547,21 @@ func endsParagraph(line string) bool {
 	return false
 }
 
+// isSentenceEnd reports whether r is punctuation that closes a sentence.
+func isSentenceEnd(r rune) bool {
+	return strings.ContainsRune("。！？…‥.!?", r)
+}
+
 // detectParagraphMode picks how to find paragraphs. A blank line anywhere means
 // the file is divided into blocks; a file with none is one paragraph per line.
+// Empty lines only at the end are the file's final newline, not a divider, or a
+// file saved one paragraph per line would be read as hard-wrapped blocks.
 func detectParagraphMode(lines []string) paragraphMode {
-	for _, raw := range lines {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	for _, raw := range lines[:end] {
 		if strings.TrimSpace(raw) == "" {
 			return modeBlock
 		}
