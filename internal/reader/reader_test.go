@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"strings"
 	"testing"
 
@@ -406,5 +407,72 @@ func TestFontsHoldEachFaceOnce(t *testing.T) {
 		if got := both.Set.FontCount(); got != 4 {
 			t.Errorf("a set with a serif face holds %d faces, want 4", got)
 		}
+	}
+}
+
+// A fade that never arrived draws the page rather than nothing: an animation
+// whose progress is not a number must not leave the book blank.
+func TestUIPainterFadeNaNIsOpaque(t *testing.T) {
+	const paper = 0xff
+	testerShot := func(fade float32) uint8 {
+		t.Helper()
+		up := NewUIPainter(nil, nil)
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Box(c).Fill().Background(ui.RGB(paper, paper, paper)).Children(func() {
+				ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+					up.P = p
+					up.SetFade(fade)
+					up.FillRect(paint.Rect{X: r.X, Y: r.Y, Width: r.W, Height: r.H}, paint.Color{A: 0xff})
+				})
+			})
+		}, 20, 20)
+		tt.Frame()
+		cr, _, _, _ := tt.Image().At(10, 10).RGBA()
+		return uint8(cr >> 8)
+	}
+	if got := testerShot(float32(math.NaN())); got != 0 {
+		t.Errorf("a NaN fade drew %#02x, want the opaque ink: the page went blank", got)
+	}
+	if got := testerShot(2); got != 0 {
+		t.Errorf("a fade past 1 drew %#02x, want the opaque ink", got)
+	}
+}
+
+// An image id that is already decoded stays available: a host may hand it again,
+// and it may have no bytes to hand by then (a rebuild that published no new
+// image for it). Reporting it missing would make a page lose a picture it has.
+func TestUIPainterSetImageKeepsADecodedID(t *testing.T) {
+	var pic bytes.Buffer
+	src := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	if err := png.Encode(&pic, src); err != nil {
+		t.Fatal(err)
+	}
+	const id, other = render.ImageID(1), render.ImageID(2)
+	up := NewUIPainter(nil, nil)
+	if !up.SetImage(id, pic.Bytes()) {
+		t.Fatal("the PNG did not decode")
+	}
+	if up.Bitmap(id) == nil {
+		t.Fatal("the decoded bitmap is not there")
+	}
+	if !up.SetImage(id, nil) {
+		t.Error("a decoded image reported missing when handed no bytes again")
+	}
+	if up.SetImage(other, nil) {
+		t.Error("an image with no bytes decoded")
+	}
+	up.ClearImages()
+	if up.Bitmap(id) != nil {
+		t.Error("ClearImages kept a bitmap")
+	}
+	if up.SetImage(id, nil) {
+		t.Error("a cleared image reports itself decoded without bytes")
+	}
+	if up.SetImage(id, pic.Bytes()) == false || up.Bitmap(id) == nil {
+		t.Error("an image does not decode again after ClearImages")
+	}
+	var nilPainter *UIPainter
+	if nilPainter.SetImage(id, pic.Bytes()) || nilPainter.Bitmap(id) != nil {
+		t.Error("a nil painter holds an image")
 	}
 }

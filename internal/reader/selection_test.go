@@ -208,3 +208,110 @@ func docChapterText(t *testing.T, doc *render.Document, i int) string {
 	}
 	return b.String()
 }
+
+// A selection a host holds by pointer may be nil: it reads as empty and every
+// method on it works, rather than the half of them that happened to check.
+func TestSelectionSurvivesNil(t *testing.T) {
+	var sel *Selection
+	if !sel.Empty() {
+		t.Error("a nil selection is not empty")
+	}
+	sel.Start(render.Location{Chapter: 1, Node: 2, Offset: 3})
+	sel.Extend(render.Location{Chapter: 1, Node: 2, Offset: 9})
+	sel.Clear()
+	if got := sel.Anchor(); got != (render.Location{}) {
+		t.Errorf("a nil selection anchors at %+v", got)
+	}
+	if got := sel.Focus(); got != (render.Location{}) {
+		t.Errorf("a nil selection focuses on %+v", got)
+	}
+	if a, f := sel.Ends(); a != (render.Location{}) || f != (render.Location{}) {
+		t.Errorf("a nil selection ends at %+v, %+v", a, f)
+	}
+	if got := sel.Quads(nil); got != nil {
+		t.Errorf("a nil selection has %d quads", len(got))
+	}
+	if got := sel.Text(nil); got != "" {
+		t.Errorf("a nil selection reads %q", got)
+	}
+}
+
+// The endpoints are clamped to the document: a location kept from another book
+// cannot make the copy walk a chapter count that is not there, and a location
+// before the first chapter reads from the first one.
+func TestSelectionTextStaysInsideTheDocument(t *testing.T) {
+	doc, fonts := selectionBook(t)
+	if _, err := BuildLayout(context.Background(), doc, fonts, 420, 560, Options{FontSize: 18}); err != nil {
+		t.Fatal(err)
+	}
+	// Both ends past the end: nothing of this book is selected, and it returns
+	// without walking a billion chapters.
+	var beyond Selection
+	beyond.Start(render.Location{Chapter: 3, Node: 0})
+	beyond.Extend(render.Location{Chapter: 1 << 30, Node: 0})
+	if got := beyond.Text(doc); got != "" {
+		t.Errorf("a selection past the last chapter reads %q", got)
+	}
+
+	// A chapter before the first one reads from the first, up to the focus.
+	ch0, ok := doc.Chapter(0)
+	if !ok {
+		t.Fatal("no chapter 0")
+	}
+	first, firstText0 := firstText(t, ch0)
+	var before Selection
+	before.Start(render.Location{Chapter: -5, Node: first})
+	before.Extend(render.Location{Chapter: 0, Node: first, Offset: len([]rune(firstText0))})
+	if got := before.Text(doc); got != firstText0 {
+		t.Errorf("a selection starting before chapter 0 reads %q, want %q", got, firstText0)
+	}
+
+	// One real end and one past the end keeps what is there and reads nothing
+	// of the chapter that is not.
+	var mixed Selection
+	mixed.Start(render.Location{Chapter: 0, Node: first, Offset: 2})
+	mixed.Extend(render.Location{Chapter: 99, Node: 0})
+	got := mixed.Text(doc)
+	if got == "" {
+		t.Error("a selection from chapter 0 into a chapter that is not there read nothing")
+	}
+	if tail := string([]rune(firstText0)[2:]); !strings.HasSuffix(got, tail) {
+		t.Errorf("the selection reads %q, want chapter 0's tail %q", got, tail)
+	}
+	if strings.Contains(got, "Second chapter") {
+		t.Errorf("the selection read a chapter the endpoints do not reach: %q", got)
+	}
+}
+
+// Copying across two paragraphs keeps a newline between them instead of
+// gluing the last word of one to the first of the next.
+func TestSelectionTextKeepsParagraphsApart(t *testing.T) {
+	b := &book.Book{Chapters: []book.Chapter{{
+		Title: "两段",
+		XHTML: []byte("<html><body><p>First paragraph.</p><p>Second paragraph.</p></body></html>"),
+	}}}
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, ok := doc.Chapter(0)
+	if !ok {
+		t.Fatal("no chapter 0")
+	}
+	var texts []render.NodeID
+	for i := range ch.Nodes {
+		if ch.Nodes[i].Kind == render.NodeText && ch.Nodes[i].Text != "" {
+			texts = append(texts, render.NodeID(i))
+		}
+	}
+	if len(texts) < 2 {
+		t.Fatalf("the chapter has %d text nodes, want two paragraphs", len(texts))
+	}
+	first, second := ch.Nodes[texts[0]].Text, ch.Nodes[texts[1]].Text
+	var sel Selection
+	sel.Start(render.Location{Chapter: 0, Node: texts[0]})
+	sel.Extend(render.Location{Chapter: 0, Node: texts[1], Offset: len([]rune(second))})
+	if got, want := sel.Text(doc), first+"\n"+second; got != want {
+		t.Errorf("two paragraphs copy as %q, want %q", got, want)
+	}
+}

@@ -96,6 +96,9 @@ func (u *UIPainter) SetFade(f float32) {
 	if u == nil {
 		return
 	}
+	if f != f { // a progress that never arrived draws the page, not a blank one
+		f = 1
+	}
 	u.fade = min(max(f, 0), 1)
 }
 
@@ -109,14 +112,19 @@ func (u *UIPainter) faded(c paint.Color) paint.Color {
 }
 
 // SetImage decodes data once and keeps the bitmap for id. It reports whether
-// the image decoded; formats beyond PNG, JPEG, GIF, WebP and BMP (SVG, say)
-// are skipped. Call it on the UI thread, after a build produced the bytes.
+// the image is there to draw afterwards; formats beyond PNG, JPEG, GIF, WebP
+// and BMP (SVG, say) are skipped. Call it on the UI thread, after a build
+// produced the bytes. An id that is already decoded is left alone: a host may
+// hand the same image again, and the bytes it hands may be gone by then.
 func (u *UIPainter) SetImage(id paint.ImageID, data []byte) bool {
-	if u == nil || len(data) == 0 {
+	if u == nil {
 		return false
 	}
 	if _, ok := u.bitmaps[id]; ok {
 		return true
+	}
+	if len(data) == 0 {
+		return false
 	}
 	bitmap, err := ui.DecodeBitmap(data)
 	if err != nil {

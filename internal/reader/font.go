@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/go-text/typesetting/font"
@@ -37,12 +38,16 @@ var serifBook []byte
 //go:embed fonts/Inter-Regular.ttf
 var uiSans []byte
 
-var uiFontReady bool
+// uiFontReady says the chrome's face has been registered with MyGo. The faces
+// are read on a goroutine, off the UI thread, and the chrome asks for the family
+// on that thread while they load: the flag is atomic so the answer does not race
+// the load.
+var uiFontReady atomic.Bool
 
 // UIFontFamily is the family name the chrome should ask for, or "" before the
 // faces have loaded and the system's own is the only one there is.
 func UIFontFamily() string {
-	if uiFontReady {
+	if uiFontReady.Load() {
 		return UIFont
 	}
 	return ""
@@ -86,8 +91,12 @@ var DefaultSerifFonts = []string{
 type Fonts struct {
 	Set *render.FontSet
 	// Path is the sans file, the one CJK text needs; SerifPath the serif one,
-	// empty when the set was made without one — the system has none, or the
-	// book is set in the sans face — and the serif choice reads in the sans one.
+	// empty when the set was made without one, or with one that could not be read
+	// — the system has none, or the book is set in the sans face — and the serif
+	// choice reads in the sans one. A serif path that names the sans file is
+	// recorded here too, since that file is in the set and is what the serif
+	// choice falls back to: reporting no serif face would make a host that waits
+	// for one ask for it again and again.
 	Path      string
 	SerifPath string
 }
@@ -119,16 +128,23 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 	// cache, a copy the reading view never draws from — its glyphs come from the
 	// set below.
 	_ = ui.RegisterFont(uiSans, UIFont)
-	uiFontReady = true
+	uiFontReady.Store(true)
 	faces := []render.FontFace{
 		{Family: familySans, Weight: 400, Data: uiSans},
 		{Family: familySans, Weight: 400, Data: sans},
 		{Family: familySerif, Weight: 400, Data: serifBook},
 	}
-	if serifPath != "" && serifPath != sansPath {
+	if serifPath != "" {
+		// A serif file the system has but cannot hand over is left out rather
+		// than failing the book: the serif choice then reads in the sans one,
+		// which is the same fallback as a system without a serif face.
 		if serif, err := os.ReadFile(serifPath); err == nil {
-			faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: serif})
 			f.SerifPath = serifPath
+			// The same file for both choices is one face in the set: a second
+			// parsed copy of it is exactly what a system CJK face cannot afford.
+			if serifPath != sansPath {
+				faces = append(faces, render.FontFace{Family: familySerif, Weight: 400, Data: serif})
+			}
 		}
 	}
 	// A serif run falls back to the sans faces without a face of the sans font
@@ -138,6 +154,9 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 	// system CJK face cannot afford.
 	fs, err := render.NewFontSet(faces...)
 	if err != nil {
+		if f.SerifPath != "" && f.SerifPath != sansPath {
+			return nil, fmt.Errorf("reader: load fonts %s and %s: %w", sansPath, f.SerifPath, err)
+		}
 		return nil, fmt.Errorf("reader: load font %s: %w", sansPath, err)
 	}
 	f.Set = fs
@@ -146,7 +165,9 @@ func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
 
 // HasSerif reports whether the set holds the system's serif face. Without one
 // the serif choice is set in the sans face and the bundled XCharter, which has
-// no CJK: a reader who picked the serif face has the set made again with it.
+// no CJK: a reader who picked the serif face has the set made again with it. A
+// serif file that names the sans file counts as the serif face too — that file
+// is in the set — so a host waiting for one does not ask for it forever.
 func (f *Fonts) HasSerif() bool { return f != nil && f.SerifPath != "" }
 
 // Family is the layout family name for a face choice. The serif family always

@@ -12,6 +12,7 @@ import (
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/locales"
 	"github.com/laix/layx/render"
+	"github.com/laix/layx/render/paint"
 )
 
 // The reading page can be turned or scrolled. Scrolling builds the layout with
@@ -800,7 +801,7 @@ func (a *app) scrollLocation(x, y float32) (render.Location, bool) {
 		return render.Location{}, false
 	}
 	m := a.layout.Margins()
-	return a.layout.HitTest(x-m.Left, a.scrollY+(y-scrollInset))
+	return a.layout.HitTest(paint.Point{X: x - m.Left, Y: a.scrollY + (y - scrollInset)})
 }
 
 // scrollSelectAll selects the lines the column is showing, the scroll-mode
@@ -811,8 +812,11 @@ func (a *app) scrollSelectAll() {
 	}
 	v := a.layout.Viewport()
 	m := a.layout.Margins()
-	from, ok1 := a.layout.HitTest(1, a.scrollY+1)
-	to, ok2 := a.layout.HitTest(v.Width-m.Left-m.Right-1, a.scrollY+a.scrollViewport()-1)
+	from, ok1 := a.layout.HitTest(paint.Point{X: 1, Y: a.scrollY + 1})
+	to, ok2 := a.layout.HitTest(paint.Point{
+		X: v.Width - m.Left - m.Right - 1,
+		Y: a.scrollY + a.scrollViewport() - 1,
+	})
 	if !ok1 || !ok2 {
 		return
 	}

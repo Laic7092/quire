@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
@@ -32,7 +33,10 @@ const (
 // window and how a page turns. Everything but the paper theme lives here,
 // because the theme is a package-level palette the document is built against.
 type Options struct {
-	// FontSize is the reading size in CSS pixels.
+	// FontSize is the reading size in CSS pixels. It is also the size the
+	// document has to be built at: the converter bakes absolute sizes into the
+	// document's own styles, so a layout cannot restyle a document built at
+	// another size (see BuildLayout).
 	FontSize float32
 	// LineHeight is the line box, as a multiple of the font size.
 	LineHeight float32
@@ -88,11 +92,19 @@ const (
 
 // Normalized returns o with every value inside its limits and a face the
 // settings know.
+//
+// A size that is not a number — a slider or a state file that lost a digit, or
+// a value that never arrived — takes the default it stands in for: every
+// comparison against NaN is false, so a NaN would slip through every limit
+// below and reach the layout, where it would place no line and ask for a new
+// layout on every frame, since NaN is not even equal to itself.
 func (o Options) Normalized() Options {
+	o.FontSize = defaultNaN(o.FontSize, DefaultFontSize)
 	if o.FontSize == 0 {
 		o.FontSize = DefaultFontSize
 	}
 	o.FontSize = clamp(o.FontSize, MinFontSize, MaxFontSize)
+	o.LineHeight = defaultNaN(o.LineHeight, 1.18)
 	if o.LineHeight == 0 {
 		o.LineHeight = 1.18
 	}
@@ -100,6 +112,7 @@ func (o Options) Normalized() Options {
 	if o.Font != FontSans {
 		o.Font = FontSerif
 	}
+	o.Margin = defaultNaN(o.Margin, Margin)
 	if o.Margin == 0 {
 		o.Margin = Margin
 	}
@@ -129,6 +142,11 @@ func Margins() paint.Insets { return DefaultOptions().Margins() }
 // Margins is the page inset for the options. The sides follow the reader's
 // margin setting; the head and foot keep Books' own proportions, so the page's
 // measure grows with the window rather than its type drifting down the page.
+//
+// In scroll mode the engine takes the sides into the column and leaves the head
+// and foot to the viewport: its content coordinates start at the top of the
+// flow, so a host that scrolls insets its viewport by PageTop and PageBottom
+// itself (the reader's column does, in scrollInset).
 func (o Options) Margins() paint.Insets {
 	m := o.Normalized().Margin
 	return paint.Insets{Top: PageTop, Right: m, Bottom: PageBottom, Left: m}
@@ -137,6 +155,13 @@ func (o Options) Margins() paint.Insets {
 // BuildLayout lays out a whole document at width×height DIPs with the reading
 // options given. The caller runs it off the UI thread: it shapes every line of
 // the book.
+//
+// doc must have been built at opts.FontSize (book.Book.DocumentSized) — the
+// reading size. The converter resolves the book's CSS into absolute sizes, so
+// this request cannot restyle a document made at another size: the pages are
+// set at the size the document was built with. Changing the reading size means
+// building the document again, which is what the reader does when the setting
+// moves.
 func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width, height float32, opts Options) (*render.Layout, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("reader: nil document")
@@ -192,8 +217,8 @@ func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.La
 		return render.LayoutOptions{}, fmt.Errorf("reader: nil fonts")
 	}
 	opts = opts.Normalized()
-	if width < 3*opts.Margin || height < 3*opts.Margin {
-		return render.LayoutOptions{}, fmt.Errorf("reader: viewport %.0fx%.0f is too small", width, height)
+	if err := checkViewport(width, height, opts); err != nil {
+		return render.LayoutOptions{}, err
 	}
 	palette := Current()
 	align := render.AlignLeft
@@ -223,6 +248,32 @@ func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.La
 		Mode:       mode,
 		TileHeight: tileHeight,
 	}, nil
+}
+
+// checkViewport reports whether a viewport can hold a page laid out with opts.
+// A size that is not a number, or an infinite one, is refused rather than passed
+// on: the engine would build pages of that size and hand the painter
+// coordinates no pixel can be cut to, which is a blank window and a page map
+// nothing can be found in. It says so instead.
+func checkViewport(width, height float32, opts Options) error {
+	if !finite(width) || !finite(height) {
+		return fmt.Errorf("reader: viewport %gx%g is not a finite size", width, height)
+	}
+	if width < 3*opts.Margin || height < 3*opts.Margin {
+		return fmt.Errorf("reader: viewport %.0fx%.0f is too small", width, height)
+	}
+	return nil
+}
+
+// finite reports whether v is a real number: neither NaN nor an infinity.
+func finite(v float32) bool { return !math.IsNaN(float64(v)) && !math.IsInf(float64(v), 0) }
+
+// defaultNaN is v, or def when v is not a number.
+func defaultNaN(v, def float32) float32 {
+	if math.IsNaN(float64(v)) {
+		return def
+	}
+	return v
 }
 
 func clamp(v, lo, hi float32) float32 {

@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -136,5 +137,90 @@ func TestScrollOptionsAreSameOnlyWhenEqual(t *testing.T) {
 	}
 	if !scroll.Same(scroll.Normalized()) {
 		t.Error("normalized scroll options are not the same as themselves")
+	}
+}
+
+// The scrolling column and the paged spread are the same type on the same paper:
+// the column keeps the page's head inset (scrollInset in the reader is PageTop,
+// and layx's scroll flow starts at content y=0), and from there it sets the same
+// lines in the same places as page 0 does inside its own margins. The two part
+// only where a page ends, which is the one thing the modes are for.
+func TestScrollColumnStartsLikePageZero(t *testing.T) {
+	bk, err := book.Open("../book/testdata/samples/aq-zhuan.epub")
+	if err != nil {
+		t.Skipf("no sample book: %v", err)
+	}
+	path, err := FindFont("")
+	if err != nil {
+		t.Skipf("no font: %v", err)
+	}
+	fonts, err := OpenFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _, err := bk.Build(DefaultFontSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const w, h float32 = 420, 600
+	opts := Options{FontSize: DefaultFontSize}
+	paged, err := BuildLayout(context.Background(), doc, fonts, w, h, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Scroll = true
+	scroll, err := BuildLayout(context.Background(), doc, fonts, w, h, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := paged.Page(0)
+	if page == nil || scroll.TileCount() == 0 {
+		t.Fatal("the two modes did not both lay the book out")
+	}
+	// The surface is reused, so each shot is copied before the next draw. A page's
+	// display list carries the head inset; a tile's does not — the column is drawn
+	// PageTop lower (the reader's scrollInset) — so the two line up with the page
+	// shifted down by PageTop.
+	pr := NewPageRenderer()
+	pageShot := pr.DrawPage(page, 1)
+	pagePix := append([]byte(nil), pageShot.Pix...)
+	stride := pageShot.Stride
+	tilePix := append([]byte(nil), pr.DrawTile(scroll.Tile(0), 1).Pix...)
+
+	paper := Current().Paper
+	ink := func(pix []byte, y int) bool {
+		row := pix[y*stride : (y+1)*stride]
+		for i := 0; i+3 < len(row); i += 4 {
+			if row[i] != paper.R || row[i+1] != paper.G || row[i+2] != paper.B {
+				return true
+			}
+		}
+		return false
+	}
+	lastInk := -1
+	for y := int(PageTop); y < int(h); y++ {
+		if ink(pagePix, y) {
+			lastInk = y
+		}
+	}
+	if lastInk < 0 {
+		t.Fatal("page 0 carries no ink")
+	}
+	for y := int(PageTop); y <= lastInk; y++ {
+		if !bytes.Equal(pagePix[y*stride:(y+1)*stride], tilePix[(y-PageTop)*stride:(y-PageTop+1)*stride]) {
+			t.Fatalf("page 0 row %d does not match the column's row %d: the two modes set the text differently",
+				y, y-PageTop)
+		}
+	}
+	// Past the page's last line the column carries on with the lines the page
+	// broke away from.
+	below := 0
+	for y := lastInk - PageTop + 1; y < int(h); y++ {
+		if ink(tilePix, y) {
+			below++
+		}
+	}
+	if below == 0 && lastInk < int(h-PageBottom)-1 {
+		t.Error("the column stops where the page does, so the two modes are one")
 	}
 }

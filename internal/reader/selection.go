@@ -24,8 +24,12 @@ type Selection struct {
 // point.
 func (s *Selection) Empty() bool { return s == nil || !s.live }
 
-// Start begins a selection at loc, replacing the previous one.
+// Start begins a selection at loc, replacing the previous one. A nil selection
+// has nowhere to keep it and starts nothing.
 func (s *Selection) Start(loc render.Location) {
+	if s == nil {
+		return
+	}
 	s.anchor, s.focus, s.live = loc, loc, true
 }
 
@@ -39,15 +43,28 @@ func (s *Selection) Extend(loc render.Location) {
 
 // Clear drops the selection.
 func (s *Selection) Clear() {
+	if s == nil {
+		return
+	}
 	s.anchor, s.focus, s.live = render.Location{}, render.Location{}, false
 }
 
 // Focus returns the location the drag last reached.
-func (s *Selection) Focus() render.Location { return s.focus }
+func (s *Selection) Focus() render.Location {
+	if s == nil {
+		return render.Location{}
+	}
+	return s.focus
+}
 
 // Anchor returns the location the press began at, which is one end of the
 // selection; Focus is the other.
-func (s *Selection) Anchor() render.Location { return s.anchor }
+func (s *Selection) Anchor() render.Location {
+	if s == nil {
+		return render.Location{}
+	}
+	return s.anchor
+}
 
 // Ends returns both ends of the selection: the anchor the drag began at and
 // the focus it reached, in gesture order. Either order works for Layout and
@@ -73,6 +90,10 @@ func (s *Selection) Quads(l *render.Layout) []render.SelectionQuad {
 // from. Chapters are joined by a blank line. An endpoint on an image or an
 // empty block resolves to where it sits, so dragging over one keeps the text
 // around it.
+//
+// The endpoints are clamped to the document: a location kept from another book,
+// or one whose chapter outlived a rebuild, reads the chapters that are there
+// rather than walking a chapter count that is not.
 func (s *Selection) Text(doc *render.Document) string {
 	if s == nil || !s.live || doc == nil {
 		return ""
@@ -80,6 +101,15 @@ func (s *Selection) Text(doc *render.Document) string {
 	from, to := s.anchor, s.focus
 	if from.Chapter > to.Chapter {
 		from, to = to, from
+	}
+	if from.Chapter < 0 {
+		from.Chapter = 0
+	}
+	if n := doc.ChapterCount(); to.Chapter >= n {
+		to.Chapter = n - 1
+	}
+	if from.Chapter > to.Chapter {
+		return ""
 	}
 	var parts []string
 	for ci := from.Chapter; ci <= to.Chapter; ci++ {
@@ -125,29 +155,67 @@ type chapterText struct {
 	nodes []textNode
 }
 
-// chapterTextOf concatenates the chapter's text nodes in reading order, as the
-// search index does, and records where every node falls in it.
+// chapterTextOf concatenates the chapter's text nodes in reading order and
+// records where every node falls in it. Block boundaries become one newline, so
+// copying two paragraphs keeps them apart instead of gluing the last word of one
+// to the first of the next; chapters themselves are joined by the caller.
 func chapterTextOf(ch render.Chapter) chapterText {
 	var ct chapterText
 	var b strings.Builder
-	stack := []render.NodeID{ch.Root}
+	// A block that held text asks for a newline before the next text run. The
+	// break is deferred so an empty block and the end of the chapter do not
+	// leave a trailing newline.
+	pending := false
+	write := func(s string) {
+		if s == "" {
+			return
+		}
+		if pending {
+			b.WriteByte('\n')
+			ct.runes++
+			pending = false
+		}
+		b.WriteString(s)
+		ct.runes += utf8.RuneCountInString(s)
+	}
+	type frame struct {
+		node  render.NodeID
+		exit  bool
+		start int
+	}
+	stack := []frame{{node: ch.Root}}
 	for len(stack) > 0 {
-		id := stack[len(stack)-1]
+		f := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if id < 0 || int(id) >= len(ch.Nodes) {
+		if f.node < 0 || int(f.node) >= len(ch.Nodes) {
 			continue
 		}
-		n := &ch.Nodes[id]
-		if n.Kind == render.NodeText {
+		n := &ch.Nodes[f.node]
+		if f.exit {
+			if n.Kind == render.NodeBlock && ct.runes > f.start {
+				pending = true
+			}
+			continue
+		}
+		switch n.Kind {
+		case render.NodeText:
 			r := utf8.RuneCountInString(n.Text)
-			ct.nodes = append(ct.nodes, textNode{node: id, start: ct.runes, end: ct.runes + r})
-			b.WriteString(n.Text)
-			ct.runes += r
-			continue
-		}
-		ct.nodes = append(ct.nodes, textNode{node: id, start: ct.runes, end: ct.runes})
-		for i := len(n.Children) - 1; i >= 0; i-- {
-			stack = append(stack, n.Children[i])
+			write(n.Text)
+			ct.nodes = append(ct.nodes, textNode{node: f.node, start: ct.runes - r, end: ct.runes})
+		case render.NodeBreak:
+			// A forced break is one newline and satisfies a pending block break.
+			pending = false
+			b.WriteByte('\n')
+			ct.runes++
+			ct.nodes = append(ct.nodes, textNode{node: f.node, start: ct.runes, end: ct.runes})
+		default:
+			ct.nodes = append(ct.nodes, textNode{node: f.node, start: ct.runes, end: ct.runes})
+			if n.Kind == render.NodeBlock {
+				stack = append(stack, frame{node: f.node, exit: true, start: ct.runes})
+			}
+			for i := len(n.Children) - 1; i >= 0; i-- {
+				stack = append(stack, frame{node: n.Children[i]})
+			}
 		}
 	}
 	ct.text = b.String()

@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -288,4 +289,108 @@ func inkOver(img *image.RGBA, paper paint.Color) int64 {
 		sum += int64(paper.R) - int64(img.Pix[i])
 	}
 	return sum
+}
+
+// imagePage builds a one-image page, the shape a cover or a figure has.
+func imagePage(t *testing.T, fonts *Fonts) (*render.Page, render.ImageID, []byte) {
+	t.Helper()
+	var pic bytes.Buffer
+	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for x := 0; x < 4; x++ {
+		for y := 0; y < 4; y++ {
+			src.Set(x, y, color.RGBA{R: 0xff, A: 0xff})
+		}
+	}
+	if err := png.Encode(&pic, src); err != nil {
+		t.Fatal(err)
+	}
+	const imageID = render.ImageID(11)
+	builder := render.NewDocumentBuilder().
+		SetStyles([]render.Style{{}, {FontFamily: "book", FontSize: 18}}).
+		SetMetadata(render.Metadata{Reflowable: true})
+	if err := builder.AddChapter(render.Chapter{
+		ID:   "c",
+		Root: 0,
+		Nodes: []render.Node{
+			{Kind: render.NodeBlock, Style: 1, Children: []render.NodeID{1}},
+			{Kind: render.NodeImage, Image: imageID, Width: 40, Height: 40},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := BuildLayout(context.Background(), doc, fonts, 200, 200, Options{FontSize: 18})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := layout.Page(0)
+	if page == nil {
+		t.Fatal("no page 0")
+	}
+	return page, imageID, pic.Bytes()
+}
+
+func hasRedPixels(img *image.RGBA) bool {
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		if img.Pix[i] > 0xc0 && img.Pix[i+1] < 0x40 && img.Pix[i+2] < 0x40 {
+			return true
+		}
+	}
+	return false
+}
+
+// ClearImages drops the decoded images and the surface that held them: the next
+// draw of a page whose image is gone paints the page without it, and a
+// re-registered image is back.
+func TestPageRendererClearImages(t *testing.T) {
+	_, fonts := testBookAndFont(t)
+	page, imageID, data := imagePage(t, fonts)
+	pr := NewPageRenderer()
+	if !pr.SetImage(imageID, data) {
+		t.Fatal("the PNG did not decode")
+	}
+	if !hasRedPixels(pr.DrawPage(page, 1)) {
+		t.Fatal("the registered image never reached the page")
+	}
+	pr.ClearImages()
+	if hasRedPixels(pr.DrawPage(page, 1)) {
+		t.Error("an image survived ClearImages")
+	}
+	if !pr.SetImage(imageID, data) {
+		t.Fatal("the PNG did not decode again")
+	}
+	if !hasRedPixels(pr.DrawPage(page, 1)) {
+		t.Error("a re-registered image never reached the page")
+	}
+	// A later page of another book reuses the ids: nothing of the first is left.
+	pr.ClearImages()
+	if pr.SetImage(imageID, []byte("not an image")) {
+		t.Error("garbage decoded after ClearImages")
+	}
+	if hasRedPixels(pr.DrawPage(page, 1)) {
+		t.Error("garbage kept the old image")
+	}
+}
+
+// The device ratio an export asks for is a real number: one that is not, or one
+// that is not positive, is drawn at 1 rather than as an empty image.
+func TestPageRendererScaleIsSane(t *testing.T) {
+	_, fonts := testBookAndFont(t)
+	page, _, _ := imagePage(t, fonts)
+	pr := NewPageRenderer()
+	one := pr.DrawPage(page, 1)
+	if one.Bounds().Dx() == 0 || one.Bounds().Dy() == 0 {
+		t.Fatal("the 1x page is empty")
+	}
+	for name, scale := range map[string]float32{
+		"zero": 0, "negative": -2, "NaN": float32(math.NaN()), "infinite": float32(math.Inf(1)),
+	} {
+		img := pr.DrawPage(page, scale)
+		if got, want := img.Bounds(), one.Bounds(); got != want {
+			t.Errorf("a %s scale drew %v, want the 1x page %v", name, got, want)
+		}
+	}
 }
