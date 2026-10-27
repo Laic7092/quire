@@ -22,13 +22,16 @@ func (a *app) linkAt(x, y float32) (render.Link, bool) {
 	if a.scrolling() {
 		return a.scrollLinkAt(x, y)
 	}
-	index := a.page
+	l, index := a.sheetPlan(a.page)
+	if l == nil {
+		return render.Link{}, false
+	}
 	width := a.boxW / float32(a.pagesOnSheet())
-	if a.pagesOnSheet() == 2 && x >= a.boxW/2 && index+1 < a.layout.PageCount() {
+	if a.pagesOnSheet() == 2 && x >= a.boxW/2 && index+1 < l.PageCount() {
 		index++
 		x -= width
 	}
-	page := a.layout.Page(index)
+	page := l.Page(index)
 	if page == nil {
 		return render.Link{}, false
 	}
@@ -44,12 +47,12 @@ func (a *app) linkAt(x, y float32) (render.Link, bool) {
 // rectangles are tile-local, so the point moves into the tile that holds it:
 // the same arithmetic drawScroll uses to place the tile on screen.
 func (a *app) scrollLinkAt(x, y float32) (render.Link, bool) {
-	if a.tileH <= 0 {
+	column, y0, tileH := a.columnPlan()
+	if column == nil || tileH <= 0 {
 		return render.Link{}, false
 	}
-	y0 := clampf(a.scrollY, 0, a.maxScroll())
 	content := y0 + (y - scrollInset)
-	tile := a.layout.Tile(int(content / a.tileH))
+	tile := column.Tile(int(content / tileH))
 	if tile == nil {
 		return render.Link{}, false
 	}

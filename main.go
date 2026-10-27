@@ -104,10 +104,29 @@ type app struct {
 	layW, layH float32
 	loading    bool
 	job        int
-	failed     bool
-	failW      float32
-	failH      float32
-	failSize   float32
+	// layCancel stops the layout in flight when a newer one supersedes it: its
+	// result names a sheet or a document the reader has already left, and
+	// letting it run to the end costs a whole book of shaping for nothing.
+	layCancel context.CancelFunc
+	// sheetPending marks a resize waiting for the sheet to hold still, sheetAt is
+	// when it last moved, and sheetPreviewed that this resize has already taken
+	// the reader's place and cancelled the job it supersedes: the chapters on
+	// screen are laid out at every size (buildPreview), and the whole book only
+	// once the sheet has been still for resizeDelay (settleSheet).
+	sheetPending   bool
+	sheetPreviewed bool
+	sheetAt        time.Time
+	// preview is the chapters on screen laid out at the sheet being dragged to,
+	// and previewW and previewH the size they were laid out at. It is drawn
+	// until the whole book lands, and it is never named by a page number: see
+	// preview.go.
+	preview  *render.Layout
+	previewW float32
+	previewH float32
+	failed   bool
+	failW    float32
+	failH    float32
+	failSize float32
 
 	body ui.Handle
 	area ui.Handle
@@ -132,6 +151,10 @@ type app struct {
 	// noteQuads holds the rectangles of every note's passage on this layout,
 	// flattened: the draw callback fills them and never computes them.
 	noteQuads []render.SelectionQuad
+	// marksOn is the layout hitQuads, noteQuads and selQuads were built for. A
+	// frame that draws another one — the published layout while a preview holds
+	// another place — paints no veils rather than these in the wrong place.
+	marksOn *render.Layout
 
 	// pan is the side panels and the persisted state; it is nil only in tests
 	// that build the reader alone. st is the same store, for the close flush.
@@ -483,7 +506,12 @@ func (a *app) setOptions(o reader.Options) {
 	}
 	a.opts = o
 	a.optsAt = time.Now()
+	a.sheetSettled()
 	a.failed = false
+	// A resize preview laid out for the settings before these names pages that
+	// are about to be built again, and a job in flight shapes the same.
+	a.dropPreview()
+	a.cancelLayout()
 	// A face the session has not read in yet — the serif one, after reading sans
 	// — is opened now, off the UI thread, so the layout that follows is set in it.
 	if prev.Font != o.Font {
@@ -531,6 +559,44 @@ func (a *app) settle(c *ui.Context) {
 	}
 	a.optsAt = time.Time{}
 	a.layW, a.layH = 0, 0
+}
+
+// settleSheet asks for the frame that lays the whole book out again, once the
+// window has stopped being dragged. The chapters on screen are already laid out
+// at the new sheet (buildPreview), so the reader sees the reflow at once; this is
+// the rest of the book, off the UI thread.
+func (a *app) settleSheet(c *ui.Context) {
+	if a.sheetAt.IsZero() {
+		return
+	}
+	if wait := time.Until(a.sheetAt.Add(resizeDelay)); wait > 0 {
+		c.After(wait)
+	}
+}
+
+// sheetSettled forgets a resize that has been answered: either the sheet came
+// back to the size the published layout already has, or the whole book has been
+// asked for at the size the window stopped at.
+func (a *app) sheetSettled() {
+	a.sheetPending = false
+	a.sheetPreviewed = false
+	a.sheetAt = time.Time{}
+}
+
+// cancelLayout stops the layout in flight, if one is running. Its result names
+// a sheet, a setting or a book the reader has already left, so it is dropped
+// rather than published; cancelling is what stops it from shaping a whole book
+// for nothing and from holding the machine the frames are drawn on.
+func (a *app) cancelLayout() {
+	if a.layCancel == nil {
+		return
+	}
+	a.layCancel()
+	a.layCancel = nil
+	// The goroutine's publish finds itself superseded, and a cancelled job's
+	// context error is not the reader's failure to report.
+	a.job++
+	a.loading = false
 }
 
 // setTurn changes how a page gives way to the next. It is not a layout
@@ -661,6 +727,8 @@ func (a *app) ensureLayout(w, h float32) {
 	// The page keeps its margins whatever the window does: below three of them
 	// there is no line to lay out, so say so instead of failing the job.
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
+		a.cancelLayout()
+		a.dropPreview()
 		a.loading = false
 		a.failed, a.failW, a.failH, a.failSize = true, w, h, opts.FontSize
 		a.status = locales.LayoutTooNarrow()
@@ -684,7 +752,33 @@ func (a *app) ensureLayout(w, h float32) {
 	}
 	if !a.loading && a.layout != nil && sw == a.layW && sh == a.layH &&
 		a.docAt == opts.FontSize && opts.Same(a.layOpts) && paper == a.layPaper {
+		// The published layout is this very sheet, and its pages are on screen:
+		// a preview built for a size the window has since come back to is stale.
+		a.dropPreview()
+		a.sheetSettled()
 		return
+	}
+
+	// The sheet moved. While the window is being dragged the chapters on screen
+	// are laid out for it (buildPreview) and drawn at once, and the whole book
+	// waits for the sheet to hold still: a width change re-breaks every chapter
+	// of the book, so a job per pixel of a drag would put the layout the reader
+	// is waiting for behind dozens of stale ones — and the garbage of all of
+	// them is what the frame loop was paying for.
+	//
+	// A tester owns no window and no job (a.win is nil), so it takes no resize
+	// either: the preview and the waiting are driven from here, below.
+	if a.win != nil {
+		switch a.resizeStep(sw, sh) {
+		case resizePreview:
+			if !a.sheetPreviewed {
+				a.sheetPreviewed = true
+				a.beginResize(sw, sh, opts)
+			} else if a.preview == nil || sw != a.previewW || sh != a.previewH {
+				a.buildPreview(sw, sh, opts)
+			}
+			return
+		}
 	}
 
 	if a.repaper(sw, sh, opts) {
@@ -694,6 +788,8 @@ func (a *app) ensureLayout(w, h float32) {
 		return
 	}
 
+	// Anything still running names a sheet or a document this job supersedes.
+	a.cancelLayout()
 	a.job++
 	job := a.job
 	a.loading = true
@@ -710,7 +806,11 @@ func (a *app) ensureLayout(w, h float32) {
 	prev := a.layout
 	doc, docAt := a.doc, a.docAt
 	size := opts.FontSize
-	ctx := context.Background()
+	// The job is cancellable: a newer size, setting or book makes its result
+	// pointless, and stopping it hands the machine back to the frame loop and to
+	// the job that matters.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.layCancel = cancel
 	// The index belongs to a document; a rebuild replaces both. Reading the
 	// field here is the UI thread's job, the goroutine only sees the copy.
 	var prevIndex *search.Index
@@ -739,8 +839,10 @@ func (a *app) ensureLayout(w, h float32) {
 					if job != a.job {
 						return
 					}
+					a.layCancel = nil
 					a.loading = false
 					a.failed, a.failW, a.failH, a.failSize = true, w, h, size
+					a.dropPreview()
 					a.status = locales.LayoutFailed(err.Error())
 				})
 				return
@@ -777,10 +879,12 @@ func (a *app) ensureLayout(w, h float32) {
 					perfSpan(time.Since(jobAt)))
 				return
 			}
+			a.layCancel = nil
 			a.loading = false
 			if err != nil {
 				a.failed, a.failW, a.failH, a.failSize = true, w, h, size
 				a.status = locales.LayoutFailed(err.Error())
+				a.dropPreview()
 				perf.event("laying out failed after %s: %v", perfSpan(time.Since(jobAt)), err)
 				return
 			}
@@ -790,6 +894,9 @@ func (a *app) ensureLayout(w, h float32) {
 					a.paint.SetImage(id, data)
 				}
 			}
+			// The whole book is here: the chapters the preview laid out are part
+			// of it now, at the size every page is numbered for.
+			a.dropPreview()
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
 			a.layScroll = opts.Scroll
@@ -1041,6 +1148,8 @@ func (a *app) reloadFonts() {
 			// The pages on screen were set in the face before this one, and the
 			// painter holds their images: the book is built and laid out again.
 			a.paint = reader.NewUIPainter(nil, fonts)
+			a.cancelLayout()
+			a.dropPreview()
 			a.doc = nil
 			a.layW, a.layH = 0, 0
 			// A setting that moved while the faces loaded asks for them again.
@@ -1101,8 +1210,7 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 			a.paint = reader.NewUIPainter(nil, fonts)
 			a.doc = nil
 		}
-		a.job++ // drop any layout still in flight
-		a.loading = false
+		a.cancelLayout() // drop any layout still in flight
 		a.failed = false
 		a.book = b
 		a.cover = b.Cover
@@ -1113,8 +1221,10 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		a.doc = nil
 		a.docAt = 0
 		a.layout = nil
+		a.preview = nil
 		a.page = 0
 		a.layW, a.layH = 0, 0
+		a.sheetSettled()
 		// The sheet, the box and the page area are all of this book's reading
 		// view: none of them is measured yet, and the layout of the new book
 		// waits for the first frame to measure them rather than reusing a

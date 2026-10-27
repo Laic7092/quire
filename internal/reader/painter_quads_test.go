@@ -114,6 +114,80 @@ func TestFillQuadsLandsOnThePage(t *testing.T) {
 	}
 }
 
+// The selection rectangles cover the type they name. The sheet paints the page
+// first and the marks over it, so a rectangle derived from the layout's line
+// boxes has to hold the rows of ink the page put there: a rectangle that is
+// off by the ascent leaves the tops of the glyphs bare and paints the leading
+// under them instead.
+func TestQuadsCoverTheType(t *testing.T) {
+	_, page, quads := selectionQuads(t)
+	size := page.Size()
+	w, h := int(size.Width), int(size.Height)
+	paper := Current().Paper
+	painter := NewUIPainter(nil, nil)
+	img := paintMarks(t, w, h, func(p *ui.Painter) {
+		painter.DrawPage(p, page, ui.Rect{W: size.Width, H: size.Height})
+	})
+	// The page's rows of ink, one span per line of type: the leading between
+	// two lines is paper, so a span is one line's glyphs.
+	type span struct{ y0, y1 int }
+	var spans []span
+	cur := span{y0: -1}
+	for y := 0; y < h; y++ {
+		dirty := false
+		for x := 0; x < w; x++ {
+			c := img.RGBAAt(x, y)
+			if c.R != paper.R || c.G != paper.G || c.B != paper.B {
+				dirty = true
+				break
+			}
+		}
+		if dirty {
+			if cur.y0 < 0 {
+				cur = span{y0: y}
+			}
+			cur.y1 = y
+			continue
+		}
+		if cur.y0 >= 0 {
+			spans = append(spans, cur)
+			cur = span{y0: -1}
+		}
+	}
+	if cur.y0 >= 0 {
+		spans = append(spans, cur)
+	}
+	if len(spans) == 0 {
+		t.Fatal("the page painted no type")
+	}
+
+	// A span that overlaps a rectangle is one of the lines that rectangle
+	// names: all of it has to be inside, and every rectangle has to name one.
+	const slop = 2
+	covered := make([]bool, len(quads))
+	for _, s := range spans {
+		for i, q := range quads {
+			if q.Page != 0 || q.Rect.Empty() {
+				continue
+			}
+			top, bottom := int(q.Rect.Y), int(q.Rect.Y+q.Rect.Height)
+			if s.y1 < top || s.y0 > bottom {
+				continue
+			}
+			if s.y0 < top-slop || s.y1 > bottom+slop {
+				t.Errorf("type rows %d..%d are not inside rect y %d..%d", s.y0, s.y1, top, bottom)
+				continue
+			}
+			covered[i] = true
+		}
+	}
+	for i, q := range quads {
+		if q.Page == 0 && !q.Rect.Empty() && !covered[i] {
+			t.Errorf("rect %+v covers no type", q.Rect)
+		}
+	}
+}
+
 // The scroll path takes content coordinates and the column's own scroll: a
 // rectangle lands on its line of the column as it is shown, and nothing of it
 // paints outside the viewport.

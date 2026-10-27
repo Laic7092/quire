@@ -55,14 +55,15 @@ func (a *app) wireNoteActions() {
 // place is skipped: half a passage marked would be worse than none.
 func (a *app) refreshNoteMarks() {
 	a.noteQuads = a.noteQuads[:0]
-	if a.layout == nil || a.pan == nil {
+	l := a.showing()
+	if l == nil || a.pan == nil {
 		return
 	}
 	for _, e := range a.pan.Notes.Entries {
 		if !e.HasLoc {
 			continue
 		}
-		a.noteQuads = append(a.noteQuads, a.layout.Selection(e.From, e.To)...)
+		a.noteQuads = append(a.noteQuads, l.Selection(e.From, e.To)...)
 	}
 }
 

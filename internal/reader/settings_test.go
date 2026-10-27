@@ -210,3 +210,107 @@ func TestReadingSizeComesFromTheDocument(t *testing.T) {
 		}
 	}
 }
+
+// chaptersBook is a document with enough chapters for a range to leave some of
+// them out, and the fonts it is set in.
+func chaptersBook(t *testing.T, chapters int) (*render.Document, *Fonts) {
+	t.Helper()
+	b := &book.Book{Title: "chapters"}
+	for i := 1; i <= chapters; i++ {
+		var body strings.Builder
+		body.WriteString("<h1>Chapter " + strings.Repeat("x", i%7) + "</h1>")
+		for j := 0; j < 4; j++ {
+			body.WriteString("<p>The quick brown fox jumps over the lazy dog, again and again, " +
+				"until the line wraps several times on a narrow page.</p>")
+		}
+		b.Chapters = append(b.Chapters, book.Chapter{
+			Title: "chapter", XHTML: []byte("<html><body>" + body.String() + "</body></html>"),
+		})
+	}
+	doc, err := b.DocumentSized(18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := FindFont("")
+	if err != nil {
+		t.Skipf("no font available: %v", err)
+	}
+	fonts, err := OpenFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc, fonts
+}
+
+// RelayoutRange lays out the chapters a resize preview shows and nothing else:
+// page numbers start at the range, the rest of the book resolves nowhere, and a
+// whole-book relayout asked for afterwards still covers the whole book.
+func TestRelayoutRangeCoversTheChaptersItNames(t *testing.T) {
+	doc, fonts := chaptersBook(t, 20)
+	if doc.ChapterCount() != 20 {
+		t.Fatalf("document has %d chapters, want 20", doc.ChapterCount())
+	}
+	opts := Options{FontSize: 18}
+	full, err := BuildLayout(context.Background(), doc, fonts, 420, 560, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := full.PageOf(render.Location{Chapter: 10}); !ok {
+		t.Fatal("the whole book has no page for chapter 10")
+	}
+
+	const first, last = 9, 12
+	part, err := RelayoutRange(context.Background(), full, fonts, 460, 560, opts, first, last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if part.PageCount() == 0 {
+		t.Fatal("the range laid out no pages")
+	}
+	// Page numbers are the range's own: the first page is the first chapter named.
+	if loc, ok := part.LocationOfPage(0); !ok || loc.Chapter != first {
+		t.Fatalf("page 0 of the range starts at %+v, want chapter %d", loc, first)
+	}
+	for chapter := 0; chapter < doc.ChapterCount(); chapter++ {
+		loc := render.Location{Chapter: chapter}
+		page, ok := part.PageOf(loc)
+		if inRange := chapter >= first && chapter < last; inRange {
+			if !ok || page < 0 || page >= part.PageCount() {
+				t.Errorf("chapter %d resolves to page %d of the range, want a page of it", chapter, page)
+			}
+			continue
+		}
+		if ok {
+			t.Errorf("chapter %d is outside the range [%d,%d) but resolves to page %d", chapter, first, last, page)
+		}
+	}
+	// Chained off the range, as a resize preview is off the preview before it.
+	next, err := RelayoutRange(context.Background(), part, fonts, 480, 560, opts, first+1, last+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc, ok := next.LocationOfPage(0); !ok || loc.Chapter != first+1 {
+		t.Fatalf("the chained range starts at %+v, want chapter %d", loc, first+1)
+	}
+
+	// A whole-book relayout handed a range layout comes back with the book: the
+	// range rides in the engine options and must not leak into the new request.
+	whole, err := Relayout(context.Background(), part, fonts, 420, 560, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if whole.PageCount() != full.PageCount() {
+		t.Errorf("relayout of a range covers %d pages, want the whole book's %d",
+			whole.PageCount(), full.PageCount())
+	}
+	if _, ok := whole.PageOf(render.Location{Chapter: 0}); !ok {
+		t.Error("the whole book does not resolve its first chapter")
+	}
+
+	// A range that names no chapter, or one outside the document, is a host bug.
+	for _, r := range [][2]int{{0, 0}, {5, 5}, {-1, 3}, {0, 21}} {
+		if _, err := RelayoutRange(context.Background(), full, fonts, 420, 560, opts, r[0], r[1]); err == nil {
+			t.Errorf("range [%d,%d) was accepted", r[0], r[1])
+		}
+	}
+}

@@ -194,6 +194,38 @@ func Relayout(ctx context.Context, prev *render.Layout, fonts *Fonts, width, hei
 	if err != nil {
 		return nil, err
 	}
+	// The whole document, whatever prev covered: a layout of a chapter range
+	// (RelayoutRange) carries its range in the engine's options, and a host that
+	// hands one back here asks for the book, not for that range again.
+	if n := prev.Document().ChapterCount(); n > 0 {
+		lo.Range = &render.ChapterRange{First: 0, Last: n}
+	}
+	return prev.Relayout(ctx, lo)
+}
+
+// RelayoutRange lays the chapters in [first, last) of prev's document out again
+// for the current palette and reading options: the few chapters a host can draw
+// at once, laid out while the whole book is still too much to wait for. It is
+// Relayout with a chapter range — it shapes and paginates those chapters and
+// nothing else, and page numbers start at 0 for the range.
+//
+// It shares prev's engine and its variant cache, so a host that chains one range
+// off the last — the chapters on screen at every size the window is dragged
+// through — pays for those chapters only, and the whole book's Relayout later
+// reuses what they computed.
+func RelayoutRange(ctx context.Context, prev *render.Layout, fonts *Fonts, width, height float32, opts Options, first, last int) (*render.Layout, error) {
+	if prev == nil || prev.Document() == nil {
+		return nil, fmt.Errorf("reader: nil layout")
+	}
+	if first < 0 || last <= first || last > prev.Document().ChapterCount() {
+		return nil, fmt.Errorf("reader: chapter range [%d,%d) outside the document's %d chapters",
+			first, last, prev.Document().ChapterCount())
+	}
+	lo, err := layoutOptions(fonts, width, height, opts)
+	if err != nil {
+		return nil, err
+	}
+	lo.Range = &render.ChapterRange{First: first, Last: last}
 	return prev.Relayout(ctx, lo)
 }
 

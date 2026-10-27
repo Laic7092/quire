@@ -67,7 +67,7 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		// A press is a new anchor: a click clears what was selected, because
 		// its zero-length range paints no rectangle and copies no text.
 		a.sel.Start(loc)
-		a.selQuads = a.sel.Quads(a.layout)
+		a.selQuads = a.sel.Quads(a.showing())
 		a.selCopied = 0
 		a.pressX, a.pressY = ev.X, ev.Y
 		a.selMoved = false
@@ -91,7 +91,7 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return true
 		}
 		a.sel.Extend(loc)
-		a.selQuads = a.sel.Quads(a.layout)
+		a.selQuads = a.sel.Quads(a.showing())
 		a.selCopied = 0
 		return true
 	case ui.InputPointerUp:
@@ -147,15 +147,16 @@ func (a *app) pageLocation(x, y float32) (render.Location, bool) {
 	if a.scrolling() {
 		return a.scrollLocation(x, y)
 	}
-	index := a.page
+	l, index := a.sheetPlan(a.page)
+	if l == nil {
+		return render.Location{}, false
+	}
 	width := a.boxW / float32(a.pagesOnSheet())
-	if a.pagesOnSheet() == 2 && x >= a.boxW/2 && index+1 < a.layout.PageCount() {
+	if a.pagesOnSheet() == 2 && x >= a.boxW/2 && index+1 < l.PageCount() {
 		index++
 		x -= width
-	} else if a.pagesOnSheet() == 2 {
-		x -= float32(index-a.page) * width
 	}
-	page := a.layout.Page(index)
+	page := l.Page(index)
 	if page == nil {
 		return render.Location{}, false
 	}
@@ -214,15 +215,16 @@ func (a *app) selectPage() {
 		a.scrollSelectAll()
 		return
 	}
-	pages := a.pagesFrom(a.page)
+	l, page := a.sheetPlan(a.page)
+	pages := a.pagesFrom(l, page)
 	if len(pages) == 0 {
 		return
 	}
-	first, last := a.layout.Page(pages[0]), a.layout.Page(pages[len(pages)-1])
+	first, last := l.Page(pages[0]), l.Page(pages[len(pages)-1])
 	if first == nil || last == nil {
 		return
 	}
-	v := a.layout.Viewport()
+	v := l.Viewport()
 	margin := a.opts.Margin
 	from, ok1 := first.HitTest(paint.Point{X: margin, Y: margin})
 	to, ok2 := last.HitTest(paint.Point{X: v.Width - margin, Y: v.Height - margin})
@@ -231,7 +233,7 @@ func (a *app) selectPage() {
 	}
 	a.sel.Start(from)
 	a.sel.Extend(to)
-	a.selQuads = a.sel.Quads(a.layout)
+	a.selQuads = a.sel.Quads(l)
 	a.selCopied = 0
 }
 
@@ -276,18 +278,21 @@ func searchLabel(text string) string {
 }
 
 // refreshMarks rebuilds the search hits' and the notes' rectangles for the
-// current layout. The engine shapes each range, so this runs when a layout or a
-// set of results or notes arrives, never while drawing.
+// layout the sheet draws (see showing). The engine shapes each range, so this
+// runs when a layout or a set of results or notes arrives, never while drawing:
+// a resize makes a new preview, which rebuilds them for the new geometry.
 func (a *app) refreshMarks() {
 	a.hitQuads = nil
-	if a.layout == nil || a.pan == nil || a.pan.Index == nil || a.pan.Index.Stale(a.layout.Document()) {
+	l := a.showing()
+	a.marksOn = l
+	if l == nil || a.pan == nil || a.pan.Index == nil || a.pan.Index.Stale(l.Document()) {
 		a.refreshNoteMarks()
 		return
 	}
 	hits := a.pan.Search.Hits
 	quads := make([][]render.SelectionQuad, 0, len(hits))
 	for _, h := range hits {
-		quads = append(quads, a.layout.Selection(h.Loc, h.End))
+		quads = append(quads, l.Selection(h.Loc, h.End))
 	}
 	a.hitQuads = quads
 	a.refreshNoteMarks()
@@ -295,8 +300,13 @@ func (a *app) refreshMarks() {
 
 // drawMarks paints the notes, the search hits and the selection over one page
 // of the sheet. It runs inside the box's Draw callback and only fills
-// rectangles it already has.
-func (a *app) drawMarks(p *ui.Painter, box ui.Rect, page int) {
+// rectangles it already has, for the layout they were built against: a page
+// drawn from another layout — a preview that does not hold it — gets no veils
+// rather than the right rectangles in the wrong place.
+func (a *app) drawMarks(p *ui.Painter, box ui.Rect, l *render.Layout, page int) {
+	if a.marksOn != l {
+		return
+	}
 	pal := reader.Current()
 	a.drawNoteMarks(p, box, page)
 	on := -1

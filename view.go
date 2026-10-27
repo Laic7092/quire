@@ -127,6 +127,7 @@ func (a *app) view(c *ui.Context) {
 	a.keys(c)
 	t := a.applyTheme(c)
 	a.settle(c)
+	a.settleSheet(c)
 	if a.turning != nil {
 		// The slide is on its way, or it has landed and a key still held asked
 		// for the next pages while it was under way. A turn's place is a function
@@ -1160,8 +1161,9 @@ func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
 // closeBook puts the library back in front of the reader. The reading position
 // is already in the store, so the book opens where it was left.
 func (a *app) closeBook() {
-	a.job++ // drop any layout still in flight
-	a.loading = false
+	a.cancelLayout() // drop any layout still in flight
+	a.preview = nil
+	a.sheetSettled()
 	a.failed = false
 	a.turning = nil
 	a.aaOpen = false

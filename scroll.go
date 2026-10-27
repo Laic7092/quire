@@ -716,7 +716,8 @@ func (a *app) scrollProgress() float64 {
 // It runs inside the box's Draw callback, so it only replays display lists it
 // already has.
 func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
-	if a.layout == nil || a.paint == nil || a.tileH <= 0 {
+	column, y, tileH := a.columnPlan()
+	if column == nil || a.paint == nil || tileH <= 0 {
 		return
 	}
 	view := ui.Rect{X: r.X, Y: r.Y + scrollInset, W: r.W, H: a.scrollViewport()}
@@ -735,15 +736,15 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// screen position of the flow's top edge and not the content offset: tile
 	// tops are whole pixels apart (layoutSheet), so they only share one phase if
 	// the edge they hang from does.
-	y := clampf(a.scrollY, 0, a.maxScroll())
+	y = clampf(y, 0, max(column.ContentHeight()-view.H, 0))
 	top := snapDevices(view.Y-y, p.Scale())
 	// Where the column is drawn, and at what ratio, is what says whether a glide
 	// has anything left to show (see landed). The viewport itself does not move,
 	// so this is a property of the window and of the screen.
 	a.viewTop, a.devScale = view.Y, p.Scale()
-	first := max(int(y/a.tileH)-1, 0)
-	last := int((y + view.H) / a.tileH)
-	if n := a.layout.TileCount(); last >= n {
+	first := max(int(y/tileH)-1, 0)
+	last := int((y + view.H) / tileH)
+	if n := column.TileCount(); last >= n {
 		last = n - 1
 	}
 	// Paint from the bottom up. Every tile starts with its own opaque sheet, and
@@ -752,7 +753,7 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// first lets that overhang land on top of its paper instead of being
 	// covered by it.
 	for i := last; i >= first; i-- {
-		tile := a.layout.Tile(i)
+		tile := column.Tile(i)
 		if tile == nil {
 			continue
 		}
@@ -763,7 +764,9 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.
-	a.drawScrollMarks(p, view, view.Y-top)
+	if a.marksOn == column {
+		a.drawScrollMarks(p, view, view.Y-top)
+	}
 }
 
 // snapScroll, cleared by LAYX_NO_SNAP, is the switch a reader flips to feel what
@@ -818,32 +821,34 @@ func (a *app) drawScrollMarks(p *ui.Painter, view ui.Rect, y float32) {
 // x is measured from the element's left edge, so the page margin comes off; the
 // y is below the head inset and the flow has already scrolled by scrollY.
 func (a *app) scrollLocation(x, y float32) (render.Location, bool) {
-	if a.layout == nil {
+	column, y0, _ := a.columnPlan()
+	if column == nil {
 		return render.Location{}, false
 	}
-	m := a.layout.Margins()
-	return a.layout.HitTest(paint.Point{X: x - m.Left, Y: a.scrollY + (y - scrollInset)})
+	m := column.Margins()
+	return column.HitTest(paint.Point{X: x - m.Left, Y: y0 + (y - scrollInset)})
 }
 
 // scrollSelectAll selects the lines the column is showing, the scroll-mode
 // counterpart of selecting the page.
 func (a *app) scrollSelectAll() {
-	if a.layout == nil {
+	column, y, _ := a.columnPlan()
+	if column == nil {
 		return
 	}
-	v := a.layout.Viewport()
-	m := a.layout.Margins()
-	from, ok1 := a.layout.HitTest(paint.Point{X: 1, Y: a.scrollY + 1})
-	to, ok2 := a.layout.HitTest(paint.Point{
+	v := column.Viewport()
+	m := column.Margins()
+	from, ok1 := column.HitTest(paint.Point{X: 1, Y: y + 1})
+	to, ok2 := column.HitTest(paint.Point{
 		X: v.Width - m.Left - m.Right - 1,
-		Y: a.scrollY + a.scrollViewport() - 1,
+		Y: y + a.scrollViewport() - 1,
 	})
 	if !ok1 || !ok2 {
 		return
 	}
 	a.sel.Start(from)
 	a.sel.Extend(to)
-	a.selQuads = a.sel.Quads(a.layout)
+	a.selQuads = a.sel.Quads(column)
 	a.selCopied = 0
 }
 

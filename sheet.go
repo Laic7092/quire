@@ -5,6 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/layx/render"
 )
 
 // The sheet is the paper the book is printed on. One page at a time on a narrow
@@ -100,24 +101,16 @@ func (a *app) sheetSize(w, h float32, opts reader.Options) (float32, float32) {
 	return box / float32(pages), h
 }
 
-// pageAtX maps a point across the box to the page shown under it: the left half
-// of a spread is the first page, the right half the second.
-func (a *app) pageAtX(x, w float32) int {
-	page := a.page
-	if a.pagesOnSheet() == 2 && x >= w/2 && a.layout != nil && page+1 < a.layout.PageCount() {
-		return page + 1
-	}
-	return page
-}
-
-// pagesFrom returns the page numbers drawn from start: one, or the pair of a
-// spread when the book has a second page to show.
-func (a *app) pagesFrom(start int) []int {
-	if a.layout == nil {
+// pagesFrom returns the page numbers drawn from start of l: one, or the pair of
+// a spread when the layout has a second page to show. l is the layout being
+// drawn — the resize preview while the whole book catches up, else the published
+// one — and start is a page of it (see sheetPlan).
+func (a *app) pagesFrom(l *render.Layout, start int) []int {
+	if l == nil {
 		return nil
 	}
 	pages := []int{start}
-	if a.pagesOnSheet() == 2 && start+1 < a.layout.PageCount() {
+	if a.pagesOnSheet() == 2 && start+1 < l.PageCount() {
 		pages = append(pages, start+1)
 	}
 	return pages
@@ -311,24 +304,30 @@ func (a *app) drawFade(p *ui.Painter, r ui.Rect, from, to int, e float32) {
 
 // drawPages paints the pages that start at start, shifted by dx.
 func (a *app) drawPages(p *ui.Painter, r ui.Rect, start int, dx float32) {
-	pages := a.pagesFrom(start)
+	l, from := a.sheetPlan(start)
+	pages := a.pagesFrom(l, from)
 	if len(pages) == 0 {
 		return
 	}
 	w := r.W / float32(a.pagesOnSheet())
 	for i, page := range pages {
-		// The page is drawn at the size it was laid out at, centred in its
-		// half of the sheet: while a resize is still being laid out the text
-		// sits where it was instead of spilling over the next page.
+		// The page is drawn at the size it was laid out at, centred in its half
+		// of the sheet: a layout built for another sheet — the published one
+		// while the whole book catches up, or the preview of the size being
+		// dragged to — sits at its own measure instead of spilling over the
+		// next page.
 		dw := w
-		if a.layW > 0 && a.layW < w {
-			dw = a.layW
+		pg := l.Page(page)
+		if pg != nil {
+			if size := pg.Size(); size.Width > 0 && size.Width < w {
+				dw = size.Width
+			}
 		}
 		box := ui.Rect{X: r.X + float32(i)*w + (w-dw)/2 + dx, Y: r.Y, W: dw, H: r.H}
-		if pg := a.layout.Page(page); pg != nil {
+		if pg != nil {
 			a.paint.DrawPage(p, pg, box)
 		}
-		a.drawMarks(p, box, page)
+		a.drawMarks(p, box, l, page)
 	}
 	// The spine only belongs to a spread at rest: while it slides the two pages
 	// are not a book.
