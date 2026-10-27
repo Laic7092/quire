@@ -158,13 +158,17 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, entry Entry, i int) {
 }
 
 // detailLabel is "Author · EPUB · 1.2 MB", leaving out the author when the book
-// has none.
+// has none and the format when it is unknown, so a row can never grow a
+// dangling separator.
 func detailLabel(entry Entry) string {
 	parts := make([]string, 0, 3)
 	if entry.Author != "" {
 		parts = append(parts, entry.Author)
 	}
-	parts = append(parts, strings.ToUpper(entry.Format), humanSize(entry.Size))
+	if entry.Format != "" {
+		parts = append(parts, strings.ToUpper(entry.Format))
+	}
+	parts = append(parts, humanSize(entry.Size))
 	return strings.Join(parts, " · ")
 }
 

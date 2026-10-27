@@ -2,6 +2,7 @@ package toc
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/widgets"
@@ -10,6 +11,11 @@ import (
 
 // indent is how far one level indents a row, in DIPs.
 const indent = 14
+
+// maxIndentLevels caps the indentation a row can ask for. A navigation document
+// with a pathologically deep tree would otherwise push its titles out of the
+// panel; Entry.Level keeps the real depth either way.
+const maxIndentLevels = 6
 
 // Panel draws the table of contents: one row per chapter or per navigation
 // target, indented by level, with the page the row points at and the row being
@@ -102,7 +108,7 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	disabled := !e.HasLoc && e.Page < 0
 
 	row := ui.Row(c).FillWidth().Height(30).AlignItems(ui.Center).Gap(6).Radius(6).
-		Padding(0, 8, 0, 8+float32(e.Level)*indent)
+		Padding(0, 8, 0, 8+indentOf(e))
 	switch {
 	case e.Current:
 		row.Background(t.Accent.Alpha(0.14))
@@ -133,7 +139,7 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 		if e.Group || e.Current {
 			weight = 500
 		}
-		ui.Text(c, e.Title).FontSize(12).FontWeight(weight).Grow(1).SingleLine().TextColor(text)
+		ui.Text(c, titleOf(e)).FontSize(12).FontWeight(weight).Grow(1).SingleLine().TextColor(text)
 		if e.Page >= 0 {
 			ui.Text(c, pageLabel(e)).FontSize(11).TextColor(t.TextMuted)
 		}
@@ -150,6 +156,28 @@ func (p *Panel) jump(i int) {
 		return
 	}
 	p.OnJump(e)
+}
+
+// indentOf is the left indent of a row's title, in DIPs.
+func indentOf(e Entry) float32 {
+	level := e.Level
+	if level < 0 {
+		level = 0
+	}
+	if level > maxIndentLevels {
+		level = maxIndentLevels
+	}
+	return float32(level) * indent
+}
+
+// titleOf is the text of a row. A title the book left empty still names its
+// chapter, so the row is never a blank line the reader cannot place. Any other
+// title is drawn as the book wrote it; Build does not rewrite them.
+func titleOf(e Entry) string {
+	if strings.TrimSpace(e.Title) != "" {
+		return e.Title
+	}
+	return locales.ChapterNumber(e.Chapter + 1)
 }
 
 // pageLabel is the page text of a row: the one page it starts on, or the range

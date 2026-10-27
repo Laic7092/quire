@@ -95,6 +95,11 @@ func Meta(path string) (Entry, bool) {
 		Size:     info.Size(),
 		Modified: info.ModTime(),
 	}
+	if entry.Title == "" {
+		// A file named ".epub" has an extension but no name: listing it would put
+		// a blank row on the shelf, and there is nothing to call the book.
+		return Entry{}, false
+	}
 	if format == "epub" {
 		meta, err := readEPUBMeta(path)
 		if errors.Is(err, errNotArchive) {

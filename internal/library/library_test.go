@@ -162,6 +162,10 @@ func TestScanTempDir(t *testing.T) {
 	writeFile(t, dir, "new.txt", "new book", now)
 	writeFile(t, dir, "broken.epub", "not a zip at all", now)
 	writeFile(t, dir, "notes.md", "ignored", now)
+	// A file named only by its extension has an extension and no name: it would
+	// be a blank row with nothing to open.
+	writeFile(t, dir, ".epub", "nameless", now)
+	writeFile(t, dir, ".txt", "nameless", now)
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -278,6 +282,17 @@ func TestDetailLabel(t *testing.T) {
 	entry.Size = 3 << 20
 	if got := detailLabel(entry); got != "Xun Lu · EPUB · 3.0 MB" {
 		t.Errorf("detailLabel with author %q", got)
+	}
+	// A row whose format the shelf never learned — a book remembered before the
+	// field existed, or a path with no extension — says what it knows instead of
+	// opening with a dangling separator.
+	entry.Format = ""
+	if got := detailLabel(entry); got != "Xun Lu · 3.0 MB" {
+		t.Errorf("detailLabel without format %q", got)
+	}
+	entry.Author = ""
+	if got := detailLabel(entry); got != "3.0 MB" {
+		t.Errorf("detailLabel without author or format %q", got)
 	}
 }
 

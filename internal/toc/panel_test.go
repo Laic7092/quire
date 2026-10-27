@@ -87,3 +87,36 @@ func TestPanelSelectCurrent(t *testing.T) {
 		t.Error("the current row is not drawn")
 	}
 }
+
+// A row whose book gave no title still names its chapter, and a pathologically
+// deep row indents no further than the cap so its title stays in the panel.
+func TestPanelBlankTitleAndDeepIndent(t *testing.T) {
+	if got := titleOf(Entry{Title: "  ", Chapter: 2}); got != locales.ChapterNumber(3) {
+		t.Errorf("blank title = %q, want %q", got, locales.ChapterNumber(3))
+	}
+	if got := titleOf(Entry{Title: " 第一章 ", Chapter: 0}); got != " 第一章 " {
+		t.Errorf("padded title = %q, want it left as the book wrote it", got)
+	}
+	if got := indentOf(Entry{Level: 40}); got != maxIndentLevels*indent {
+		t.Errorf("indent of level 40 = %v, want %v", got, maxIndentLevels*indent)
+	}
+	if got := indentOf(Entry{Level: -3}); got != 0 {
+		t.Errorf("indent of level -3 = %v, want 0", got)
+	}
+	if got := indentOf(Entry{Level: 2}); got != 2*indent {
+		t.Errorf("indent of level 2 = %v, want %v", got, 2*indent)
+	}
+
+	p := &Panel{Entries: []Entry{
+		{Title: "", Chapter: 0, Page: 0, Pages: 1, Level: 40},
+		{Title: "第二章", Chapter: 1, Page: 1, Pages: 1, Level: 1},
+	}, Selected: -1}
+	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 400)
+	tt.Frame()
+	if !tt.HasText(locales.ChapterNumber(1)) {
+		t.Errorf("a blank row drew no fallback title: %v", tt.Texts())
+	}
+	if !tt.HasText("第二章") {
+		t.Errorf("the deep row lost its title: %v", tt.Texts())
+	}
+}

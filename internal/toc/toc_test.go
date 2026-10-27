@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/book"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx/render"
@@ -507,5 +508,165 @@ func TestNavigationDepthNormalized(t *testing.T) {
 	// chapters the navigation document named.
 	if entries[3].Chapter != 2 || entries[3].Title != "第三章 丙" {
 		t.Errorf("unnamed chapter row = %+v", entries[3])
+	}
+}
+
+// A navigation row whose fragment the layout does not know still opens: it
+// falls back to the top of its chapter instead of being a dead row with no
+// page.
+func TestNavigationRowWithoutTargetFallsBackToChapter(t *testing.T) {
+	b, err := book.Open(writeNavEPUB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := sampleLayout(t, b)
+	// A stale fragment: the anchor is beyond anything the layout registered.
+	b.Toc = []book.TOCEntry{
+		{Title: "失效的锚点", Chapter: 0, Anchor: render.AnchorID(9999)},
+		{Title: "第二章", Chapter: 1, Anchor: 2},
+	}
+	entries := Build(b, layout, -1)
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d (%+v), want 2", len(entries), entries)
+	}
+	e := entries[0]
+	if !e.HasLoc {
+		t.Fatal("a row with an unknown anchor has no location")
+	}
+	if e.Chapter != 0 || e.Loc.Chapter != 0 {
+		t.Errorf("row loc = %+v, want chapter 0", e.Loc)
+	}
+	first, count, ok := layout.PageRange(0)
+	if !ok || count == 0 {
+		t.Fatal("chapter 0 has no page range")
+	}
+	if e.Page < first || (e.Page >= first+count) {
+		t.Errorf("row page = %d, want it inside chapter 0's range [%d, %d)", e.Page, first, first+count)
+	}
+	// The row jumps, so the panel does not draw it disabled.
+	p := &Panel{Entries: entries, Selected: -1}
+	var jumped []Entry
+	p.OnJump = func(e Entry) { jumped = append(jumped, e) }
+	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 400)
+	tt.Frame()
+	if err := tt.Click("失效的锚点"); err != nil {
+		t.Fatal(err)
+	}
+	if len(jumped) != 1 {
+		t.Errorf("the fallback row did not jump: %v", jumped)
+	}
+}
+
+// A plain text book has no navigation document, so its table of contents is one
+// row per chapter heading, with the volume headings guessed as the top level
+// and the pages of a real layout.
+func TestBuildTextBook(t *testing.T) {
+	b, err := book.Open("../book/testdata/samples/fusheng-liuji.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Toc) != 0 {
+		t.Fatalf("the text sample has %d navigation rows, want none", len(b.Toc))
+	}
+	layout := sampleLayout(t, b)
+	if len(layout.ChapterPages()) != len(b.Chapters) {
+		t.Fatalf("layout covers %d chapters, book has %d", len(layout.ChapterPages()), len(b.Chapters))
+	}
+
+	entries := BuildAt(b, layout, render.Location{Chapter: 0, Node: 0})
+	if len(entries) != len(b.Chapters) {
+		t.Fatalf("entries = %d, want %d", len(entries), len(b.Chapters))
+	}
+	total := 0
+	for i, e := range entries {
+		if e.Title != b.Chapters[i].Title {
+			t.Errorf("entry %d title = %q, want %q", i, e.Title, b.Chapters[i].Title)
+		}
+		if want := levelOf(b.Chapters[i].Title); e.Level != want {
+			t.Errorf("entry %d (%q) level = %d, want %d", i, e.Title, e.Level, want)
+		}
+		first, count, ok := layout.PageRange(i)
+		if !ok || count == 0 {
+			t.Fatalf("chapter %d has no page range", i)
+		}
+		if e.Page != first || e.Pages != count || !e.HasLoc {
+			t.Errorf("entry %d = page %d/%d hasLoc %v, want %d/%d and located",
+				i, e.Page, e.Pages, e.HasLoc, first, count)
+		}
+		total += count
+	}
+	if total != layout.PageCount() {
+		t.Errorf("chapter pages sum to %d, layout has %d", total, layout.PageCount())
+	}
+	if got := currentOf(entries); len(got) != 1 || got[0] != b.Chapters[0].Title {
+		t.Errorf("reading the first chapter marks %v", got)
+	}
+
+	// The volume heading is marked while reading inside that chapter.
+	entries = BuildAt(b, layout, render.Location{Chapter: 1, Node: 0})
+	if got := currentOf(entries); len(got) != 1 || got[0] != b.Chapters[1].Title {
+		t.Errorf("reading chapter 1 marks %v", got)
+	}
+}
+
+// scrollLayout lays the same book out as one continuous column, the reader's
+// other mode.
+func scrollLayout(t *testing.T, b *book.Book) *render.Layout {
+	t.Helper()
+	path, err := reader.FindFont("")
+	if err != nil {
+		t.Skipf("no font available, skipping layout test: %v", err)
+	}
+	fonts, err := reader.OpenFont(path)
+	if err != nil {
+		t.Skipf("cannot open font %s: %v", path, err)
+	}
+	doc, err := b.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := reader.BuildLayout(context.Background(), doc, fonts, 480, 640,
+		reader.Options{FontSize: 18, Scroll: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return layout
+}
+
+// A scrolling layout has no pages: its rows still locate, the panel draws no
+// page for them, and BuildAt marks the section the reader is in.
+func TestBuildAtScrollLayout(t *testing.T) {
+	b, err := book.Open(writeNavEPUB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := scrollLayout(t, b)
+	if layout.PageCount() != 0 {
+		t.Fatalf("scroll layout reports %d pages", layout.PageCount())
+	}
+
+	entries := Build(b, layout, -1)
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(entries))
+	}
+	for i, e := range entries {
+		if e.Page != -1 || e.Pages != 0 {
+			t.Errorf("entry %d has pages %d/%d in a scroll layout, want -1/0", i, e.Page, e.Pages)
+		}
+		if !e.HasLoc {
+			t.Errorf("entry %d (%q) has no location", i, e.Title)
+		}
+		if _, ok := PageOf(layout, e); ok {
+			t.Errorf("PageOf(entry %d) found a page in a scroll layout", i)
+		}
+	}
+
+	loc, ok := layout.Locate(entries[1].Anchor)
+	if !ok {
+		t.Fatal("the second section has no location")
+	}
+	entries = BuildAt(b, layout, loc)
+	if got := currentOf(entries); len(got) != 1 || got[0] != "第二节" {
+		t.Errorf("reading the second section marks %v", got)
 	}
 }

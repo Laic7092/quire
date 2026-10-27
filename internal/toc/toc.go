@@ -241,8 +241,11 @@ func chapterRow(b *book.Book, chapter int) row {
 	}
 }
 
-// locate resolves a row to a reading position. A chapter row whose anchor the
-// layout does not know still has the start of its content.
+// locate resolves a row to a reading position. A row whose anchor the layout
+// does not know still has the start of its chapter's content: navigation
+// documents name fragments that a conversion can drop, or that an older
+// archive spelled differently, and a row landing at the top of its chapter is
+// better than a row that cannot be opened at all.
 func locate(layout *render.Layout, r row) (render.Location, bool) {
 	if layout == nil {
 		return render.Location{}, false
@@ -250,10 +253,8 @@ func locate(layout *render.Layout, r row) (render.Location, bool) {
 	if loc, ok := layout.Locate(r.anchor); ok {
 		return loc, true
 	}
-	if !r.nav {
-		if top, ok := layout.ChapterContentTop(r.chapter); ok {
-			return layout.LocationAt(top)
-		}
+	if top, ok := layout.ChapterContentTop(r.chapter); ok {
+		return layout.LocationAt(top)
 	}
 	return render.Location{}, false
 }
