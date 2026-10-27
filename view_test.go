@@ -976,9 +976,9 @@ func TestHeldTurnWaitsForTheSlideThenFlicks(t *testing.T) {
 	}
 }
 
-// A fade turn paints both spreads in place: the one leaving whole, the one
-// arriving over it at the turn's progress, so half way through each shows
-// through the other. It moves nothing and lays nothing out.
+// A fade turn paints both spreads in place: the one leaving fading out, the one
+// arriving fading in, so half way through each shows the other through it. It
+// moves nothing and lays nothing out.
 func TestTurnFadesInPlace(t *testing.T) {
 	a := newWindow(t)
 	a.instant = false
@@ -1008,9 +1008,10 @@ func TestTurnFadesInPlace(t *testing.T) {
 	}
 	leaving := shot(from, nil)
 	arriving := shot(to, nil)
-	// A fifth of the way through is about half a fade, so both spreads show.
+	// Half way through the turn is where the two printings are on the sheet
+	// together: one fade has given way to the next.
 	mid := shot(to, &turnState{from: from, to: to, dir: 1,
-		at: at.Add(-turnDuration / 5)})
+		at: at.Add(-turnDuration / 2)})
 
 	paper := reader.Current().Paper
 	ink := func(img *image.RGBA, x, y int) int {
@@ -1037,6 +1038,34 @@ func TestTurnFadesInPlace(t *testing.T) {
 	}
 	if got := kept(arriving); got < 1000 {
 		t.Errorf("only %d of the marks of the page arriving are in place half way through", got)
+	}
+}
+
+// A fade fades out and back in: the printing leaving is gone before the turn
+// ends, the one arriving is not on the sheet before a fifth of it, and the two
+// are never both faint enough to leave the sheet looking blank.
+func TestFadeRampsOverlapWithoutBlanking(t *testing.T) {
+	if leaving, arriving := fadeAlpha(0); leaving != 1 || arriving != 0 {
+		t.Errorf("fadeAlpha(0) = (%v, %v), want the leaving printing whole", leaving, arriving)
+	}
+	if leaving, arriving := fadeAlpha(1); leaving != 0 || arriving != 1 {
+		t.Errorf("fadeAlpha(1) = (%v, %v), want the arriving printing whole", leaving, arriving)
+	}
+	prevLeaving, prevArriving := fadeAlpha(0)
+	for i := 1; i <= 100; i++ {
+		p := float32(i) / 100
+		leaving, arriving := fadeAlpha(p)
+		if leaving < 0 || leaving > 1 || arriving < 0 || arriving > 1 {
+			t.Fatalf("fadeAlpha(%v) = (%v, %v), want both in 0..1", p, leaving, arriving)
+		}
+		if leaving > prevLeaving || arriving < prevArriving {
+			t.Errorf("fadeAlpha(%v) = (%v, %v) does not carry on from (%v, %v)",
+				p, leaving, arriving, prevLeaving, prevArriving)
+		}
+		if leaving+arriving < 0.25 {
+			t.Errorf("fadeAlpha(%v) = (%v, %v): the sheet would look blank", p, leaving, arriving)
+		}
+		prevLeaving, prevArriving = leaving, arriving
 	}
 }
 

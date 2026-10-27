@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx/render"
+	"github.com/laix/layx/render/paint"
 )
 
 // The sheet is the paper the book is printed on. One page at a time on a narrow
@@ -15,6 +16,9 @@ const (
 	// turnDuration is how long a page takes to give way: short enough to feel
 	// immediate, long enough to read as motion.
 	turnDuration = 240 * time.Millisecond
+	// turnFadeDuration is how long a fade takes: shorter than a slide, because a
+	// dissolve has no motion to read, only two printings changing places.
+	turnFadeDuration = 190 * time.Millisecond
 	// turnFlickDuration is how long each turn of a held key lasts. A repeat
 	// arrives every 30 ms or so, far faster than a reading turn; keeping the
 	// short slide means the sheet can finish every one of them, so a held key
@@ -142,6 +146,19 @@ func (a *app) turnProgress() (float32, bool) {
 	return p, true
 }
 
+// easeInOut is the curve a fade follows: slow at both ends, quickest in the
+// middle, so the change is spread over the whole turn instead of being spent on
+// its first frames.
+func easeInOut(p float32) float32 {
+	if p <= 0 {
+		return 0
+	}
+	if p >= 1 {
+		return 1
+	}
+	return p * p * (3 - 2*p)
+}
+
 // easeOut is the curve a turn follows: quick off the mark, settling at the end,
 // as a page slides under a finger.
 func easeOut(p float32) float32 {
@@ -258,7 +275,9 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	e := easeOut(progress)
 	p.Clip(r, 0, func() {
 		if a.opts.Turn == reader.TurnFade {
-			a.drawFade(p, r, from, to, e)
+			// The fade has its own curve: easing it again with easeOut would
+			// spend the turn's whole change on its first frames.
+			a.drawFade(p, r, from, to, progress)
 			return
 		}
 		a.drawSlide(p, r, from, to, e)
@@ -292,14 +311,35 @@ func (a *app) drawSlide(p *ui.Painter, r ui.Rect, from, to int, e float32) {
 
 // drawFade dissolves the spread leaving into the one arriving in place: the
 // pages do not move, one printing gives way to the next as if the same sheet
-// were printed again, and only the text changes. The leaving spread is painted
-// whole; the arriving one is painted over it at the turn's progress, so half way
-// through each shows the other through it.
-func (a *app) drawFade(p *ui.Painter, r ui.Rect, from, to int, e float32) {
+// were printed again, and only the text changes.
+//
+// The sheet is printed once, opaque, and the two spreads are painted over it:
+// the one leaving fading out, the one arriving fading in, on an S curve. The two
+// ramps overlap by half the turn, so the sheet is never blank — a fade that
+// passes through the paper reads as the screen flashing, not as a page — and the
+// ink never sits at half strength on both printings for long.
+func (a *app) drawFade(p *ui.Painter, r ui.Rect, from, to int, progress float32) {
+	leaving, arriving := fadeAlpha(progress)
+	a.drawPaper(p, r)
+	a.paint.SetFade(leaving)
 	a.drawPages(p, r, from, 0)
-	a.paint.SetFade(e)
+	a.paint.SetFade(arriving)
 	defer a.paint.SetFade(1)
 	a.drawPages(p, r, to, 0)
+}
+
+// fadeAlpha is how strongly each printing shows at progress: the one leaving is
+// gone by four fifths of the turn, the one arriving starts at a fifth, and the
+// two are on the sheet together only in between.
+func fadeAlpha(progress float32) (leaving, arriving float32) {
+	progress = clampf(progress, 0, 1)
+	const out, in = 0.8, 0.2
+	return easeInOut(1 - min(progress/out, 1)), easeInOut(max((progress-in)/(1-in), 0))
+}
+
+// drawPaper prints the sheet itself, opaque, in the paper's colour.
+func (a *app) drawPaper(p *ui.Painter, r ui.Rect) {
+	a.paint.FillRect(paint.Rect{X: r.X, Y: r.Y, Width: r.W, Height: r.H}, reader.Current().Paper)
 }
 
 // drawPages paints the pages that start at start, shifted by dx.

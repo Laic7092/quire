@@ -409,6 +409,9 @@ func (a *app) startTurn(delta int, flick bool) {
 		return
 	}
 	dur := turnDuration
+	if a.opts.Turn == reader.TurnFade {
+		dur = turnFadeDuration
+	}
 	if flick {
 		dur = turnFlickDuration
 	}
