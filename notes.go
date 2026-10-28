@@ -77,3 +77,13 @@ func (a *app) drawNoteMarks(p *ui.Painter, box ui.Rect, page int) {
 	}
 	a.paint.FillQuads(p, box, page, a.noteQuads, reader.Current().Note)
 }
+
+// drawScrollNoteMarks is drawNoteMarks for a scrolling column: the quads carry
+// content coordinates, so they are cut to the viewport and moved by the column's
+// own offset, the way the hits and the selection are (see FillScrollQuads).
+func (a *app) drawScrollNoteMarks(p *ui.Painter, view ui.Rect, y float32) {
+	if len(a.noteQuads) == 0 {
+		return
+	}
+	a.paint.FillScrollQuads(p, view, a.noteQuads, reader.Current().Note, y)
+}

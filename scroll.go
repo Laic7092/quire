@@ -797,11 +797,14 @@ func roundDevices(v, scale float32) float32 {
 	return float32(math.Round(float64(v)*float64(scale))) / scale
 }
 
-// drawScrollMarks paints the search hits and the selection over the column. It
-// only fills rectangles it already has: the veils are rebuilt when the layout
-// or the results change, never while drawing.
+// drawScrollMarks paints the notes, the search hits and the selection over the
+// column. It only fills rectangles it already has: the veils are rebuilt when
+// the layout or the results change, never while drawing.
 func (a *app) drawScrollMarks(p *ui.Painter, view ui.Rect, y float32) {
 	pal := reader.Current()
+	// The notes sit under what the reader is acting on now, as they do on a
+	// page: the hits and the selection are painted over them.
+	a.drawScrollNoteMarks(p, view, y)
 	on := -1
 	if a.pan != nil {
 		on = a.pan.Search.Selected

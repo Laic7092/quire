@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx-reader/internal/appstate"
 	"github.com/laix/layx-reader/internal/reader"
 	"github.com/laix/layx-reader/locales"
 )
@@ -194,6 +195,56 @@ func TestScrollModeSelectsText(t *testing.T) {
 	}
 	if a.chapterNumber() != e.Chapter+1 {
 		t.Errorf("chapter number %d after jumping to %d", a.chapterNumber(), e.Chapter+1)
+	}
+}
+
+// A note marks its passage in the scrolling column too. The veil is a content
+// rectangle, so it is painted where the text is and travels with the column
+// rather than staying on the screen.
+func TestScrollModePaintsNoteMarks(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	r := sheetRect(t, tt)
+	x := r.X + r.W/2
+
+	tt.Press(x, r.Y+80)
+	tt.Move(x, r.Y+220)
+	tt.Release(x, r.Y+220)
+	tt.Frame()
+	if len(a.selQuads) == 0 {
+		t.Fatal("the drag selected nothing")
+	}
+	a.addNoteFromSelection()
+	if len(a.pan.Notes.Entries) != 1 {
+		t.Fatalf("%d notes after adding one", len(a.pan.Notes.Entries))
+	}
+	a.pan.Show(appstate.SidebarNone)
+	tt.Frame()
+	if len(a.noteQuads) == 0 {
+		t.Fatal("the note has no rectangles")
+	}
+
+	// A point inside the first passage rectangle, in the sheet's own terms.
+	q := a.noteQuads[0]
+	px := r.X + q.Content.X + q.Content.Width/2
+	py := r.Y + scrollInset + q.Content.Y - a.scrollY + q.Content.Height/2
+	marked := tt.Image().RGBAAt(int(px), int(py))
+	// The same frame without the veil: the pixel is the paper, or the ink of the
+	// line under it, so the note is what painted there.
+	noteQuads := a.noteQuads
+	a.noteQuads = nil
+	tt.Frame()
+	if plain := tt.Image().RGBAAt(int(px), int(py)); plain == marked {
+		t.Errorf("the note paints nothing at (%d, %d): %v", int(px), int(py), marked)
+	}
+
+	// The veil follows the text: after a scroll it is over the same passage at
+	// the passage's new place, with the same colour it had before.
+	a.noteQuads = noteQuads
+	a.scrollByNow(60)
+	tt.Frame()
+	py = r.Y + scrollInset + q.Content.Y - a.scrollY + q.Content.Height/2
+	if got := tt.Image().RGBAAt(int(px), int(py)); got != marked {
+		t.Errorf("the note does not follow the column: %v where it stands, want %v", got, marked)
 	}
 }
 
