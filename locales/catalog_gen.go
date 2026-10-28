@@ -118,20 +118,6 @@ func (msgs Messages) MenuOpen() string {
 	return Catalog.Format(msgs.locale, "menuOpen", nil)
 }
 
-// MenuNewWindow says "New Window"
-// in the language the app shows.
-//
-// The File menu item that opens another reader window on the library.
-func MenuNewWindow() string { return In(i18n.Locale()).MenuNewWindow() }
-
-// MenuNewWindow says "New Window"
-// in the language of msgs.
-//
-// The File menu item that opens another reader window on the library.
-func (msgs Messages) MenuNewWindow() string {
-	return Catalog.Format(msgs.locale, "menuNewWindow", nil)
-}
-
 // MenuCopySelection says "Copy Selected Text"
 // in the language the app shows.
 //
@@ -1638,6 +1624,22 @@ func ReaderEmptyHint() string { return In(i18n.Locale()).ReaderEmptyHint() }
 // The reader's message while no book is open.
 func (msgs Messages) ReaderEmptyHint() string {
 	return Catalog.Format(msgs.locale, "readerEmptyHint", nil)
+}
+
+// OpeningBook says "Opening…"
+// in the language the app shows.
+//
+// The book window's message while the file is being read, before its first
+// page.
+func OpeningBook() string { return In(i18n.Locale()).OpeningBook() }
+
+// OpeningBook says "Opening…"
+// in the language of msgs.
+//
+// The book window's message while the file is being read, before its first
+// page.
+func (msgs Messages) OpeningBook() string {
+	return Catalog.Format(msgs.locale, "openingBook", nil)
 }
 
 // PageLabel says "Book page"

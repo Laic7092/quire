@@ -36,10 +36,6 @@
   "@menuOpen": {
     "description": "The File menu item and the library's buttons that open a book."
   },
-  "menuNewWindow": "New Window",
-  "@menuNewWindow": {
-    "description": "The File menu item that opens another reader window on the library."
-  },
   "menuCopySelection": "Copy Selected Text",
   "@menuCopySelection": {
     "description": "The Edit menu item that copies the text selected on the page."
@@ -597,6 +593,10 @@
   "readerEmptyHint": "Choose Open… to read an EPUB or TXT",
   "@readerEmptyHint": {
     "description": "The reader's message while no book is open."
+  },
+  "openingBook": "Opening…",
+  "@openingBook": {
+    "description": "The book window's message while the file is being read, before its first page."
   },
   "pageLabel": "Book page",
   "@pageLabel": {

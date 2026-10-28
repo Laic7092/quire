@@ -32,12 +32,17 @@ type desk struct {
 	// reading position are the app's, not a window's.
 	st   *store.Store
 	wins []*app
+	// library is the one window that shows the shelf. Books are read in
+	// windows of their own, so it stays behind them; it is made again from a
+	// book when the reader closed it.
+	library *app
 	// ready is set once MyGo is up and a window can be made. Open-file events
 	// that arrive during launch wait in pendingOpen until then.
 	ready       bool
 	pendingOpen string
-	// seq numbers the windows, so each one remembers its own frame and size in
-	// the app's state (WindowOptions.StateKey) instead of fighting over one.
+	// seq numbers the book windows, so each one remembers its own frame and
+	// size in the app's state (WindowOptions.StateKey) instead of fighting over
+	// one. The library always keeps the first key.
 	seq int
 
 	// The settings a window starts from, and the ones that belong to the whole
@@ -116,13 +121,12 @@ func (d *desk) focused() *app {
 	return nil
 }
 
-// homeWindow is an open window still showing the library. A book asked for by
-// the Finder or the Dock lands there rather than opening yet another window.
-func (d *desk) homeWindow() *app {
-	for _, a := range d.wins {
-		if a.live() && !a.hasBook() {
-			return a
-		}
+// emptyBookWindow is a book window showing neither a book nor an opening: a
+// file it could not read, or one whose book never arrived. The next book opened
+// from its menu belongs there rather than in yet another window.
+func (d *desk) emptyBookWindow() *app {
+	if a := d.focused(); a != nil && a.bookWindow && a.book == nil && a.opening == "" {
+		return a
 	}
 	return nil
 }
@@ -139,19 +143,17 @@ func (d *desk) holding(path string) *app {
 	return nil
 }
 
-// nextStateKey names the window being made. The first window keeps the key the
-// reader's frame has always had; the others get one apiece, so each remembers
-// where it was put without overwriting its neighbour.
-func (d *desk) nextStateKey() string {
+// nextBookKey names the book window being made. The library owns "main"; each
+// book gets a key of its own, so the windows remember where they were put
+// without overwriting each other.
+func (d *desk) nextBookKey() string {
 	d.seq++
-	if d.seq == 1 {
-		return "main"
-	}
-	return fmt.Sprintf("window-%d", d.seq)
+	return fmt.Sprintf("book-%d", d.seq)
 }
 
 // newApp builds one window's reader from the desk's shared state. It is added
-// with add and given its window with openWindow.
+// with add, given its window, and marked as the library or as a book window by
+// the caller.
 func (d *desk) newApp() *app {
 	a := &app{
 		desk:        d,
@@ -198,11 +200,31 @@ func (d *desk) newApp() *app {
 	return a
 }
 
-// openWindow makes a reader and its window, showing the library until a book
-// is opened in it. It is the way a second book, or a second shelf, is opened.
-func (d *desk) openWindow() *app {
+// openReader makes the window for one book. It is the only way a book is
+// opened: the shelf, the File menu, the Finder and Open Recent all come here,
+// and the library window stays where it is.
+func (d *desk) openReader(path string) *app {
+	a := d.newApp()
+	a.bookWindow = true
+	d.add(a)
+	a.newWindow()
+	a.openHere(path)
+	return a
+}
+
+// showLibrary brings the library window forward, making it when the reader
+// closed it. The app's own window is the shelf; a book is read in its own.
+func (d *desk) showLibrary() *app {
+	if d.library != nil && d.library.live() {
+		d.library.focusWindow()
+		return d.library
+	}
+	if !d.ready {
+		return nil
+	}
 	a := d.newApp()
 	d.add(a)
+	d.library = a
 	a.newWindow()
 	if a.pan != nil {
 		a.pan.ReloadShelf()
@@ -210,17 +232,13 @@ func (d *desk) openWindow() *app {
 	return a
 }
 
-// focusOrOpen returns the reader's window, making one when none is left. The
-// app stays in the Dock on macOS, so a menu command can run with no window at
-// all.
+// focusOrOpen returns a window, making the library when none is left. The app
+// stays in the Dock on macOS, so a menu command can run with no window at all.
 func (d *desk) focusOrOpen() *app {
 	if a := d.focused(); a != nil {
 		return a
 	}
-	if !d.ready {
-		return nil
-	}
-	return d.openWindow()
+	return d.showLibrary()
 }
 
 // menuApp is the window a menu-bar command acts on: the one the reader is
@@ -305,8 +323,9 @@ func (d *desk) setTheme(t reader.Theme, from *app) {
 	}
 }
 
-// hasBook reports whether this window is reading or opening a book: a second
-// book asked for here belongs in another window.
+// hasBook reports whether this window is reading or opening a book, as opposed
+// to showing the library. It is what keeps a book from being opened over the
+// shelf and what keeps the shelf from being reloaded under a page.
 func (a *app) hasBook() bool {
 	return a.book != nil || a.loading || a.opening != ""
 }
@@ -325,9 +344,9 @@ func (a *app) focusWindow() {
 	a.win.Focus()
 }
 
-// openPath opens a book in this window, or in a new one when this window is
-// already reading: the shelf, the File menu and the Finder all come through
-// here. The parsing happens off the UI thread (see openAsync).
+// openPath opens a book in its own window: the shelf, the File menu and the
+// Finder all come through here. The parsing happens off the UI thread (see
+// openAsync).
 func (a *app) openPath(path string) {
 	if path == "" {
 		return
@@ -337,7 +356,7 @@ func (a *app) openPath(path string) {
 		a.openHere(path)
 		return
 	}
-	a.desk.openPath(a, path)
+	a.desk.openPath(path)
 }
 
 // openHere starts reading path in this window. It is what the desk calls once
@@ -360,6 +379,9 @@ func (a *app) openHere(path string) {
 		return
 	}
 	a.opening = path
+	// An error from the book before this one is not about this one.
+	a.status = ""
+	a.failed = false
 	// The faces a book is set in are read with it, the first time a book is
 	// read: a shelf alone never pays for the system's CJK face, which costs
 	// tens of megabytes once parsed. The serif file is only read for a book set
@@ -372,9 +394,10 @@ func (a *app) openHere(path string) {
 	go a.openAsync(win, path, a.fonts, face, load)
 }
 
-// openPath opens a book asked for by the shelf or a menu command of from, in
-// that window when it is not reading yet, and in a new window when it is.
-func (d *desk) openPath(from *app, path string) {
+// openPath opens a book in a window of its own, whatever window asked for it.
+// The library is the app's shelf, not a place to read; a book already open is
+// brought forward rather than opened twice.
+func (d *desk) openPath(path string) {
 	if path == "" {
 		return
 	}
@@ -385,22 +408,20 @@ func (d *desk) openPath(from *app, path string) {
 		d.pendingOpen = path
 		return
 	}
-	// The same file asked for twice is one window: bring the one that has it
-	// forward instead of opening a second copy.
 	if a := d.holding(path); a != nil {
 		a.focusWindow()
 		return
 	}
-	target := from
-	if target == nil || target.hasBook() || !target.live() {
-		target = d.openWindow()
+	if a := d.emptyBookWindow(); a != nil {
+		a.openHere(path)
+		return
 	}
-	target.openHere(path)
+	d.openReader(path)
 }
 
 // openExternal opens a book the system handed the app — a Finder double-click,
-// Open Recent, a second launch — in the window the reader is looking at when it
-// is still the library, and in a new window otherwise.
+// Open Recent, a second launch — in a window of its own. The library window is
+// left alone, as it is for a book picked from its shelf.
 func (d *desk) openExternal(path string) {
 	if path == "" {
 		return
@@ -416,24 +437,20 @@ func (d *desk) openExternal(path string) {
 		a.focusWindow()
 		return
 	}
-	target := d.focused()
-	if target == nil || target.hasBook() {
-		if home := d.homeWindow(); home != nil {
-			target = home
-		} else {
-			target = d.openWindow()
-		}
+	if a := d.emptyBookWindow(); a != nil {
+		a.openHere(path)
+		return
 	}
-	target.openHere(path)
+	d.openReader(path)
 }
 
-// newWindow makes this reader's window and keeps a.win pointing at it. On
-// macOS the app keeps running when a window closes, so a new reader gets a new
-// window rather than reopening this one.
+// newWindow makes this reader's window and keeps a.win pointing at it. A book
+// window's key belongs to that book; the library keeps the first key, so its
+// frame comes back when it is made again.
 func (a *app) newWindow() {
 	key := "main"
-	if a.desk != nil {
-		key = a.desk.nextStateKey()
+	if a.desk != nil && a.bookWindow {
+		key = a.desk.nextBookKey()
 	}
 	win := mygo.NewWindow(windowOptions(a.view, key))
 	a.win = win
@@ -452,6 +469,9 @@ func (a *app) newWindow() {
 		}
 		if a.desk != nil {
 			a.desk.remove(a)
+			if a.desk.library == a {
+				a.desk.library = nil
+			}
 		}
 	})
 	win.OnFocus(func() {

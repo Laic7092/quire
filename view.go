@@ -1,7 +1,6 @@
 package main
 
 import (
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -164,6 +163,12 @@ func (a *app) view(c *ui.Context) {
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		if a.book == nil {
+			if a.bookWindow {
+				// A book window opens on the paper its book will be printed on,
+				// rather than flashing the library while the file is parsed.
+				a.openingView(c, t)
+				return
+			}
 			a.library(c, t)
 			return
 		}
@@ -179,6 +184,35 @@ func (a *app) view(c *ui.Context) {
 	// The question that comes before a book leaves the shelf lies over whatever
 	// the window shows, so it is built beside the page rather than inside it.
 	a.removeDialog(c, t)
+}
+
+// openingView is a book window before its book has arrived: the paper it will
+// be printed on, and either a spinner or the reason it stayed empty. It keeps
+// the reading bar's room for the system's buttons and drags the window, as the
+// reader's own bar does, so a book that cannot be read can still be moved and
+// closed.
+func (a *app) openingView(c *ui.Context, t *ui.Theme) {
+	bar := c.TitleBar()
+	ui.Column(c).Fill().Background(paper()).Children(func() {
+		ui.Row(c).FillWidth().Height(max(headerHeight, bar.Height)).
+			Padding(0, 8+bar.Right, 0, 8+bar.Left).DragWindow()
+		ui.Column(c).Grow(1).Center().Padding(32).Gap(10).Children(func() {
+			if a.opening != "" {
+				ui.Spinner(c).Size(18, 18)
+			}
+			message := a.status
+			if message == "" {
+				message = locales.OpeningBook()
+			}
+			colour := t.TextMuted
+			if a.opening == "" && a.status != "" {
+				// The file could not be read: say so, and stay open for the
+				// reader to close or try another book.
+				colour = t.Danger
+			}
+			ui.Text(c, message).TextColor(colour).TextAlign(ui.Center).MaxWidth(320)
+		})
+	})
 }
 
 // keys installs the window's shortcuts. They are declared before the widgets
@@ -198,6 +232,9 @@ func (a *app) keys(c *ui.Context) {
 	}
 	if c.Shortcut(0, ui.KeyEscape) {
 		switch {
+		case a.bookWindow && a.book == nil:
+			// A book window with no book yet has nothing to close but itself.
+			a.leaveBook()
 		case a.aaOpen:
 			a.aaOpen = false
 		case a.showCover:
@@ -209,30 +246,19 @@ func (a *app) keys(c *ui.Context) {
 		case a.libSearch:
 			a.libSearch = false
 			a.libQuery = ""
-		default:
-			// Nothing left to close: the way back to the library, as Books has
-			// it.
-			a.closeBook()
+		case a.bookWindow || a.desk == nil:
+			// Nothing left to close: the way back to the library. A book
+			// window closes; the library window has nothing to leave.
+			a.leaveBook()
 		}
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyO) {
 		a.chooseFile()
 	}
-	// The File menu carries the new-window command on macOS; the platforms
-	// without a menu bar get the key here. It asks for the window on the next
-	// main-loop turn rather than making one in the middle of a build.
-	if runtime.GOOS != "darwin" && c.Shortcut(ui.Cmd, ui.KeyN) && a.desk != nil && a.desk.ready && a.win != nil {
-		d := a.desk
-		a.win.Update(func() {
-			if d.ready {
-				d.openWindow()
-			}
-		})
-	}
 	if a.book == nil {
 		// The library's own search: ⌘F opens the field, as its row in the
-		// source list does.
-		if c.Shortcut(ui.Cmd, ui.KeyF) {
+		// source list does. A book window is not the library.
+		if !a.bookWindow && c.Shortcut(ui.Cmd, ui.KeyF) {
 			a.libSearch = true
 		}
 		return
@@ -1348,7 +1374,7 @@ func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
 	if strip.Hovered() {
 		strip.Background(t.SurfaceHover)
 	}
-	strip.OnClick(a.closeBook)
+	strip.OnClick(a.leaveBook)
 	strip.Children(func() {
 		if !strip.Hovered() {
 			return
@@ -1405,6 +1431,32 @@ func (a *app) closeBook() {
 		// again from the store rather than from the list this window remembers.
 		a.desk.refreshShelves(nil)
 	}
+}
+
+// leaveBook is the reader's way back to the library. A book window belongs to
+// its book, so it closes; the library window behind it comes forward, and is
+// made again when the reader had closed it. A reader built by hand, as the
+// tests make, simply clears its book.
+//
+// Closing and making windows is asked for on the next main-loop turn: this is
+// reached from a key press and a click during a build, and a window is not
+// destroyed or made under the frame that is still drawing it.
+func (a *app) leaveBook() {
+	if a.desk == nil {
+		a.closeBook()
+		return
+	}
+	if a.win == nil {
+		a.closeBook()
+		a.desk.showLibrary()
+		return
+	}
+	win := a.win
+	win.Update(func() {
+		a.closeBook()
+		win.Close()
+		a.desk.showLibrary()
+	})
 }
 
 // toggleSidebar hides or shows the library's source list. The reader floats its

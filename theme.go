@@ -58,7 +58,12 @@ func (a *app) paperTheme(dark bool) reader.Theme {
 // change: see syncWindowAppearance.
 func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 	base := *c.Theme()
-	follow := a.book == nil || a.themeSys || a.theme == ""
+	// A window is either the library or a book. The library is chrome and keeps
+	// the system's own appearance; a book window is the page, even before its
+	// book has arrived, so it opens on the paper rather than on the library's
+	// desk.
+	reading := a.book != nil || a.bookWindow
+	follow := !reading || a.themeSys || a.theme == ""
 	paper := a.paperTheme(base.Dark)
 	// The window's own controls are the system's, and they sit on this bar: let
 	// them take its appearance rather than the desktop's.
@@ -70,11 +75,11 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		paper = a.paperTheme(base.Dark)
 	}
 	pal := reader.ForTheme(paper)
-	if a.book == nil {
+	if !reading {
 		pal = systemChrome(base.Dark)
 	}
 	a.chrome = pal
-	key := skinKey{paper: paper, dark: base.Dark, accent: base.Accent, font: base.FontSize, library: a.book == nil}
+	key := skinKey{paper: paper, dark: base.Dark, accent: base.Accent, font: base.FontSize, library: !reading}
 	if !a.skinSet || key != a.skinKey {
 		a.skin = readerTheme(base, a.chrome)
 		a.skinSet = true

@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // Each window is its own reader: a page turned, a font size changed or a book
@@ -61,13 +63,16 @@ func TestAPaperChangeTurnsEveryWindow(t *testing.T) {
 	}
 }
 
-// Every window gets its own frame in the app's state, so moving one does not
-// move the others on the next launch.
-func TestEachWindowRemembersItsOwnFrame(t *testing.T) {
+// Every book window gets its own frame in the app's state, so moving one does
+// not move the others on the next launch, and none of them takes the library's
+// key.
+func TestEachBookWindowRemembersItsOwnFrame(t *testing.T) {
 	d := &desk{}
-	first, second, third := d.nextStateKey(), d.nextStateKey(), d.nextStateKey()
-	if first != "main" {
-		t.Errorf("the first window's state key is %q, want %q", first, "main")
+	first, second, third := d.nextBookKey(), d.nextBookKey(), d.nextBookKey()
+	for _, key := range []string{first, second, third} {
+		if key == "main" {
+			t.Errorf("a book window took the library's state key: %q", key)
+		}
 	}
 	if first == second || second == third || first == third {
 		t.Errorf("windows share a state key: %q, %q, %q", first, second, third)
@@ -122,22 +127,21 @@ func TestAWindowMadeLaterCanDrawWithTheSharedFaces(t *testing.T) {
 	}
 }
 
-// The desk knows which window is a library, which one has a book, and which one
-// already holds a file: that is how a second book gets a window of its own and
-// how the same file asked for twice gets one.
-func TestTheDeskFindsTheRightWindow(t *testing.T) {
+// The desk knows which window already holds a file: that is how a book asked
+// for twice comes forward instead of opening a second copy. A window without a
+// book is the library, and it is never the one a book is opened in.
+func TestTheDeskFindsTheWindowThatHoldsABook(t *testing.T) {
 	d := &desk{}
 	home := d.newApp()
 	home.win = &mygo.Window{}
 	d.add(home)
+	d.library = home
 	reading := d.newApp()
+	reading.bookWindow = true
 	reading.win = &mygo.Window{}
 	reading.book = &book.Book{}
 	d.add(reading)
 
-	if got := d.homeWindow(); got != home {
-		t.Errorf("home window = %v, want the one without a book", got)
-	}
 	if got := d.focused(); got != reading {
 		t.Errorf("focused window = %v, want the last open one", got)
 	}
@@ -149,7 +153,7 @@ func TestTheDeskFindsTheRightWindow(t *testing.T) {
 		t.Errorf("holding window = %v, want the reading one", got)
 	}
 	if home.hasBook() || !reading.hasBook() {
-		t.Errorf("hasBook: home %v, reading %v", home.hasBook(), reading.hasBook())
+		t.Errorf("hasBook: library %v, reading %v", home.hasBook(), reading.hasBook())
 	}
 
 	d.remove(reading)
@@ -158,17 +162,28 @@ func TestTheDeskFindsTheRightWindow(t *testing.T) {
 	}
 }
 
-// A book named before MyGo is up waits for the first window instead of being
-// dropped, and the desk tells a book in a window from an empty one when the
-// system hands it another file later.
-func TestAnEarlyBookWaitsForTheFirstWindow(t *testing.T) {
+// A book named before MyGo is up waits for the window instead of being
+// dropped, and a pending book is not one a window already holds.
+func TestAnEarlyBookWaitsForTheWindow(t *testing.T) {
 	d := &desk{}
-	a := d.newApp()
-	d.openPath(a, "/books/x.epub")
+	d.openPath("/books/x.epub")
 	if d.pendingOpen == "" {
 		t.Fatal("a book opened before the app was ready was dropped")
 	}
 	if d.holding(d.pendingOpen) != nil {
 		t.Error("a pending book was reported as open in a window")
+	}
+}
+
+// A book window opens on paper while its file is read, not on the library: the
+// reader asked for one book, and the shelf is another window's business.
+func TestABookWindowOpensOnPaper(t *testing.T) {
+	a := &app{bookWindow: true, opts: reader.DefaultOptions(), instant: true}
+	tt := ui.NewTester(a.view, 900, 700)
+	if !tt.HasText(locales.OpeningBook()) {
+		t.Fatalf("the empty book window does not say it is opening: %q", tt.Texts())
+	}
+	if tt.HasText(locales.SidebarLibraryHeading()) {
+		t.Errorf("a book window showed the library: %q", tt.Texts())
 	}
 }

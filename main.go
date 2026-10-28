@@ -71,6 +71,10 @@ type app struct {
 	book  *book.Book
 	doc   *render.Document
 	docAt float32 // base font size doc was built with
+	// bookWindow marks a window made to read one book. It opens on a sheet of
+	// paper while the book is parsed and never shows the library; leaving the
+	// book closes the window, and the library window behind it comes forward.
+	bookWindow bool
 	// layout is immutable once published; the draw callback only reads it.
 	layout *render.Layout
 	paint  *reader.UIPainter
@@ -601,6 +605,8 @@ func (a *app) frameScene() string {
 		return "scrolling"
 	case a.loading:
 		return "laying out"
+	case a.book == nil && a.bookWindow:
+		return "opening a book"
 	case a.book == nil:
 		return "in the library"
 	}
@@ -1430,11 +1436,6 @@ func (a *app) menuBar() *mygo.Menu {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu},
 		{Label: locales.MenuFile(), Submenu: []*mygo.MenuItem{
-			{Label: locales.MenuNewWindow(), Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
-				if a.desk != nil && a.desk.ready {
-					a.desk.openWindow()
-				}
-			}},
 			{Label: locales.MenuOpen(), Accelerator: "CmdOrCtrl+O", Click: onActive((*app).chooseFile)},
 			{Role: mygo.RoleOpenRecent},
 			mygo.Separator(),
@@ -1562,6 +1563,7 @@ func main() {
 	// the recovered state's notice, and the app's own status.
 	first := d.newApp()
 	d.add(first)
+	d.library = first
 	first.startPath = flag.Arg(0)
 	if recovered != "" {
 		first.notice = locales.StateRecovered(recovered)
