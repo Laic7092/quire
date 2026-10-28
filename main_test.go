@@ -265,19 +265,14 @@ func TestMenuBarCommands(t *testing.T) {
 
 // The Books-style shell is the window on every platform, not a macOS-only
 // arrangement: the same binary hides the system title bar whether it runs on
-// macOS, Windows or Linux, and only the buttons' side differs.
-func TestWindowHidesTheSystemTitleBarEverywhere(t *testing.T) {
+// macOS, Windows or Linux, and only the buttons' side differs. The buttons share
+// the reader's bar so their glyphs sit on the toolbar's line, which means the
+// shell takes the header's height: a 32 DIP bar would ride above it.
+func TestTheShellIsTheReaderHeaderEverywhere(t *testing.T) {
 	o := windowOptions(func(*ui.Context) {})
 	if o.TitleBarStyle != mygo.TitleBarHidden {
 		t.Errorf("TitleBarStyle = %v, want TitleBarHidden on every platform", o.TitleBarStyle)
 	}
-}
-
-// The system's window buttons share the reader's bar, so that their glyphs sit
-// on the same line as the toolbar's: Windows and Linux centre them in
-// TitleBarHeight, and a 32 DIP one would ride above the 46 DIP header.
-func TestWindowControlsCentreOnTheHeader(t *testing.T) {
-	o := windowOptions(func(*ui.Context) {})
 	if o.TitleBarHeight != headerHeight {
 		t.Errorf("TitleBarHeight = %d, want the header's %d", o.TitleBarHeight, headerHeight)
 	}

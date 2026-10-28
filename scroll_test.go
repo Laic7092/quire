@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"image"
 	"sort"
 	"testing"
@@ -606,204 +605,121 @@ func TestScrollKeyHoldsOneRate(t *testing.T) {
 	}
 }
 
-// Whatever a notch asks for, the glide ends: an ask smaller than a pixel is
-// taken at once rather than left owing, and one of a few pixels is walked out a
-// pixel a frame. A glide that could not pay what it owed would keep asking for
-// frames and drawing the same picture forever.
-func TestEveryAskLands(t *testing.T) {
-	for _, ask := range []float32{0.1, 0.3, 0.66, 0.7, 1.2, 2.4, 12, 49.5, 200} {
-		a, tt := newScrollWindow(t)
-		a.instant = false
-		tt.SetScale(1.5)
-		tt.Frame()
-		tt.Frame()
-		at := time.Now()
-		a.now = func() time.Time { return at }
-		start := a.scrollY
-		a.scrollBy(ask)
-		frames := 0
-		for frames < 500 && a.gliding() {
-			at = at.Add(7 * time.Millisecond)
-			tt.Frame()
-			frames++
-		}
-		if a.gliding() {
-			t.Errorf("an ask of %.2f DIP never landed: %.3f still owed after %d frames", ask, a.scrollGoal-a.scrollY, frames)
-			continue
-		}
-		if got, want := a.scrollY-start, ask; got != want {
-			t.Errorf("an ask of %.2f landed %.3f away from where it started", want, got)
-		}
-	}
-}
-
-// With the snapping off the glide is the same motion without the pixel floor: it
-// lands exactly where it was asked to, never passes it, and comes up to its
-// speed and leaves it again.
-func TestANotchLandWithoutSnapping(t *testing.T) {
-	old := snapScroll
-	snapScroll = false
-	t.Cleanup(func() { snapScroll = old })
-	a, _ := newScrollWindow(t)
-	if a.maxScroll() < 100 {
-		t.Skipf("the sample book only scrolls %.0f", a.maxScroll())
-	}
-	a.instant = false
-	at := time.Now()
-	a.now = func() time.Time { return at }
-	// a display that turns over every 7 ms
-	a.scrollBy(49.5)
-	prev := a.scrollY
-	var deltas []float32
-	for i := 0; i < 400 && a.gliding(); i++ {
-		at = at.Add(7 * time.Millisecond)
-		a.stepScroll()
-		if a.scrollY < prev-1e-4 {
-			t.Fatalf("the column went back from %.4f to %.4f", prev, a.scrollY)
-		}
-		if a.scrollY > 49.5+1e-4 {
-			t.Fatalf("the column passed the notch: %.4f", a.scrollY)
-		}
-		deltas = append(deltas, a.scrollY-prev)
-		prev = a.scrollY
-	}
-	if a.gliding() {
-		t.Fatalf("the notch never landed: %.4f to go", a.scrollGoal-a.scrollY)
-	}
-	if a.scrollY != 49.5 {
-		t.Errorf("landed at %.4f, want 49.5", a.scrollY)
-	}
-	// The glide comes up to its speed and then leaves it: one peak, a ramp up to
-	// it and a ramp down, so the column neither lurches out of rest nor stops
-	// dead.
-	peak := 0
-	for i, d := range deltas {
-		if d > deltas[peak] {
-			peak = i
-		}
-	}
-	for i := 1; i <= peak; i++ {
-		if deltas[i] < deltas[i-1]-1e-4 {
-			t.Fatalf("frame %d slowed to %.4f from %.4f before the peak: the glide does not come up to speed", i, deltas[i], deltas[i-1])
-		}
-	}
-	// The last frame is the landing: what is left is taken whole, so it is
-	// allowed to be the bigger of the two.
-	for i := peak + 1; i < len(deltas)-1; i++ {
-		if deltas[i] > deltas[i-1]+1e-4 {
-			t.Fatalf("frame %d sped up to %.4f from %.4f after the peak: the glide does not ease out", i, deltas[i], deltas[i-1])
-		}
-	}
-	if peak == 0 || peak == len(deltas)-1 {
-		t.Fatalf("the glide has no ramp: %v", deltas)
-	}
-}
-
-// A spin of the wheel travels as far as it was spun. Every notch joins the same
-// debt, so what a fast wheel asks for is delivered at the speed it asked for
-// instead of being cut back to what the follow could carry: ten notches in a
-// quarter of a second cover ten notches, not the three or four the column used
-// to be allowed to keep.
-func TestASpinOfTheWheelTravelsAsFarAsItWasSpun(t *testing.T) {
-	a, _ := newScrollWindow(t)
+// Every ask lands, and lands exactly: what the wheel asks for is delivered at
+// the speed it asked for instead of being cut back to what the follow could
+// carry, an ask smaller than a pixel is taken at once rather than left owing,
+// and ten notches cover ten notches. The column never goes back and never
+// passes what was asked.
+//
+// The rows measured on a display are about the frame, not the number: at 60 and
+// 144 Hz, on a 150% display, no frame of a notch may draw the picture it already
+// drew once the glide is under way. A follow's tail is a share of its distance,
+// so its last frames are under a device pixel, and a snapped column would draw
+// the same image again and then hop.
+func TestWheelAsksLandExactly(t *testing.T) {
 	const notch = 49.5
-	if a.maxScroll() < 12*notch {
-		t.Skipf("the sample book only scrolls %.0f", a.maxScroll())
+	cases := []struct {
+		name string
+		asks []float32 // one a notch, fed a frame apart
+		hz   int       // display the glide runs on; 0 is a 7 ms frame
+		snap bool
+	}{
+		{name: "a tenth of a pixel", asks: []float32{0.1}, snap: true},
+		{name: "half a pixel", asks: []float32{0.3, 0.36}, snap: true},
+		{name: "a few pixels", asks: []float32{2.4}, snap: true},
+		{name: "a long ask", asks: []float32{200}, snap: true},
+		{name: "a notch at 60Hz", asks: []float32{notch}, hz: 60, snap: true},
+		{name: "a notch at 144Hz", asks: []float32{notch}, hz: 144, snap: true},
+		{name: "a notch, no snapping", asks: []float32{notch}},
+		{name: "a spin of ten notches", asks: []float32{
+			notch, notch, notch, notch, notch, notch, notch, notch, notch, notch,
+		}, snap: true},
 	}
-	a.instant = false
-	at := time.Now()
-	a.now = func() time.Time { return at }
-	const frame = 16667 * time.Microsecond
-	for i := 0; i < 10; i++ {
-		a.scrollBy(notch)
-		// a free wheel's notches arrive faster than the display draws
-		for f := 0; f < 2; f++ {
-			at = at.Add(frame)
-			a.stepScroll()
-		}
-	}
-	for i := 0; i < 200 && a.gliding(); i++ {
-		at = at.Add(frame)
-		a.stepScroll()
-	}
-	if a.gliding() {
-		t.Fatalf("the column never settled: it owes %.1f", a.scrollGoal-a.scrollY)
-	}
-	if want := float32(10) * notch; a.scrollY != want {
-		t.Errorf("ten notches put the column at %.1f, want all of %.1f", a.scrollY, want)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := snapScroll
+			snapScroll = tc.snap
+			t.Cleanup(func() { snapScroll = old })
 
-// A glide ends on the frame its picture stops changing: the tail of a follow is
-// a share of its distance, and its last frames are under a device pixel, where a
-// snapped column draws the same image again and then hops. No frame of a notch
-// moves nothing.
-func TestANotchNeverFreezesAtTheEnd(t *testing.T) {
-	if !snapScroll {
-		t.Skip("LAYX_NO_SNAP turned the snapping off")
-	}
-	// A display of 60 Hz and one of 144 Hz: a faster display draws more of the
-	// follow's tail, and the tail is where the frames went by that moved no
-	// pixels at all.
-	for _, hz := range []time.Duration{60, 144} {
-		t.Run(fmt.Sprintf("%dHz", hz), func(t *testing.T) {
-			notchNeverFreezes(t, time.Second/hz)
+			a, tt := newScrollWindow(t)
+			tt.SetScale(1.5)
+			tt.Frame()
+			tt.Frame()
+			if !(a.devScale > 0) {
+				t.Fatalf("no frame said where the column is drawn (scale %g)", a.devScale)
+			}
+			var want float32
+			for _, ask := range tc.asks {
+				want += ask
+			}
+			if a.maxScroll() < want {
+				t.Skipf("the sample book only scrolls %.0f, wanted %.1f", a.maxScroll(), want)
+			}
+
+			a.instant = false
+			at := time.Now()
+			a.now = func() time.Time { return at }
+			frame := 7 * time.Millisecond
+			if tc.hz > 0 {
+				frame = time.Second / time.Duration(tc.hz)
+			}
+
+			start := a.scrollY
+			drawn := func() float32 { return snapDevices(a.viewTop-a.scrollY, a.devScale) }
+			// Only a notch is big enough that every frame of the glide should move
+			// the picture: a two-pixel ask is spent in under three device pixels,
+			// where some frame has to repeat by arithmetic, not by a frozen tail.
+			frames := tc.snap && want >= notch
+			prev, lastDrawn := start, drawn()
+			var moves []float32
+			moved := false
+			check := func() {
+				if a.scrollY < prev-1e-4 {
+					t.Fatalf("the column went back from %.4f to %.4f", prev, a.scrollY)
+				}
+				if a.scrollY > start+want+1e-4 {
+					t.Fatalf("the column passed what was asked: %.4f of %.4f", a.scrollY-start, want)
+				}
+				prev = a.scrollY
+				if !frames {
+					return
+				}
+				d := drawn()
+				step := d - lastDrawn
+				moves = append(moves, step)
+				lastDrawn = d
+				if step == 0 && moved {
+					t.Errorf("a frame drew the same picture again after the glide had started (%v device px a frame)", moves)
+				}
+				if step != 0 {
+					moved = true
+				}
+			}
+
+			for _, ask := range tc.asks {
+				a.scrollBy(ask)
+				at = at.Add(frame)
+				tt.Frame()
+				check()
+			}
+			for n := 0; n < 400 && a.gliding(); n++ {
+				at = at.Add(frame)
+				tt.Frame()
+				check()
+			}
+
+			if a.gliding() {
+				t.Fatalf("the column never landed: it still owes %.3f after 400 frames", a.scrollGoal-a.scrollY)
+			}
+			if got := a.scrollY - start; got != want {
+				t.Errorf("landed %.4f away from where it started, want %.4f", got, want)
+			}
+			// A notch is a motion, not a jump: it takes several frames to land
+			// and moves the picture on every one of them.
+			if frames && (!moved || len(moves) < 3) {
+				t.Errorf("a notch of %.1f drew nothing that moved in %d frames: %v", want, len(moves), moves)
+			}
 		})
-	}
-}
-
-// notchNeverFreezes glides one wheel notch a frame at the given frame interval
-// and holds every frame of it to moving the picture.
-func notchNeverFreezes(t *testing.T, frame time.Duration) {
-	t.Helper()
-	a, tt := newScrollWindow(t)
-	a.instant = false
-	tt.SetScale(1.5)
-	tt.Frame()
-	tt.Frame()
-	if !(a.devScale > 0) {
-		t.Fatalf("no frame said where the column is drawn (scale %g)", a.devScale)
-	}
-	at := time.Now()
-	a.now = func() time.Time { return at }
-	drawn := func() float32 { return snapDevices(a.viewTop-a.scrollY, a.devScale) }
-	a.scrollBy(49.5)
-	last := drawn()
-	var deltas []float32
-	for i := 0; i < 400 && a.gliding(); i++ {
-		at = at.Add(frame)
-		tt.Frame()
-		now := drawn()
-		deltas = append(deltas, now-last)
-		last = now
-	}
-	if a.gliding() {
-		t.Fatalf("the notch never landed: it owes %.1f", a.scrollGoal-a.scrollY)
-	}
-	if len(deltas) < 3 {
-		t.Fatalf("the notch was over in %d frames", len(deltas))
-	}
-	t.Logf("one notch at 150%%, a frame every %s, in device px: %v", frame, deltas)
-	// A glide starts from rest — that is what a bell is, and what a browser's
-	// notch is: its first frames cover a share of a pixel and the screen draws
-	// the picture it had. What must not happen is a frame that draws the same
-	// picture again once the glide is under way, which is the frozen tail a
-	// follow used to leave.
-	moved := false
-	for i, d := range deltas {
-		if d != 0 {
-			moved = true
-			continue
-		}
-		if moved {
-			t.Errorf("frame %d of %d drew the same picture again after the glide had started (%v device px a frame)", i, len(deltas), deltas)
-		}
-	}
-	if !moved {
-		t.Fatalf("the notch drew nothing at all: %v", deltas)
-	}
-	if a.scrollY != 49.5 {
-		t.Errorf("the column settled at %.2f, want the notch's 49.5", a.scrollY)
 	}
 }
 

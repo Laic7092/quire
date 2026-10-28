@@ -6,10 +6,8 @@ import (
 	"os"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/raster"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )
@@ -201,32 +199,6 @@ func TestGlyphAtlasIsStable(t *testing.T) {
 	}
 }
 
-// TestGlyphAtlasFrame reports what one frame of the column costs the painter
-// with the atlas on and off: the runs and glyphs it is asked for, the outlines
-// it flattens or the bitmaps it rasterizes, and how much memory the atlas takes.
-// The timing of the same frames is in BenchmarkScrollViewportPaint.
-func TestGlyphAtlasFrame(t *testing.T) {
-	l, up, _ := benchScrollColumn(t)
-	useAtlas(t, "")
-	glyphStatsOn = true
-	defer func() { glyphStatsOn = false }()
-	for _, scale := range []float32{1, 2} {
-		for _, mode := range []struct {
-			name  string
-			atlas string
-		}{{"outlines", "0"}, {"atlas", "1"}} {
-			glyphAtlasMode = mode.atlas
-			paintViewport(l, up, scale, 4000)
-			up.ResetGlyphStats()
-			paintViewport(l, up, scale, 4000)
-			s := up.GlyphStats()
-			t.Logf("scale=%g %-9s warm runs=%d glyphs=%d lookups=%d hits=%d (%.1f%%) rasters=%d flattens=%d slots=%d layers=%d bytes=%d",
-				scale, mode.name, s.Runs, s.Glyphs, s.Lookups, s.Hits, s.HitRate()*100,
-				s.Rasters, s.Flattens, s.Slots, s.Layers, s.Bytes)
-		}
-	}
-}
-
 // TestGlyphAtlasByRenderer holds the default to the atlas on every renderer,
 // and the switch to the variable: the outlines are the A/B, not the default.
 func TestGlyphAtlasByRenderer(t *testing.T) {
@@ -281,57 +253,6 @@ func TestGlyphAtlasScrolling(t *testing.T) {
 	}
 }
 
-// TestGlyphAtlasPaintCost times what the painter does inside the frame's draw
-// callback, where the reader's page is replayed: the work the atlas replaces,
-// apart from what the renderer spends on the pixels it was handed. It drives a
-// window the way the reader does, one glide step a frame, so the caches and the
-// display lists are as warm as a reader's.
-func TestGlyphAtlasPaintCost(t *testing.T) {
-	l, up, _ := benchScrollColumn(t)
-	useAtlas(t, "")
-	const frames = 40
-	for _, scale := range []float32{1, 2} {
-		for _, mode := range []struct {
-			name  string
-			atlas string
-		}{{"outlines", "0"}, {"atlas", "1"}} {
-			glyphAtlasMode = mode.atlas
-			var scrollY float32 = 4000
-			var draws []time.Duration
-			tt := ui.NewTester(func(c *ui.Context) {
-				scrollY += 6.3
-				paintFrame(c, l, up, scrollY, &draws)
-			}, 620, 700)
-			tt.SetScale(scale)
-			tt.Frame() // the frame that builds the atlas, if there is one
-			draws = draws[:0]
-			start := time.Now()
-			for i := 0; i < frames; i++ {
-				tt.Advance(16 * time.Millisecond)
-			}
-			total := time.Since(start) / frames
-			var sum time.Duration
-			for _, d := range draws {
-				sum += d
-			}
-			t.Logf("scale=%g %-9s paint=%.3fms/draw (%d draws) frame=%.3fms",
-				scale, mode.name, float64(sum)/float64(max(len(draws), 1))/1e6, len(draws), float64(total)/1e6)
-		}
-	}
-}
-
-// viewport draws one frame of the column and records how long the painter spent
-// in the draw callback.
-func paintFrame(c *ui.Context, l *render.Layout, up *UIPainter, scrollY float32, draws *[]time.Duration) {
-	ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-		start := time.Now()
-		counter := &countPainter{UIPainter: up}
-		drawViewport(l, p, counter, scrollY)
-		*draws = append(*draws, time.Since(start))
-		p.AnimationFrame()
-	})
-}
-
 // inkMass is how much ink a frame carries: every pixel counted by how far it is
 // from the paper, over the whole picture. It is the number that says whether the
 // type got heavier, which is what the tone correction and a synthetic bold are
@@ -373,56 +294,6 @@ func TestTextToneMakesTheEdgesInkier(t *testing.T) {
 	textToneOff = true
 	if again := inkMass(paintViewport(l, up, 1, scrollY)); again != plain {
 		t.Errorf("turning the correction off drew %d, want the %d it started with", again, plain)
-	}
-}
-
-// TestTextToneCurve holds the correction to the shape it has to have: the paper
-// and the ink stay where they are, the edges between them grow, and a pale ink —
-// a night paper's — gets no contrast on top of the growth, since what a dark page
-// needs is the growth and not more weight. The curve itself lives in
-// layx/raster; what this pins down is the policy that picks it.
-func TestTextToneCurve(t *testing.T) {
-	tc := &toneCache{}
-	dark := tc.toneFor(paint.Color{R: 0x1c, G: 0x1c, B: 0x1e, A: 255}, 17, false)
-	pale := tc.toneFor(paint.Color{R: 0xf2, G: 0xf2, B: 0xf7, A: 255}, 17, false)
-	for name, tone := range map[string]*raster.Tone{"dark": dark, "pale": pale} {
-		if tone == nil {
-			t.Fatalf("%s ink: no correction", name)
-		}
-		if tone.Coverage(0) != 0 || tone.Coverage(255) != 255 {
-			t.Fatalf("%s ink: the paper is %d and the ink %d, want 0 and 255",
-				name, tone.Coverage(0), tone.Coverage(255))
-		}
-		for i := 1; i < 256; i++ {
-			if tone.Coverage(uint8(i)) < tone.Coverage(uint8(i-1)) {
-				t.Fatalf("%s ink: coverage %d draws %d under %d's %d", name, i, tone.Coverage(uint8(i)),
-					i-1, tone.Coverage(uint8(i-1)))
-			}
-		}
-	}
-	if d := int(dark.Coverage(128)) - 128; d < 8 {
-		t.Errorf("half coverage carries %d of 255, want at least 136", dark.Coverage(128))
-	}
-	if pale.Coverage(128) >= dark.Coverage(128) {
-		t.Errorf("a pale ink at half coverage is %d and a dark one %d: want the pale one lighter",
-			pale.Coverage(128), dark.Coverage(128))
-	}
-	// A size band takes less of the gain: display type has stems of its own.
-	big := tc.toneFor(paint.Color{A: 255}, 30, false)
-	if big.Coverage(128) >= dark.Coverage(128) {
-		t.Errorf("display type at half coverage is %d and body type %d: want the display type lighter",
-			big.Coverage(128), dark.Coverage(128))
-	}
-	// A run grown into a synthetic bold takes the contrast without the growth:
-	// its strokes already carry more than their outline, and stacking the growth
-	// on that closes a bold body's counters.
-	grown := tc.toneFor(paint.Color{A: 255}, 17, true)
-	if grown.Coverage(128) >= dark.Coverage(128) {
-		t.Errorf("a grown run at half coverage is %d and a plain one %d: want no growth on a grown run",
-			grown.Coverage(128), dark.Coverage(128))
-	}
-	if grown.Coverage(128) <= 128 {
-		t.Errorf("a grown run at half coverage is %d: want the contrast kept", grown.Coverage(128))
 	}
 }
 

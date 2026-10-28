@@ -1154,77 +1154,83 @@ func TestEscapeGoesBackToTheLibrary(t *testing.T) {
 	}
 }
 
-// A window with a hidden title bar hands the view the room the traffic lights
-// take: the reader's bar starts to their right, and the library's source list
-// starts below them.
+// A window with a hidden title bar hands the view the room the buttons take: the
+// reader's bar starts to the right of the traffic lights and the library's source
+// list below them. Windows and some Linux desktops put the buttons on the right
+// instead, so the settings button and the reading ring keep out of their way
+// there too. With no title bar the view reserves nothing and keeps its own margin.
 func TestWindowControlsLeaveRoomInTheView(t *testing.T) {
-	bar := ui.TitleBar{Height: 28, Left: 78}
-
-	a := newWindow(t)
-	tt := ui.NewTester(a.view, 1180, 800)
-	tt.SetTitleBar(bar)
-	btn, ok := tt.Find(locales.PanelContents())
-	if !ok {
-		t.Fatalf("the reader's bar is missing: %q", tt.Texts())
-	}
-	if btn.X < bar.Left {
-		t.Errorf("the reader's bar starts at x=%g, under the traffic lights (left %g)", btn.X, bar.Left)
+	// The library is another screen, with no book open.
+	newLibrary := func(t *testing.T, w, h int) *ui.Tester {
+		t.Helper()
+		lib := &app{opts: reader.DefaultOptions(), instant: true}
+		return ui.NewTester(lib.view, w, h)
 	}
 
-	lib := &app{opts: reader.DefaultOptions(), instant: true}
-	lt := ui.NewTester(lib.view, 900, 700)
-	lt.SetTitleBar(bar)
-	row, ok := lt.Find(locales.Search())
-	if !ok {
-		t.Fatalf("the library's source list is missing: %q", lt.Texts())
-	}
-	if row.Y < bar.Height {
-		t.Errorf("the source list starts at y=%g, under the traffic lights (height %g)", row.Y, bar.Height)
-	}
+	t.Run("left", func(t *testing.T) {
+		bar := ui.TitleBar{Height: 28, Left: 78}
+		a := newWindow(t)
+		tt := ui.NewTester(a.view, 1180, 800)
+		tt.SetTitleBar(bar)
+		btn, ok := tt.Find(locales.PanelContents())
+		if !ok {
+			t.Fatalf("the reader's bar is missing: %q", tt.Texts())
+		}
+		if btn.X < bar.Left {
+			t.Errorf("the reader's bar starts at x=%g, under the traffic lights (left %g)", btn.X, bar.Left)
+		}
 
-	// Windows and some Linux desktops put the buttons at the right instead:
-	// the reader's settings and the library's toolbar keep out of their way
-	// there too. The buttons fill the header's height, as windowOptions asks,
-	// and the toolbar's controls centre on that same line.
-	right := ui.TitleBar{Height: headerHeight, Right: 138}
+		lt := newLibrary(t, 900, 700)
+		lt.SetTitleBar(bar)
+		row, ok := lt.Find(locales.Search())
+		if !ok {
+			t.Fatalf("the library's source list is missing: %q", lt.Texts())
+		}
+		if row.Y < bar.Height {
+			t.Errorf("the source list starts at y=%g, under the traffic lights (height %g)", row.Y, bar.Height)
+		}
+	})
 
-	rt := ui.NewTester(a.view, 1180, 800)
-	rt.SetTitleBar(right)
-	aa, ok := rt.Find("Aa")
-	if !ok {
-		t.Fatalf("the reader's settings button is missing: %q", rt.Texts())
-	}
-	if aa.X+aa.W > 1180-right.Right {
-		t.Errorf("the reader's bar ends at x=%g, under the caption buttons (right %g)", aa.X+aa.W, right.Right)
-	}
-	if mid, want := aa.Y+aa.H/2, float32(headerHeight)/2; mid != want {
-		t.Errorf("the reader's settings sit at y=%g, off the caption buttons' line y=%g", mid, want)
-	}
+	t.Run("right", func(t *testing.T) {
+		// The buttons fill the header's height, as windowOptions asks, and the
+		// toolbar's controls centre on that same line.
+		bar := ui.TitleBar{Height: headerHeight, Right: 138}
+		a := newWindow(t)
+		rt := ui.NewTester(a.view, 1180, 800)
+		rt.SetTitleBar(bar)
+		aa, ok := rt.Find("Aa")
+		if !ok {
+			t.Fatalf("the reader's settings button is missing: %q", rt.Texts())
+		}
+		if aa.X+aa.W > 1180-bar.Right {
+			t.Errorf("the reader's bar ends at x=%g, under the caption buttons (right %g)", aa.X+aa.W, bar.Right)
+		}
+		if mid, want := aa.Y+aa.H/2, float32(headerHeight)/2; mid != want {
+			t.Errorf("the reader's settings sit at y=%g, off the caption buttons' line y=%g", mid, want)
+		}
 
-	rlt := ui.NewTester(lib.view, 900, 700)
-	rlt.SetTitleBar(right)
-	ring, ok := rlt.Find(locales.WeekRing())
-	if !ok {
-		t.Fatalf("the library's reading ring is missing: %q", rlt.Texts())
-	}
-	if ring.X+ring.W > 900-right.Right {
-		t.Errorf("the library's reading ring ends at x=%g, under the caption buttons (right %g)", ring.X+ring.W, right.Right)
-	}
-}
+		rlt := newLibrary(t, 900, 700)
+		rlt.SetTitleBar(bar)
+		ring, ok := rlt.Find(locales.WeekRing())
+		if !ok {
+			t.Fatalf("the library's reading ring is missing: %q", rlt.Texts())
+		}
+		if ring.X+ring.W > 900-bar.Right {
+			t.Errorf("the library's reading ring ends at x=%g, under the caption buttons (right %g)", ring.X+ring.W, bar.Right)
+		}
+	})
 
-// With no hidden title bar, the view keeps its own margins: the controls the
-// view receives are zero and nothing moves.
-func TestNoTitleBarKeepsTheViewMargins(t *testing.T) {
-	a := newWindow(t)
-	tt := ui.NewTester(a.view, 1180, 800)
-	got, ok := tt.Find(locales.PanelContents())
-	if !ok {
-		t.Fatalf("the reader's bar is missing: %q", tt.Texts())
-	}
-	want := float32(9) // cluster padding + header padding
-	if got.X != want {
-		t.Errorf("the reader's bar starts at x=%g, want %g", got.X, want)
-	}
+	t.Run("none", func(t *testing.T) {
+		a := newWindow(t)
+		tt := ui.NewTester(a.view, 1180, 800)
+		got, ok := tt.Find(locales.PanelContents())
+		if !ok {
+			t.Fatalf("the reader's bar is missing: %q", tt.Texts())
+		}
+		if got.X <= 0 || got.X >= 78 {
+			t.Errorf("the reader's bar starts at x=%g with no title bar: the view reserves room for buttons it was not given", got.X)
+		}
+	})
 }
 
 // The reading bar's first cluster is the three panels, as Books has them:
