@@ -1,4 +1,4 @@
-module github.com/laix/layx-reader
+module github.com/laix/quire
 
 go 1.27.2
 

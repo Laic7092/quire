@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laix/layx-reader/internal/book"
+	"github.com/laix/quire/internal/book"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 )

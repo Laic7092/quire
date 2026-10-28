@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laix/layx-reader/internal/appstate"
-	"github.com/laix/layx-reader/internal/library"
-	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/quire/internal/appstate"
+	"github.com/laix/quire/internal/library"
+	"github.com/laix/quire/internal/store"
 )
 
 // A position marked finished counts as read even though Progress names the top

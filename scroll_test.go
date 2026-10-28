@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/appstate"
-	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/appstate"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // newScrollWindow is newWindow with a scrolling column: the sample book laid out

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/locales"
 )
 
 // TestPanelDrawsAndOpens runs the panel headless: it shows titles and

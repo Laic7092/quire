@@ -41,7 +41,7 @@ const Version = 1
 
 const (
 	// appDir is the per-user directory name under the config root.
-	appDir = "layx-reader"
+	appDir = "quire"
 	// fileName is the state file name inside appDir.
 	fileName = "state.json"
 )
@@ -162,7 +162,7 @@ type State struct {
 var ErrClosed = errors.New("store: closed")
 
 // DefaultPath returns the state file path:
-// $XDG_CONFIG_HOME/layx-reader/state.json, else ~/.config/layx-reader/state.json.
+// $XDG_CONFIG_HOME/quire/state.json, else ~/.config/quire/state.json.
 // The directory is not created; Save does that.
 func DefaultPath() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" && filepath.IsAbs(dir) {

@@ -1,4 +1,4 @@
-// layx-reader reads EPUB files with MyGo's native UI: the window is built from
+// quire reads EPUB files with MyGo's native UI: the window is built from
 // Go with package ui, page breaking and glyph positions come from the layx
 // render engine, and a paint.Painter replays layx's display list through
 // ui.Painter. There is no webview and no frontend.
@@ -19,12 +19,12 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/appstate"
-	"github.com/laix/layx-reader/internal/book"
-	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx-reader/internal/search"
-	"github.com/laix/layx-reader/internal/store"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/appstate"
+	"github.com/laix/quire/internal/book"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/internal/search"
+	"github.com/laix/quire/internal/store"
+	"github.com/laix/quire/locales"
 	"github.com/laix/layx/render"
 )
 
@@ -1117,7 +1117,7 @@ func (a *app) loadFonts(face string) (*reader.Fonts, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("layx-reader: font %s, serif %q", fonts.Path, fonts.SerifPath)
+	log.Printf("quire: font %s, serif %q", fonts.Path, fonts.SerifPath)
 	// Parsing the faces leaves the tables the layout keeps and, beside them, the
 	// copies and scratch the parse was made with. Hand that garbage back to the
 	// system now, while no page waits for it, rather than at the next collection:
@@ -1272,7 +1272,7 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 
 // appName is the reader's name: the window's title while no book is open, and
 // what the About box and the menus call it. Its messages are in the catalogs.
-const appName = "layx-reader"
+const appName = "Quire"
 
 // windowOptions are the reader's window. Every platform gets the Books-style
 // shell: no system title bar, the view runs to the top edge, and its own bars
@@ -1450,7 +1450,7 @@ func main() {
 	stateFlag := flag.String("state", "", "state file (default: the config directory)")
 	perfFlag := flag.Bool("perf", false, "write a human-readable performance log (also $LAYX_PERF)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: layx-reader [-font path] [-shelf dir] [-perf] [book.epub]\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: quire [-font path] [-shelf dir] [-perf] [book.epub]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

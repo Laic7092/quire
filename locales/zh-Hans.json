@@ -1,6 +1,6 @@
 {
   "@@locale": "zh-Hans",
-  "windowTitle": "《{title}》 — layx-reader",
+  "windowTitle": "《{title}》 — Quire",
   "openedBook": "《{title}》",
   "menuFile": "文件",
   "menuEdit": "编辑",
@@ -107,7 +107,7 @@
   "goalDaysLabel": "一周阅读",
   "goalDaysCell": "一周阅读 {count} 天",
   "goalBooksCell": "一年读完 {count} 本",
-  "shareRecordText": "layx-reader 阅读记录：今年读完 {books} 本（目标 {goal} 本），本周读了 {days} 天（目标 {goalDays} 天），已读 {total} 天，连续 {streak} 天。",
+  "shareRecordText": "Quire 阅读记录：今年读完 {books} 本（目标 {goal} 本），本周读了 {days} 天（目标 {goalDays} 天），已读 {total} 天，连续 {streak} 天。",
   "libraryEmptyLine": "打开一本 EPUB 或 TXT，它就会留在这里",
   "libraryCount": "{count} 本书",
   "layingOut": "正在排版…",
@@ -190,6 +190,6 @@
   "timeHoursAgo": "{count} 小时前",
   "timeYesterday": "昨天",
   "timeDaysAgo": "{count} 天前",
-  "mygo.appName": "layx-reader",
+  "mygo.appName": "Quire",
   "mygo.appDescription": "EPUB 与 TXT 阅读器"
 }

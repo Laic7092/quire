@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/locales"
 )
 
 // bookmarkHere bookmarks the page being read and says so in the status line.

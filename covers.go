@@ -6,8 +6,8 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/library"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/library"
+	"github.com/laix/quire/locales"
 )
 
 // coverKey identifies a decoded cover: a book re-downloaded or edited gets a new

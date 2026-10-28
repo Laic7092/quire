@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/quire/internal/store"
 )
 
 // The reading goals the home screen measures against, when the reader has not

@@ -588,7 +588,7 @@ func TestDefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join("/tmp/xdg-test", "layx-reader", "state.json"); got != want {
+	if want := filepath.Join("/tmp/xdg-test", "quire", "state.json"); got != want {
 		t.Errorf("DefaultPath with XDG_CONFIG_HOME = %q, want %q", got, want)
 	}
 
@@ -602,8 +602,8 @@ func TestDefaultPath(t *testing.T) {
 	if !filepath.IsAbs(got) {
 		t.Errorf("DefaultPath = %q, want an absolute path", got)
 	}
-	if filepath.Base(filepath.Dir(got)) != "layx-reader" {
-		t.Errorf("DefaultPath = %q, want a layx-reader directory", got)
+	if filepath.Base(filepath.Dir(got)) != "quire" {
+		t.Errorf("DefaultPath = %q, want a quire directory", got)
 	}
 }
 

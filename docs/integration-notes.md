@@ -1,6 +1,6 @@
 # 联调笔记：宿主对 layx / MyGo 的依赖与缺口
 
-layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"的代码都记在这里，作为
+quire 是 layx 的宿主探针：它把每一条"宿主不得不自己写"的代码都记在这里，作为
 上游 API 的输入。本文只保留**当前仍然成立**的结论；逐轮的历史不再保留，要查某个决定
 的来龙去脉看 git 记录。
 
@@ -45,14 +45,14 @@ layx-reader 是 layx 的宿主探针：它把每一条"宿主不得不自己写"
    显示列表时给字形 op 补行盒矩形，`Page.Draw`/`Tile.Draw` 求交后跳过。
    定位与实测见 [`scroll-performance.md`](scroll-performance.md)。
 7. **书架用的元数据。** 已解决：`epub.ReadMetadata` 只读 container.xml、OPF 和封面，
-   `layx-reader/internal/library` 不再自己解包文档。
+   `quire/internal/library` 不再自己解包文档。
 
 8. **图片链路给一份参考实现。** 位图按 `ImageID` 由宿主缓存、跨文档清空、按栏宽缩放，
    这套语义现在只在宿主里；引擎侧最好有"图片在页面里的矩形"的明确 API。
 9. **XHTML/CSS 的边界写清楚。** 哪些标签/属性会被映射、哪些被有意丢弃，应由 `render`
    或 `epub` 给出一张清单；现在宿主在自己的 README 里维护这份清单。
 10. **目录层级。** 已解决，两边都改了：`layx/epub` 的 `Book.Toc` 保留 nav/NCX 的
-   顺序、嵌套、`#fragment` 和每个目标的 `render.AnchorID`；`layx-reader/internal/toc`
+   顺序、嵌套、`#fragment` 和每个目标的 `render.AnchorID`；`quire/internal/toc`
    接上它之后一个章节可以有多行（章内小节），层级、跳转位置和“正在读”都来自真实
    数据。宿主只剩两条保险：标签太长的行（有些书的 NCX 塞的是整段正文）和只写了一个
    条目的桩目录，遇到就退回按章节建行，`levelOf` 只在这时和 TXT 上兜底。

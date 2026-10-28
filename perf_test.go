@@ -62,7 +62,7 @@ func TestPerfLogWritesWhatItPromises(t *testing.T) {
 	log := string(data)
 	t.Logf("the log the reader gets:\n%s", log)
 	for _, want := range []string{
-		"layx-reader performance log", // the header
+		"quire performance log", // the header
 		"log file  " + path,
 		"first frame: device scale",     // how the frame is drawn
 		"frames in",                     // a block

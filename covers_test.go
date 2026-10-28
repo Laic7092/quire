@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laix/layx-reader/internal/library"
+	"github.com/laix/quire/internal/library"
 )
 
 // The cover cache follows the file it was decoded from: the same book in the same

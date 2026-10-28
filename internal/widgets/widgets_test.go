@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/icons"
+	"github.com/laix/quire/internal/icons"
 )
 
 // The row fill is the one thing the shared pieces decide with numbers: a chosen

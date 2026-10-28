@@ -5,7 +5,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/quire/internal/reader"
 	"github.com/laix/layx/render/paint"
 )
 

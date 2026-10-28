@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/quire/internal/reader"
 )
 
 // The performance log answers "what does reading cost on this machine?" in a
@@ -196,7 +196,7 @@ func perfStart(o perfOptions) {
 	if f, err := os.Create(path); err != nil {
 		// A log that cannot be written is worth saying out loud, and worth
 		// keeping the session measurable: the console gets it instead.
-		log.Printf("layx-reader: performance log %s: %v (writing it to the console instead)", path, err)
+		log.Printf("quire: performance log %s: %v (writing it to the console instead)", path, err)
 		p.w = os.Stderr
 	} else {
 		p.f, p.w, p.path = f, f, path
@@ -259,7 +259,7 @@ func perfDir(statePath string) string {
 		return filepath.Dir(statePath)
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "layx-reader")
+		return filepath.Join(dir, "quire")
 	}
 	return os.TempDir()
 }
@@ -272,7 +272,7 @@ func perfFloat(name string) (float64, bool) {
 	}
 	n, err := strconv.ParseFloat(v, 64)
 	if err != nil {
-		log.Printf("layx-reader: %s=%q is not a number: ignored", name, v)
+		log.Printf("quire: %s=%q is not a number: ignored", name, v)
 		return 0, false
 	}
 	return n, true
@@ -283,7 +283,7 @@ func perfFloat(name string) (float64, bool) {
 func (p *perfLog) header(o perfOptions) {
 	rule := strings.Repeat("=", 78)
 	p.line(rule)
-	p.line(" layx-reader performance log")
+	p.line(" quire performance log")
 	p.line(strings.Repeat("-", 78))
 	p.line(" session   %s", p.sess.Format("2006-01-02 15:04:05"))
 	p.line(" platform  %s/%s, %s, %d CPUs", runtime.GOOS, runtime.GOARCH, runtime.Version(), runtime.NumCPU())

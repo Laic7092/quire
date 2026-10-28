@@ -1,4 +1,4 @@
-# layx-reader
+# Quire
 
 用 MyGo 原生 UI（`package ui`，没有 webview / TypeScript 前端）写的 EPUB / TXT 阅读器，
 分页与滚动两种模式，外观照 macOS Books 26 的阅读页摆。
@@ -7,6 +7,20 @@
 本仓库只做四件事：把书变成 `render.Document`、把 `DisplayList` 画到 `ui.Painter`、
 把窗口和面板摆出来、把状态存下来。两个 layx module 都是本地 `replace`
 （`github.com/laix/layx` 排版、`github.com/laix/layx/epub` 解析 EPUB），改上层库不用发版。
+
+## 名字与图标
+
+**Quire**：装订时对折起来的一叠纸，一帖。大开本摊开的两页，正好就是一张纸对折的样子，
+阅读器就叫这个名字。`resources/icon.py` 画的是同一件事：墨色圆角底上摊开的一帖，右页
+折角是走开的那一页，正在读的那一行用强调色。
+
+脚本是唯一的一份几何——Pillow 出 `icon.png`，同一批多边形写成 `icon.svg`（两者逐像素
+只差 ~1/255），外加 `icons/` 里 16…512 与 `icon.ico`、`icon-sheet.png` 供人看尺寸。
+改配色改顶层 `VARIANTS`（`icon` 是墨底，`icon-light` 是纸底），然后
+
+```sh
+python3 resources/icon.py
+```
 
 ## 模块
 
@@ -23,7 +37,7 @@
 - `internal/toc` / `internal/search`：目录行来自书的 nav/NCX（层级、章内 `#fragment`
   都是真的），页码只来自 `layout.PageRange`；搜索索引走 `render.NodeText`，命中映射回
   `render.Location`。
-- `internal/store`：`os.UserConfigDir()/layx-reader/state.json`，原子写 + 2s 合并，
+- `internal/store`：`os.UserConfigDir()/quire/state.json`，原子写 + 2s 合并，
   存书单、每本书的阅读位置与字号/面板偏好。书架就是这份书单。
 - `internal/appstate`：把上面几个接起来的一层（面板切换、异步刷新、索引与文档同步）。
 - `internal/icons`、`internal/widgets`：工具栏与三个面板共用的图标和小件。

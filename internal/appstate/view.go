@@ -2,9 +2,9 @@ package appstate
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/store"
-	"github.com/laix/layx-reader/internal/widgets"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/store"
+	"github.com/laix/quire/internal/widgets"
+	"github.com/laix/quire/locales"
 )
 
 // Showing reports whether a panel is open; the host floats it over the page.

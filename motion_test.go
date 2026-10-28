@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/quire/internal/reader"
 )
 
 // A glide paints the column without building the window: the view is built once

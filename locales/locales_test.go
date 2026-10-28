@@ -18,8 +18,8 @@ func TestCatalogsSayBothLanguages(t *testing.T) {
 		{"pages left", zh.ChapterPagesLeft(12), "本章还有 12 页"},
 		{"one page left", en.ChapterPagesLeft(1), "1 page left in chapter"},
 		{"query", zh.SearchNotFound("阿Q"), "未找到「阿Q」"},
-		{"title", zh.WindowTitle("边城"), "《边城》 — layx-reader"},
-		{"title", en.WindowTitle("Border Town"), "Border Town — layx-reader"},
+		{"title", zh.WindowTitle("边城"), "《边城》 — Quire"},
+		{"title", en.WindowTitle("Border Town"), "Border Town — Quire"},
 		{"one day", en.UnitDays(1), "1 day"},
 		{"days", zh.UnitDays(30), "30 天"},
 		// A language the catalogs do not carry falls back to the source.
@@ -55,7 +55,7 @@ func TestMessagesFollowTheAppLanguage(t *testing.T) {
 		{"books", LibraryCount(3), "3 本书"},
 		{"panel", PanelContents(), "目录"},
 		{"menu", MenuOpen(), "打开…"},
-		{"title", WindowTitle("边城"), "《边城》 — layx-reader"},
+		{"title", WindowTitle("边城"), "《边城》 — Quire"},
 		{"layout", LayoutFailed("out of memory"), "排版失败：out of memory"},
 	} {
 		if tc.got != tc.want {

@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/appstate"
-	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/appstate"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // The ribbon in the reading bar marks the page and unmarks it: the label, the

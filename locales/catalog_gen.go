@@ -34,13 +34,13 @@ type Messages struct{ locale string }
 // source language.
 func In(locale string) Messages { return Messages{locale} }
 
-// WindowTitle says "{title} — layx-reader"
+// WindowTitle says "{title} — Quire"
 // in the language the app shows.
 //
 // The window title while the book titled {title} is open.
 func WindowTitle(title string) string { return In(i18n.Locale()).WindowTitle(title) }
 
-// WindowTitle says "{title} — layx-reader"
+// WindowTitle says "{title} — Quire"
 // in the language of msgs.
 //
 // The window title while the book titled {title} is open.
@@ -1554,7 +1554,7 @@ func (msgs Messages) GoalBooksCell(count int) string {
 	return Catalog.Format(msgs.locale, "goalBooksCell", map[string]any{"count": count})
 }
 
-// ShareRecordText says "layx-reader reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {to…"
+// ShareRecordText says "Quire reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {total} d…"
 // in the language the app shows.
 //
 // The reading record put on the clipboard.
@@ -1562,7 +1562,7 @@ func ShareRecordText(books int, goal int, days int, goalDays int, total int, str
 	return In(i18n.Locale()).ShareRecordText(books, goal, days, goalDays, total, streak)
 }
 
-// ShareRecordText says "layx-reader reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {to…"
+// ShareRecordText says "Quire reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {total} d…"
 // in the language of msgs.
 //
 // The reading record put on the clipboard.

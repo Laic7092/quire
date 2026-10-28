@@ -4,9 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/laix/layx-reader/internal/book"
-	"github.com/laix/layx-reader/internal/notes"
-	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/quire/internal/book"
+	"github.com/laix/quire/internal/notes"
+	"github.com/laix/quire/internal/store"
 	"github.com/laix/layx/render"
 )
 

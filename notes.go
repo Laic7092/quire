@@ -2,10 +2,10 @@ package main
 
 import (
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/appstate"
-	"github.com/laix/layx-reader/internal/notes"
-	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/appstate"
+	"github.com/laix/quire/internal/notes"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // addNoteFromSelection turns the text the reader dragged over into a note and

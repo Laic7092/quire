@@ -14,9 +14,9 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/icons"
-	"github.com/laix/layx-reader/internal/widgets"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/icons"
+	"github.com/laix/quire/internal/widgets"
+	"github.com/laix/quire/locales"
 	"github.com/laix/layx/render"
 )
 

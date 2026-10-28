@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laix/layx-reader/internal/store"
+	"github.com/laix/quire/internal/store"
 )
 
 // The library's measures come from the window, not from one screenshot: the

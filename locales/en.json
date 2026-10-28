@@ -1,6 +1,6 @@
 {
   "@@locale": "en",
-  "windowTitle": "{title} — layx-reader",
+  "windowTitle": "{title} — Quire",
   "@windowTitle": {
     "description": "The window title while the book titled {title} is open.",
     "placeholders": {
@@ -542,7 +542,7 @@
   "@goalDaysLabel": {
     "description": "The days-a-week goal in the goals' settings."
   },
-  "shareRecordText": "layx-reader reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {total} days read, {streak} in a row.",
+  "shareRecordText": "Quire reading record: finished {books} of {goal} books this year, read {days} of {goalDays} days this week, {total} days read, {streak} in a row.",
   "@shareRecordText": {
     "description": "The reading record put on the clipboard.",
     "placeholders": {
@@ -938,7 +938,7 @@
     "placeholders": {
       "path": {
         "type": "String",
-        "example": "/home/reader/.config/layx-reader/state.json.bak"
+        "example": "/home/reader/.config/quire/state.json.bak"
       }
     }
   },
@@ -1070,7 +1070,7 @@
       }
     }
   },
-  "mygo.appName": "layx-reader",
+  "mygo.appName": "Quire",
   "@mygo.appName": {
     "description": "The app's name, which packaging writes where systems list it."
   },

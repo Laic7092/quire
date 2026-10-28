@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx-reader/internal/icons"
-	"github.com/laix/layx-reader/internal/reader"
-	"github.com/laix/layx-reader/locales"
+	"github.com/laix/quire/internal/icons"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // settingsWidth is how wide the display settings panel is, in DIPs, measured

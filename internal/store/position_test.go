@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laix/layx-reader/internal/book"
-	"github.com/laix/layx-reader/internal/reader"
+	"github.com/laix/quire/internal/book"
+	"github.com/laix/quire/internal/reader"
 	"github.com/laix/layx/render"
 )
 

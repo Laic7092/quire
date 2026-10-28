@@ -1,6 +1,6 @@
 {
-  "name": "layx-reader",
-  "identifier": "com.laix.layxreader",
+  "name": "quire",
+  "identifier": "com.laix.quire",
   "version": "0.1.0",
   "i18n": {
     "dir": "locales",

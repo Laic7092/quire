@@ -23,7 +23,7 @@
 - **关窗不退出**：关掉窗口后应用留在 Dock；点图标或用菜单命令会重建窗口，
   打开的书、阅读位置和浮出的面板都还在。
 - **字体**：字体查找已包含 `PingFang.ttc` / `Songti.ttc`；状态文件在
-  `~/Library/Application Support/layx-reader/state.json`。
+  `~/Library/Application Support/quire/state.json`。
 
 ## 打包
 
@@ -31,7 +31,7 @@
 go tool mygo build -platform darwin/universal
 ```
 
-产物是 `build/darwin-universal/layx-reader.app`（arm64 + amd64）。MyGo 不需要 cgo，
+产物是 `build/darwin-universal/quire.app`（arm64 + amd64）。MyGo 不需要 cgo，
 Linux/Windows 上也能交叉编译出这个 bundle，但没有签名、不会生成 `.dmg`。要分发就在 Mac 上
 配置 `macos.signingIdentity`（Developer ID）与 `macos.notarize`，或命令行加 `-sign`；
 只想出 app 加 `-skip-dmg`。`go run .` 有同样的隐藏标题栏和菜单栏，
