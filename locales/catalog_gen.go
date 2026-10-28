@@ -1942,6 +1942,104 @@ func (msgs Messages) ShelfCountFiltered(matched int, total int) string {
 	return Catalog.Format(msgs.locale, "shelfCountFiltered", map[string]any{"matched": matched, "total": total})
 }
 
+// ShelfRemove says "Remove from Shelf"
+// in the language the app shows.
+//
+// The shelf's menu item and row control that take a book off the shelf.
+func ShelfRemove() string { return In(i18n.Locale()).ShelfRemove() }
+
+// ShelfRemove says "Remove from Shelf"
+// in the language of msgs.
+//
+// The shelf's menu item and row control that take a book off the shelf.
+func (msgs Messages) ShelfRemove() string {
+	return Catalog.Format(msgs.locale, "shelfRemove", nil)
+}
+
+// ShelfRemoveTip says "Remove “{title}” from the shelf"
+// in the language the app shows.
+//
+// The tooltip of the shelf's control that takes a book off the shelf.
+func ShelfRemoveTip(title string) string { return In(i18n.Locale()).ShelfRemoveTip(title) }
+
+// ShelfRemoveTip says "Remove “{title}” from the shelf"
+// in the language of msgs.
+//
+// The tooltip of the shelf's control that takes a book off the shelf.
+func (msgs Messages) ShelfRemoveTip(title string) string {
+	return Catalog.Format(msgs.locale, "shelfRemoveTip", map[string]any{"title": title})
+}
+
+// ShelfRemoveTitle says "Remove “{title}” from the shelf?"
+// in the language the app shows.
+//
+// The question the shelf asks before a book leaves it.
+func ShelfRemoveTitle(title string) string { return In(i18n.Locale()).ShelfRemoveTitle(title) }
+
+// ShelfRemoveTitle says "Remove “{title}” from the shelf?"
+// in the language of msgs.
+//
+// The question the shelf asks before a book leaves it.
+func (msgs Messages) ShelfRemoveTitle(title string) string {
+	return Catalog.Format(msgs.locale, "shelfRemoveTitle", map[string]any{"title": title})
+}
+
+// ShelfRemoveHint says "The book leaves the shelf, and its reading position, bookmarks and notes go with it. The file stays on your disk."
+// in the language the app shows.
+//
+// What removing a book from the shelf does, under the question that asks.
+func ShelfRemoveHint() string { return In(i18n.Locale()).ShelfRemoveHint() }
+
+// ShelfRemoveHint says "The book leaves the shelf, and its reading position, bookmarks and notes go with it. The file stays on your disk."
+// in the language of msgs.
+//
+// What removing a book from the shelf does, under the question that asks.
+func (msgs Messages) ShelfRemoveHint() string {
+	return Catalog.Format(msgs.locale, "shelfRemoveHint", nil)
+}
+
+// ShelfRemoveConfirm says "Remove"
+// in the language the app shows.
+//
+// The button that answers the question asking to take a book off the shelf.
+func ShelfRemoveConfirm() string { return In(i18n.Locale()).ShelfRemoveConfirm() }
+
+// ShelfRemoveConfirm says "Remove"
+// in the language of msgs.
+//
+// The button that answers the question asking to take a book off the shelf.
+func (msgs Messages) ShelfRemoveConfirm() string {
+	return Catalog.Format(msgs.locale, "shelfRemoveConfirm", nil)
+}
+
+// ShelfRemoved says "“{title}” is off the shelf"
+// in the language the app shows.
+//
+// The home screen's line after a book was taken off the shelf.
+func ShelfRemoved(title string) string { return In(i18n.Locale()).ShelfRemoved(title) }
+
+// ShelfRemoved says "“{title}” is off the shelf"
+// in the language of msgs.
+//
+// The home screen's line after a book was taken off the shelf.
+func (msgs Messages) ShelfRemoved(title string) string {
+	return Catalog.Format(msgs.locale, "shelfRemoved", map[string]any{"title": title})
+}
+
+// Cancel says "Cancel"
+// in the language the app shows.
+//
+// The button that closes a question without doing what it asked.
+func Cancel() string { return In(i18n.Locale()).Cancel() }
+
+// Cancel says "Cancel"
+// in the language of msgs.
+//
+// The button that closes a question without doing what it asked.
+func (msgs Messages) Cancel() string {
+	return Catalog.Format(msgs.locale, "cancel", nil)
+}
+
 // TocEmpty says "This book has no contents"
 // in the language the app shows.
 //

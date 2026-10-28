@@ -564,6 +564,50 @@ func (s *Store) Recent(n int) []Book {
 	return books
 }
 
+// RemoveBook forgets the book whose file is path: its shelf row goes, and with
+// it the reading position and the bookmarks and notes recorded for that
+// revision of the file. The file itself belongs to the reader and is left where
+// it is. It reports whether the shelf had such a book.
+//
+// The row is found by path rather than by Key because a book whose file went
+// away — moved, deleted, on an unmounted disk — is remembered under the name it
+// had, and its key names a revision that is no longer there to hash.
+func (s *Store) RemoveBook(path string) bool {
+	if path == "" {
+		return false
+	}
+	removed := false
+	s.Update(func(st *State) {
+		i := samePathBook(st.Books, path)
+		if i < 0 {
+			return
+		}
+		key := st.Books[i].Key
+		st.Books = append(st.Books[:i], st.Books[i+1:]...)
+		delete(st.Positions, key)
+		delete(st.Bookmarks, key)
+		delete(st.Notes, key)
+		if st.LastOpen == key {
+			st.LastOpen = newestBook(st.Books)
+		}
+		removed = true
+	})
+	return removed
+}
+
+// newestBook is the key of the book opened last, "" when the shelf holds none:
+// what LastOpen becomes when the book it named is gone.
+func newestBook(books []Book) string {
+	key := ""
+	var newest time.Time
+	for _, b := range books {
+		if b.LastOpened.After(newest) {
+			key, newest = b.Key, b.LastOpened
+		}
+	}
+	return key
+}
+
 // Position returns the saved position for key.
 func (s *Store) Position(key string) (Position, bool) {
 	s.mu.Lock()

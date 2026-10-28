@@ -429,6 +429,54 @@ func TestTouchBookAndRecent(t *testing.T) {
 	}
 }
 
+// Taking a book off the shelf forgets the row and everything the reader
+// recorded about that revision: the position, the bookmarks and the notes. The
+// other books keep theirs, and LastOpen names a book that is still there.
+func TestRemoveBookForgetsTheBook(t *testing.T) {
+	s, _ := openTemp(t)
+	s.TouchBook(Book{Key: "gone", Path: "/books/gone.epub", Title: "Gone"})
+	s.TouchBook(Book{Key: "kept", Path: "/books/kept.epub", Title: "Kept"})
+	s.SetPosition("gone", Position{Chapter: 2, Progress: 0.3})
+	s.SetPosition("kept", Position{Chapter: 5, Progress: 0.7})
+	s.AddBookmark("gone", Bookmark{Label: "here"})
+	s.AddNote("gone", Note{Text: "passage", Comment: "note"})
+	if got := s.State().LastOpen; got != "kept" {
+		t.Fatalf("LastOpen = %q, want the book opened last", got)
+	}
+
+	if !s.RemoveBook("/books/gone.epub") {
+		t.Fatal("RemoveBook reported nothing removed")
+	}
+	if got := s.Recent(0); len(got) != 1 || got[0].Key != "kept" {
+		t.Errorf("shelf = %+v, want the other book alone", got)
+	}
+	if _, ok := s.Position("gone"); ok {
+		t.Error("the removed book kept its position")
+	}
+	if got := s.BookmarksOf("gone"); len(got) != 0 {
+		t.Errorf("bookmarks = %+v, want none", got)
+	}
+	if got := s.NotesOf("gone"); len(got) != 0 {
+		t.Errorf("notes = %+v, want none", got)
+	}
+	// The book that stayed keeps its own reading state.
+	if p, ok := s.Position("kept"); !ok || p.Chapter != 5 {
+		t.Errorf("the other book's position = %+v, ok = %v", p, ok)
+	}
+	if s.RemoveBook("/books/gone.epub") {
+		t.Error("RemoveBook removed a book that was gone")
+	}
+	if s.RemoveBook("") {
+		t.Error("RemoveBook removed the empty path")
+	}
+
+	// The next launch opens the book that is still on the shelf.
+	s.RemoveBook("/books/kept.epub")
+	if got := s.State().LastOpen; got != "" {
+		t.Errorf("LastOpen = %q, want none on an empty shelf", got)
+	}
+}
+
 // A book whose file changed has a new key but the same path: it keeps one row
 // and its reading state follows, so a re-download does not strand a position or
 // leave a ghost book on the shelf.

@@ -166,6 +166,9 @@ func (a *app) view(c *ui.Context) {
 			a.panels(c)
 		})
 	})
+	// The question that comes before a book leaves the shelf lies over whatever
+	// the window shows, so it is built beside the page rather than inside it.
+	a.removeDialog(c, t)
 }
 
 // keys installs the window's shortcuts. They are declared before the widgets
@@ -701,6 +704,13 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 		Clip().Shadow(0, 2, 7, 0, ui.RGBA(0, 0, 0, 0.16)).
 		Cursor(ui.CursorPointer).Label(e.Title)
 	board.OnClick(func() { a.openPath(e.Path) })
+	// The secondary button offers the same removal, so the control that shows
+	// with the pointer is a shortcut rather than the only way in.
+	board.ContextMenu(func(m *ui.Menu) {
+		if m.Item(locales.ShelfRemove()).Chosen() {
+			a.askRemoveBook(e)
+		}
+	})
 	if art := a.coverBitmap(e); art != nil {
 		board.Children(func() {
 			ui.Image(c, art).Fill().Fit(ui.Cover)
@@ -710,11 +720,72 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 			ui.Icon(c, icons.Book).Size(22, 22).TextColor(t.TextMuted)
 		})
 	}
+	// The control that takes the book off the shelf shows with the pointer, as a
+	// list row's does: removing a book is not what a click on a cover is for.
+	if board.Hovered() {
+		board.Children(func() {
+			ui.Box(c).Absolute().Top(4).Right(4).Radius(6).
+				Background(t.Background.Alpha(0.9)).Children(func() {
+				if widgets.IconButton(c, icons.Trash, locales.ShelfRemove(),
+					locales.ShelfRemoveTip(e.Title)).Clicked() {
+					a.askRemoveBook(e)
+				}
+			})
+		})
+	}
 	if read := a.readProgress(e); read > 0 && read < 1 {
 		board.Children(func() {
 			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(2).
 				Background(t.Accent).Label(locales.ProgressLabel(e.Title))
 		})
+	}
+}
+
+// askRemoveBook raises the question that comes before a book leaves the shelf.
+// The question names the book, because what leaves with it — the reading
+// position, the bookmarks and the notes — does not come back by opening the
+// file again.
+func (a *app) askRemoveBook(e library.Entry) {
+	a.removePath, a.removeTitle = e.Path, e.Title
+	a.removeOpen = true
+}
+
+// removeBook takes a book off the shelf and says so on the home page. The file
+// itself is left where it is: see appstate.RemoveBook.
+func (a *app) removeBook(path, title string) {
+	if a.pan == nil || !a.pan.RemoveBook(path) {
+		return
+	}
+	a.notice = locales.ShelfRemoved(title)
+}
+
+// removeDialog is the question askRemoveBook raised. It is an overlay over the
+// whole window, and it is built whether or not a book is open: the shelf is
+// where a book can be taken off, and a book being read is not on it.
+func (a *app) removeDialog(c *ui.Context, t *ui.Theme) {
+	if !a.removeOpen {
+		return
+	}
+	title := a.removeTitle
+	ui.Modal(c, &a.removeOpen, func() {
+		ui.Column(c).Gap(8).MaxWidth(360).Children(func() {
+			ui.Text(c, locales.ShelfRemoveTitle(title)).FontSize(14).
+				FontWeight(600).TextColor(t.Text)
+			ui.Text(c, locales.ShelfRemoveHint()).FontSize(12).
+				TextColor(t.TextMuted)
+			ui.Row(c).Gap(8).Justify(ui.End).Padding(6, 0, 0, 0).Children(func() {
+				if ui.Button(c, locales.Cancel()).Clicked() {
+					a.removeOpen = false
+				}
+				if ui.Button(c, locales.ShelfRemoveConfirm()).Clicked() {
+					a.removeOpen = false
+					a.removeBook(a.removePath, title)
+				}
+			})
+		})
+	})
+	if !a.removeOpen {
+		a.removePath, a.removeTitle = "", ""
 	}
 }
 

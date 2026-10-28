@@ -261,6 +261,42 @@ func (a *App) upsertShelf(path string) {
 	})
 }
 
+// RemoveBook takes the book at path off the shelf, and with it what the reader
+// recorded about that revision of the file: the reading position, the bookmarks
+// and the notes. The file itself stays where it is — the shelf lists books, it
+// does not own them — so tidying it up never costs the reader a library.
+//
+// It reports whether the shelf changed.
+func (a *App) RemoveBook(path string) bool {
+	if path == "" {
+		return false
+	}
+	if a.Store != nil {
+		a.Store.RemoveBook(path)
+		a.Store.SaveSoon(0)
+	}
+	a.initShelf()
+	rows := a.Library.Entries
+	kept := rows[:0]
+	for _, row := range rows {
+		if !samePath(row.Path, path) {
+			kept = append(kept, row)
+		}
+	}
+	if len(kept) == len(rows) {
+		return false
+	}
+	a.Library.Entries = kept
+	// A listing that read the shelf before this removal would put the book back
+	// on the next publication: this removal is newer than that snapshot.
+	a.shelfID++
+	if a.Shelf.Selected >= len(kept) {
+		a.Shelf.Selected = len(kept) - 1
+	}
+	a.Shelf.Status = shelfCount(len(kept))
+	return true
+}
+
 // mergeShelf adds entries to the shelf, replacing a row that names the same
 // file. It is the UI-thread half of upsertShelf; the row is keyed by path
 // because that is what the reader recognises as one book.

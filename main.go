@@ -268,6 +268,12 @@ type app struct {
 	goalCopied time.Time
 	// shelfScroll keeps each cover row's place while the reader scrolls it.
 	shelfScroll [2]ui.ScrollState
+	// removeOpen shows the question asked before a book leaves the shelf, and
+	// removePath and removeTitle name the book it is about: the dialog must
+	// still know the book after the row it came from has gone.
+	removeOpen  bool
+	removePath  string
+	removeTitle string
 
 	// aaOpen is the display settings panel, and its open state. The ui fields
 	// mirror the settings the sliders write, which work in float64.

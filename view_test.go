@@ -1394,6 +1394,101 @@ func TestClickTurnsAndDragSelects(t *testing.T) {
 
 // The cover is the book's own front page: a click on it opens the book at the
 // place the reader left, and does not turn a page or start a selection.
+// A book the reader is done with leaves the shelf through the control that
+// shows on its cover, and through the cover's own menu; both ask first, and
+// cancelling keeps the book where it was. The file stays on disk.
+func TestRemovingABookFromTheShelfAsksFirst(t *testing.T) {
+	a := newWindow(t)
+	a.book, a.layout, a.status = nil, nil, ""
+	a.showCover = false
+	a.pan.Show(appstate.SidebarNone)
+	gone := a.pan.Library.Entries[0]
+
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	if !tt.HasText(locales.AllBooks()) {
+		t.Fatalf("the shelf did not build: %q", tt.Texts())
+	}
+	// The control is not on a cover until the pointer rests on it: a click on a
+	// cover opens the book.
+	if _, ok := tt.Find(locales.ShelfRemove()); ok {
+		t.Fatalf("the remove control shows without the pointer: %q", tt.Texts())
+	}
+	cover, ok := tt.Find(gone.Title)
+	if !ok {
+		t.Fatalf("no cover for %q: %q", gone.Title, tt.Texts())
+	}
+	tt.Move(cover.X+cover.W/2, cover.Y+cover.H/2)
+	tt.Frame()
+	control, ok := tt.Find(locales.ShelfRemove())
+	if !ok {
+		t.Fatalf("the pointer on the cover shows no remove control: %q", tt.Texts())
+	}
+
+	// The click asks; it does not remove the book.
+	tt.ClickAt(control.X+control.W/2, control.Y+control.H/2)
+	if !tt.HasText(locales.ShelfRemoveTitle(gone.Title)) {
+		t.Fatalf("the click asked nothing: %q", tt.Texts())
+	}
+	if a.book != nil {
+		t.Fatal("the remove control opened the book instead")
+	}
+	if err := tt.Click(locales.Cancel()); err != nil {
+		t.Fatalf("cancel: %v (texts %q)", err, tt.Texts())
+	}
+	tt.Frame()
+	if tt.HasText(locales.ShelfRemoveHint()) {
+		t.Fatalf("the question stayed after Cancel: %q", tt.Texts())
+	}
+	if got := len(a.pan.Library.Entries); got != 3 {
+		t.Fatalf("cancelling left %d books on the shelf, want 3", got)
+	}
+	if _, ok := tt.Find(gone.Title); !ok {
+		t.Fatalf("the cancelled book is off the shelf: %q", tt.Texts())
+	}
+
+	// The cover's menu takes the same way in, and answering it removes the book:
+	// the row goes and the store forgets what it kept for the file.
+	if err := tt.RightClick(gone.Title); err != nil {
+		t.Fatalf("secondary click: %v", err)
+	}
+	if err := tt.ChooseMenuItem(locales.ShelfRemove()); err != nil {
+		t.Fatalf("choose the removal: %v (menu %q)", err, tt.Menu())
+	}
+	if !tt.HasText(locales.ShelfRemoveTitle(gone.Title)) {
+		t.Fatalf("the menu item asked nothing: %q", tt.Texts())
+	}
+	if err := tt.Click(locales.ShelfRemoveConfirm()); err != nil {
+		t.Fatalf("remove: %v (texts %q)", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := len(a.pan.Library.Entries); got != 2 {
+		t.Fatalf("the shelf lists %d books after removing one, want 2", got)
+	}
+	for _, b := range a.st.Recent(0) {
+		if b.Path == gone.Path {
+			t.Error("the store still remembers the removed book")
+		}
+	}
+	if _, err := os.Stat(gone.Path); err != nil {
+		t.Errorf("removing a book deleted its file: %v", err)
+	}
+	if !tt.HasText(locales.ShelfRemoved(gone.Title)) {
+		t.Errorf("the home page does not say the book is off the shelf: %q", tt.Texts())
+	}
+	// The row stays gone in the frames after it, and the rest of the shelf does
+	// not change under it.
+	for range 2 {
+		tt.Frame()
+		if _, ok := tt.Find(gone.Title); ok {
+			t.Fatalf("the removed cover came back: %q", tt.Texts())
+		}
+		if !tt.HasText(locales.LibraryCount(2)) {
+			t.Errorf("the shelf does not count the 2 books left: %q", tt.Texts())
+		}
+	}
+}
+
 func TestClickOnTheCoverOpensTheBook(t *testing.T) {
 	a := newWindow(t)
 	a.showCover = true

@@ -126,6 +126,104 @@ func TestShelfListsABookWhoseFileIsGone(t *testing.T) {
 	}
 }
 
+// Taking a book off the shelf drops the row and the reading state kept for that
+// revision of the file, and leaves the file itself alone: the shelf is a list,
+// not the library.
+func TestRemoveBookDropsTheRowAndItsReadingState(t *testing.T) {
+	a := New(newStore(t))
+	a.ImportDir(filepath.Join("..", "book", "testdata", "samples"))
+	if len(a.Library.Entries) != 3 {
+		t.Fatalf("shelf lists %d books, want the 3 samples", len(a.Library.Entries))
+	}
+	gone := a.Library.Entries[0]
+	kept := a.Library.Entries[1]
+	goneKey := store.Key(gone.Path, gone.Size, gone.Modified)
+	a.Store.SetPosition(goneKey, store.Position{Chapter: 2, Progress: 0.3})
+	a.Store.AddBookmark(goneKey, store.Bookmark{Label: "here"})
+	a.Store.AddNote(goneKey, store.Note{Text: "passage", Comment: "note"})
+	a.Shelf.Selected = 2
+
+	if !a.RemoveBook(gone.Path) {
+		t.Fatal("RemoveBook reported nothing removed")
+	}
+	if got := len(a.Library.Entries); got != 2 {
+		t.Fatalf("shelf lists %d books, want 2", got)
+	}
+	for _, row := range a.Library.Entries {
+		if samePath(row.Path, gone.Path) {
+			t.Error("the removed book is still on the shelf")
+		}
+	}
+	if _, ok := a.Store.Position(goneKey); ok {
+		t.Error("the removed book kept its position")
+	}
+	if rows := a.Store.BookmarksOf(goneKey); len(rows) != 0 {
+		t.Errorf("bookmarks = %+v, want none", rows)
+	}
+	if rows := a.Store.NotesOf(goneKey); len(rows) != 0 {
+		t.Errorf("notes = %+v, want none", rows)
+	}
+	if got := a.Shelf.Selected; got != 1 {
+		t.Errorf("the chosen row is %d, want it on the last book left", got)
+	}
+	// The other books, and their files, are untouched.
+	if _, err := os.Stat(kept.Path); err != nil {
+		t.Errorf("the book still on the shelf: %v", err)
+	}
+	if _, err := os.Stat(gone.Path); err != nil {
+		t.Errorf("the removed book's file is gone from disk: %v", err)
+	}
+	// Removing the same path again changes nothing.
+	if a.RemoveBook(gone.Path) {
+		t.Error("RemoveBook removed a book that was already gone")
+	}
+
+	// The shelf is the store's list: a restart agrees with what is left.
+	a.ReloadShelf()
+	if got := len(a.Library.Entries); got != 2 {
+		t.Errorf("after a reload the shelf lists %d books, want 2", got)
+	}
+}
+
+// A book whose file went away keeps its row under the name the store remembers,
+// so it can still be taken off the shelf: the removal finds the row by path, not
+// by a key of a file that is no longer there to hash.
+func TestRemoveBookWhoseFileIsGone(t *testing.T) {
+	st := newStore(t)
+	sample := filepath.Join(t.TempDir(), "aq-zhuan.epub")
+	data, err := os.ReadFile(filepath.Join("..", "book", "testdata", "samples", "aq-zhuan.epub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sample, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+	a.open(sample)
+	if err := os.Remove(sample); err != nil {
+		t.Fatal(err)
+	}
+	a.ReloadShelf()
+	if len(a.Library.Entries) != 1 {
+		t.Fatalf("the shelf lists %d rows, want the missing book's", len(a.Library.Entries))
+	}
+
+	if !a.RemoveBook(sample) {
+		t.Fatal("RemoveBook left the row of a book whose file is gone")
+	}
+	if got := len(a.Library.Entries); got != 0 {
+		t.Errorf("the shelf lists %d rows after the removal, want none", got)
+	}
+	if got := st.Recent(0); len(got) != 0 {
+		t.Errorf("the store still remembers %+v", got)
+	}
+	// The store is the shelf: the next listing does not bring the book back.
+	a.ReloadShelf()
+	if got := len(a.Library.Entries); got != 0 {
+		t.Errorf("a reload listed %d rows, want none", got)
+	}
+}
+
 // The open panel survives a restart, and an unknown value falls back to none.
 func TestSidebarIsRemembered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")

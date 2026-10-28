@@ -732,6 +732,52 @@
       }
     }
   },
+  "shelfRemove": "Remove from Shelf",
+  "@shelfRemove": {
+    "description": "The shelf's menu item and row control that take a book off the shelf."
+  },
+  "shelfRemoveTip": "Remove “{title}” from the shelf",
+  "@shelfRemoveTip": {
+    "description": "The tooltip of the shelf's control that takes a book off the shelf.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "shelfRemoveTitle": "Remove “{title}” from the shelf?",
+  "@shelfRemoveTitle": {
+    "description": "The question the shelf asks before a book leaves it.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "shelfRemoveHint": "The book leaves the shelf, and its reading position, bookmarks and notes go with it. The file stays on your disk.",
+  "@shelfRemoveHint": {
+    "description": "What removing a book from the shelf does, under the question that asks."
+  },
+  "shelfRemoveConfirm": "Remove",
+  "@shelfRemoveConfirm": {
+    "description": "The button that answers the question asking to take a book off the shelf."
+  },
+  "shelfRemoved": "“{title}” is off the shelf",
+  "@shelfRemoved": {
+    "description": "The home screen's line after a book was taken off the shelf.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "The button that closes a question without doing what it asked."
+  },
   "tocEmpty": "This book has no contents",
   "@tocEmpty": {
     "description": "The contents panel's message while the book has no navigation document."
