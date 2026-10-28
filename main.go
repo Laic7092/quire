@@ -140,6 +140,10 @@ type app struct {
 
 	body ui.Handle
 	area ui.Handle
+	// surface is the paper the reading view prints on: the column that covers the
+	// whole window, under the bars and the panels. It is what says the sheet
+	// reaches the window's edges, whatever the chrome over it is doing.
+	surface ui.Handle
 	// headBar is the reading bar, and headLeft and headRight the groups of
 	// controls at its ends: the book's name in the middle is given the room
 	// they leave it, measured on the committed frame. headPlace is the place
@@ -272,6 +276,11 @@ type app struct {
 	// instant turns the page without sliding, as tests and reduced-motion
 	// readers need.
 	instant bool
+	// chromeAway puts the reading bar and the folio away while the reader moves
+	// down a scrolling column, and the frames between fade them (see
+	// chromeTarget). Nothing is laid out from it: both are a layer over the
+	// sheet, never a row of it.
+	chromeAway bool
 
 	// now is the clock the page turn is measured against; nil means time.Now,
 	// and a test that wants a fixed slide pins it.

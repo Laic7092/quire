@@ -348,6 +348,12 @@ func TestWindowRendersEveryScreen(t *testing.T) {
 			tt.SetDark(true)
 		}
 		s.render(t)
+		// Two frames: the page area's measure is a frame behind the layout it is
+		// drawn from, and a shot that changes how wide the sheet is (a spread, a
+		// narrower window) is only drawn at its own measure on the second. An
+		// ask for a frame that only paints is not what settles the view, so the
+		// snapshot would otherwise show the frame that measured it.
+		tt.Frame()
 		tt.Frame()
 		if want := s.want(a); !tt.HasText(want) {
 			t.Errorf("%s: %q is missing from %q", s.name, want, tt.Texts())

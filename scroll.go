@@ -219,6 +219,9 @@ func (a *app) scrollBy(dy float32) {
 	if a.layout == nil || dy == 0 {
 		return
 	}
+	// The bars follow the reader down the column and come back when the reader
+	// does: the chrome is the window's, not the page's.
+	a.chromeFollow(dy)
 	// Any scrolling is a turn of the page as far as the cover is concerned.
 	a.dismissCover()
 	a.jumpAt = false
@@ -243,7 +246,10 @@ func (a *app) scrollBy(dy float32) {
 // scrollByNow moves the column by dy DIPs at once, from where it is drawn: a
 // continuous device's deltas are the movement itself, so they land in the frame
 // they arrive in and stack from the position on screen.
-func (a *app) scrollByNow(dy float32) { a.scrollNow(a.scrollY + dy) }
+func (a *app) scrollByNow(dy float32) {
+	a.chromeFollow(dy)
+	a.scrollNow(a.scrollY + dy)
+}
 
 // follow sets the place the column owes, without touching where it is drawn: the
 // next frames cover the distance. It is the one way an ask becomes motion, so a
@@ -576,6 +582,7 @@ func (a *app) scrollKey(d float32) {
 	if a.layout == nil || d == 0 {
 		return
 	}
+	a.chromeFollow(d)
 	a.dismissCover()
 	a.jumpAt = false
 	if a.instant {

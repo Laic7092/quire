@@ -161,7 +161,7 @@ func (a *app) view(c *ui.Context) {
 	}
 	perf.frameScene(a.frameScene())
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
+	ui.Box(c).Fill().Background(t.Background).Children(func() {
 		if a.book == nil {
 			if a.bookWindow {
 				// A book window opens on the paper its book will be printed on,
@@ -172,14 +172,13 @@ func (a *app) view(c *ui.Context) {
 			a.library(c, t)
 			return
 		}
+		// The sheet is the window, and the chrome is the layer over it: the paper
+		// reaches every edge and the bars and the panels float above it. Nothing
+		// of the chrome takes room from the page, so putting the bars away or
+		// opening a panel never reflows the book.
+		a.reader(c, t)
 		a.header(c, t)
-		// The page and the floating panels share one box: the panels are
-		// absolute, so they lie over the reading area instead of taking room
-		// from it, and the book keeps its measure while one is open.
-		ui.Box(c).Grow(1).MinWidth(0).FillWidth().Children(func() {
-			a.reader(c, t)
-			a.panels(c)
-		})
+		a.panels(c)
 	})
 	// The question that comes before a book leaves the shelf lies over whatever
 	// the window shows, so it is built beside the page rather than inside it.
@@ -194,7 +193,10 @@ func (a *app) view(c *ui.Context) {
 func (a *app) openingView(c *ui.Context, t *ui.Theme) {
 	bar := c.TitleBar()
 	ui.Column(c).Fill().Background(paper()).Children(func() {
-		ui.Row(c).FillWidth().Height(max(headerHeight, bar.Height)).
+		// The bar of a book still opening: the room the system's buttons take,
+		// and the drag that moves the window, over the paper the book will be
+		// printed on.
+		ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(barHeight(c)).
 			Padding(0, 8+bar.Right, 0, 8+bar.Left).DragWindow()
 		ui.Column(c).Grow(1).Center().Padding(32).Gap(10).Children(func() {
 			if a.opening != "" {
@@ -358,9 +360,19 @@ func (a *app) syncMenu() {
 	}
 }
 
+// barHeight is the room the reading bar takes at the head of a book window: its
+// own header, or the system's title bar where that one is taller, so the page
+// never comes under the window's own buttons. The bar floats over the sheet, so
+// the page's band and the panels under it are measured from here.
+func barHeight(c *ui.Context) float32 { return max(headerHeight, c.TitleBar().Height) }
+
 // header is the reader's bar: the panels and the way back at the left, the
 // book's name in the middle, and the display settings at the right, as Books
-// lays it out. It has no fill of its own — the paper runs under it.
+// lays it out. It has no fill of its own — the paper shows through it.
+//
+// It is a layer over the page and not a row of it: it takes no room from the
+// sheet, it goes away while the reader moves down the column, and the pointer
+// where it is brings it back.
 //
 // In a window with a hidden title bar this bar is the title bar: it leaves the
 // system's window buttons their room — traffic lights at the left on macOS,
@@ -369,9 +381,16 @@ func (a *app) syncMenu() {
 func (a *app) header(c *ui.Context, t *ui.Theme) {
 	bar := c.TitleBar()
 	pal := a.chrome
-	ui.Row(c).FillWidth().Height(max(headerHeight, bar.Height)).
+	row := ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(barHeight(c)).
 		Padding(0, 8+bar.Right, 0, 8+bar.Left).AlignItems(ui.Center).DragWindow().
-		Bind(&a.headBar).Children(func() {
+		Bind(&a.headBar)
+	if row.Hovered() {
+		// The pointer where the bar goes brings it back: the reader reaches for
+		// it without knowing a key for it.
+		a.chromeAway = false
+	}
+	row.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
+	row.Children(func() {
 		a.toolbarCluster(c, func() {
 			a.panelButton(c, appstate.SidebarToc, icons.ListBullet, locales.PanelContents(), locales.PanelContentsTip())
 			a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, locales.PanelBookmarks(), locales.PanelBookmarksTip())
@@ -475,14 +494,16 @@ func (a *app) titleRoom(c *ui.Context) titlePlace {
 
 // panels floats the open reading panel over the page at the left, in a card
 // inset from the page's edges, as Books floats its table of contents. It is
-// absolute in the page's box, so the page keeps every DIP of its measure while
-// the panel is open: opening one never reflows the book.
+// absolute in the window, under the bar and clear of it, so the page keeps
+// every DIP of its measure while the panel is open: opening one never reflows
+// the book.
 func (a *app) panels(c *ui.Context) {
 	if a.pan == nil || !a.pan.Showing() {
 		return
 	}
 	pal := a.chrome
-	card := ui.Box(c).Absolute().Left(panelMargin).Top(panelTop).Bottom(panelMargin).
+	card := ui.Box(c).Absolute().Left(panelMargin).Top(barHeight(c)+panelTop).
+		Bottom(panelMargin).
 		Width(panelWidth).Radius(14).Background(reader.UIColor(pal.Popover)).
 		Border(1, reader.UIColor(pal.Line)).Clip().
 		Shadow(0, 12, 32, 0, ui.RGBA(0, 0, 0, 0.24)).Label(a.pan.Title())
@@ -1158,8 +1179,13 @@ func (a *app) readProgress(e library.Entry) float64 {
 // reader is the reading area: the paper the theme prints on, the page or the
 // two pages of the open book set on it without a frame, and the folio under
 // them.
+//
+// The paper covers the whole window, the bars included; the text keeps the band
+// they leave it, so the measure the book is laid out at is the same whether the
+// bars are showing or away.
 func (a *app) reader(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Grow(1).MinWidth(0).FillHeight().Background(paper()).Children(func() {
+	ui.Column(c).Fill().MinWidth(0).Background(paper()).
+		Padding(barHeight(c), 0, footerHeight, 0).Bind(&a.surface).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
@@ -1234,12 +1260,21 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 
 // folio is the bar under the text, as Books draws it: the reader's jumps at the
 // left, the page in the middle, what is left of the chapter at the right, and
-// the small scrubber pill under them at the book's own progress.
+// the small scrubber pill under them at the book's own progress. It floats over
+// the foot of the sheet, and goes away with the bar at the head when the reader
+// moves down the column.
 func (a *app) folio(c *ui.Context, t *ui.Theme) {
 	muted := t.TextMuted
 	ink := reader.UIColor(a.chrome.Muted)
 	w, _ := c.Size()
-	ui.Column(c).FillWidth().Height(footerHeight).Children(func() {
+	bar := ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Height(footerHeight)
+	if bar.Hovered() {
+		// The pointer at the foot of the window brings the bars back, as the one
+		// at its head does.
+		a.chromeAway = false
+	}
+	bar.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
+	bar.Children(func() {
 		ui.Row(c).FillWidth().Height(30).Padding(0, 48).Gap(6).
 			AlignItems(ui.Center).Children(func() {
 			if a.layout == nil {
@@ -1392,6 +1427,8 @@ func (a *app) closeBook() {
 	a.failed = false
 	a.turning = nil
 	a.aaOpen = false
+	// The shelf has no sheet to put the bars away over.
+	a.chromeAway = false
 	a.book = nil
 	a.doc = nil
 	a.docAt = 0

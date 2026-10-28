@@ -379,9 +379,11 @@ func (a *app) openHere(path string) {
 		return
 	}
 	a.opening = path
-	// An error from the book before this one is not about this one.
+	// An error from the book before this one is not about this one, and neither
+	// is the place the bars were left in while it was read.
 	a.status = ""
 	a.failed = false
+	a.chromeAway = false
 	// The faces a book is set in are read with it, the first time a book is
 	// read: a shelf alone never pays for the system's CJK face, which costs
 	// tens of megabytes once parsed. The serif file is only read for a book set
