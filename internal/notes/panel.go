@@ -14,10 +14,10 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/widgets"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
 // Entry is one note as the panel shows it.
@@ -220,18 +220,21 @@ func (p *Panel) editor(c *ui.Context, e Entry) {
 			Placeholder(locales.NoteComment()).Height(76)
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if p.OnRemove != nil {
-				b := widgets.IconButton(c, icons.Trash, locales.DeleteNote(), locales.DeleteNote())
-				if b.Clicked() {
-					p.OnRemove(e)
-				}
+				// OnClick, not Clicked: deleting republishes the panel's rows, and
+				// the build pass that shows them has to be over first.
+				widgets.IconButton(c, icons.Trash, locales.DeleteNote(), locales.DeleteNote()).
+					OnClick(func() { p.OnRemove(e) })
 			}
 			ui.Spacer(c)
-			btn := widgets.SmallButton(c, locales.NoteSave(), locales.NoteSave())
-			btn.Disabled(!save)
-			if btn.Clicked() && p.OnSave != nil {
-				comment := strings.TrimSpace(p.Draft)
-				p.OnSave(e, comment)
-				p.Draft = comment
+			btn := widgets.SmallButton(c, locales.NoteSave(), locales.NoteSave()).Disabled(!save)
+			if p.OnSave != nil {
+				// The draft is read when the click is handled, after this pass, and
+				// taken as saved only then.
+				btn.OnClick(func() {
+					comment := strings.TrimSpace(p.Draft)
+					p.OnSave(e, comment)
+					p.Draft = comment
+				})
 			}
 		})
 	})

@@ -13,10 +13,10 @@ package bookmarks
 
 import (
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/widgets"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
 // Entry is one bookmark as the panel shows it.
@@ -99,11 +99,11 @@ func (p *Panel) View(c *ui.Context) ui.Element {
 			ui.Text(c, locales.BookmarkCount(len(p.Entries))).FontSize(11).
 				TextColor(t.TextMuted).Grow(1).SingleLine()
 			if p.OnAdd != nil {
-				b := widgets.IconButton(c, icons.Plus, locales.AddBookmark(), locales.AddBookmark())
-				b.Disabled(len(p.Entries) > 0 && p.current())
-				if b.Clicked() {
-					p.OnAdd()
-				}
+				// OnClick, not Clicked: a bookmark added while the list below is
+				// being built would grow the rows the list is counting.
+				widgets.IconButton(c, icons.Plus, locales.AddBookmark(), locales.AddBookmark()).
+					Disabled(len(p.Entries) > 0 && p.current()).
+					OnClick(p.OnAdd)
 			}
 		})
 		ui.Divider(c)
@@ -191,10 +191,10 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 		})
 
 		if p.OnRemove != nil && (row.Hovered() || chosen) {
-			b := widgets.IconButton(c, icons.Trash, locales.DeleteBookmark(), locales.DeleteBookmark())
-			if b.Clicked() {
-				p.OnRemove(e)
-			}
+			// OnClick, not Clicked: the delete runs after the build, so the row
+			// it takes out of Entries is not one the list is still building.
+			widgets.IconButton(c, icons.Trash, locales.DeleteBookmark(), locales.DeleteBookmark()).
+				OnClick(func() { p.OnRemove(e) })
 		}
 	})
 }

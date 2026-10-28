@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
 // bookmarkFixture opens the sample book through the App and builds a paged
@@ -326,5 +327,40 @@ func TestBookmarksAreKeptPerBook(t *testing.T) {
 	}
 	if !a.Bookmarks.Entries[0].Current {
 		t.Errorf("the first book's row is not at the reading place: %+v", a.Bookmarks.Entries[0])
+	}
+}
+
+// The panel's delete control drops the bookmark it belongs to, and the frame
+// that handled the click shows the rows left: the delete runs after the build
+// of the list it came from, so the list never builds a row that is gone.
+func TestDeleteControlRemovesTheBookmark(t *testing.T) {
+	a, bk, layout, _ := bookmarkFixture(t)
+	for page := 0; page < 3; page++ {
+		a.Refresh(bk, layout, page)
+		if !a.BookmarkHere() {
+			t.Fatalf("page %d was not bookmarked", page)
+		}
+	}
+	if len(a.Bookmarks.Entries) != 3 {
+		t.Fatalf("panel lists %d rows, want 3", len(a.Bookmarks.Entries))
+	}
+	a.Bookmarks.Selected = 0
+	gone := a.Bookmarks.Entries[0].ID
+
+	tt := ui.NewTester(func(c *ui.Context) { a.Bookmarks.View(c) }, 320, 420)
+	tt.Frame()
+	if err := tt.Click(locales.DeleteBookmark()); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Bookmarks.Entries) != 2 {
+		t.Fatalf("panel lists %d rows after the delete, want 2", len(a.Bookmarks.Entries))
+	}
+	for _, e := range a.Bookmarks.Entries {
+		if e.ID == gone {
+			t.Error("the deleted bookmark is still listed")
+		}
+	}
+	if got := a.Store.BookmarksOf(a.BookKey); len(got) != 2 {
+		t.Errorf("store holds %d bookmarks after the delete, want 2", len(got))
 	}
 }

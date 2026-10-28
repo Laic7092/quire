@@ -5,8 +5,8 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/internal/reader"
 	"github.com/laix/layx/render/paint"
+	"github.com/laix/quire/internal/reader"
 )
 
 // pagePaper is what a layout's pages are painted with: the sheet, the ink and
@@ -115,8 +115,32 @@ func windowSource(follow bool, paper reader.Theme) mygo.ThemeSource {
 // macOS is left alone. Its traffic lights are coloured dots that read on every
 // paper, and its menus are the desktop's own, not the reader's, so forcing the
 // page's appearance on the app would darken them without a reason.
+//
+// The appearance is the app's, like the palette: with several windows, a
+// library on the system's look and a book on a dark paper would otherwise fight
+// over it every frame. The focused window decides, so a book's controls match
+// the bar they sit on; the windows behind it keep the system's until they are
+// looked at.
 func (a *app) syncWindowAppearance(src mygo.ThemeSource) bool {
-	if runtime.GOOS == "darwin" || src == a.winSrc {
+	if runtime.GOOS == "darwin" {
+		return false
+	}
+	if a.desk != nil {
+		if a.win == nil || !a.win.IsFocused() {
+			return false
+		}
+		if !mygo.App.IsReady() {
+			return false
+		}
+		if mygo.Theme.Source() == src {
+			a.winSrc = src
+			return false
+		}
+		mygo.Theme.SetSource(src)
+		a.winSrc = src
+		return true
+	}
+	if src == a.winSrc {
 		return false
 	}
 	if !mygo.App.IsReady() {

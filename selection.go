@@ -53,7 +53,7 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			// The cover is the book's own front page: a press on it opens the
 			// book where the reader left off, as the first turn does. It is not
 			// a selection, so the press is taken and the release ignored.
-			a.showCover = false
+			a.dismissCover()
 			return true
 		}
 		if a.layout == nil {

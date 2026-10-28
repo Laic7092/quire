@@ -24,7 +24,26 @@ const (
 	// short slide means the sheet can finish every one of them, so a held key
 	// flicks through the book instead of restarting one slide it never lands.
 	turnFlickDuration = 90 * time.Millisecond
+	// coverHold is how long an opening book's cover rests before it gives way to
+	// the place the book resumes at: the dissolve has to read as the book
+	// opening, not as a flicker of its cover.
+	coverHold = 420 * time.Millisecond
+	// coverFadeDuration is how long that dissolve takes: the fade's pace, since
+	// it is the same kind of change, two printings swapping places.
+	coverFadeDuration = 260 * time.Millisecond
+	// coverPad is the margin the cover keeps inside the page area, as Books
+	// shows a cover on the sheet.
+	coverPad = 28
 )
+
+// coverIntro is the cover giving way to the place a resumed book opens at: hold
+// is how long it rests before it starts to go, and fade how long the dissolve
+// takes.
+type coverIntro struct {
+	at   time.Time
+	hold time.Duration
+	fade time.Duration
+}
 
 // turnState is a page turn on its way across the sheet: from and to are the
 // starts of the spreads leaving and arriving, dir which way it goes, and dur
@@ -129,6 +148,86 @@ func (a *app) clock() time.Time {
 	return time.Now()
 }
 
+// beginCoverIntro starts the cover dissolving into the place a resumed book
+// opens at. The book is laid out by now, so its cover is drawn from this frame
+// on: it holds for coverHold, long enough to read as the book opening rather
+// than a flicker, and then fades over coverFadeDuration. A reader who asked for
+// no motion opens straight at the place.
+func (a *app) beginCoverIntro() {
+	if !a.showCover || a.coverIntro != nil {
+		return
+	}
+	if a.instant {
+		a.dismissCover()
+		return
+	}
+	a.coverIntro = &coverIntro{at: a.clock(), hold: coverHold, fade: coverFadeDuration}
+}
+
+// coverAlpha is how strongly the cover shows now, and false once it has given
+// way. It is 1 for a cover that is not dissolving, so a cover the reader has not
+// moved past keeps showing.
+func (a *app) coverAlpha() (float32, bool) {
+	c := a.coverIntro
+	if c == nil {
+		return 1, false
+	}
+	elapsed := a.clock().Sub(c.at)
+	if elapsed < c.hold {
+		return 1, true
+	}
+	p := float32(elapsed-c.hold) / float32(c.fade)
+	if p >= 1 {
+		return 0, false
+	}
+	return 1 - easeInOut(p), true
+}
+
+// dismissCover takes the cover away now, with the dissolve it may be in, as the
+// reader turning, scrolling or jumping into the book does.
+func (a *app) dismissCover() {
+	a.showCover = false
+	a.coverIntro = nil
+}
+
+// drawCover paints the cover over the sheet: alone while the book opens, and
+// dissolving into the place the book resumes at. It reports whether it drew the
+// frame, in which case the caller can draw no page.
+func (a *app) drawCover(p *ui.Painter, r ui.Rect) bool {
+	if a.paint == nil {
+		return false
+	}
+	alpha, moving := a.coverAlpha()
+	if a.coverIntro != nil && !moving {
+		// The dissolve has landed: the cover is gone for good, and the frame
+		// asked for here draws the reader's page, its folio and its menu.
+		a.dismissCover()
+		a.services.Invalidate()
+		return false
+	}
+	if !moving {
+		// The cover stands alone until the reader moves on.
+		return a.paint.DrawCover(p, a.cover, r, coverPad)
+	}
+	// The cover rests, then gives way: the frames have to keep coming.
+	p.AnimationFrame()
+	if alpha >= 1 || a.layout == nil {
+		return a.paint.DrawCover(p, a.cover, r, coverPad)
+	}
+	// The page the book opens at is drawn under the cover, and the cover fades
+	// over it: the dissolve reads as the book opening where it was left.
+	a.drawPaper(p, r)
+	if a.scrolling() {
+		a.drawScroll(p, r)
+	} else {
+		a.drawPages(p, r, a.page, 0)
+		a.drawSpine(p, r)
+	}
+	a.paint.SetFade(alpha)
+	defer a.paint.SetFade(1)
+	return a.paint.DrawCover(p, a.cover, r, coverPad)
+}
+
 // turnProgress is how far the turn in flight has come, from 0 to 1, and false
 // when the sheet is still.
 func (a *app) turnProgress() (float32, bool) {
@@ -221,8 +320,18 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	// pages are drawn, so this frame shows them. It runs before paintEnd, which
 	// is why the frame's upload count is the one this draw callback caused.
 	defer a.paint.FlushGlyphs()
-	if a.showCover && a.paint != nil && a.paint.DrawCover(p, a.cover, r, 28) {
-		return
+	if a.showCover && a.paint != nil {
+		if a.drawCover(p, r) {
+			return
+		}
+		// There is no cover to draw. Before the book is laid out the bitmap is
+		// still on its way and the frame shows the reading state, so the cover
+		// stays armed; once the dissolve is armed the image would have been
+		// decoded, so the book itself is the front.
+		if a.coverIntro != nil {
+			a.dismissCover()
+			a.services.Invalidate()
+		}
 	}
 	if a.layout == nil || a.paint == nil {
 		return

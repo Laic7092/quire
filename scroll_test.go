@@ -192,8 +192,8 @@ func TestScrollModeSelectsText(t *testing.T) {
 	if a.scrollY != clampf(top, 0, a.maxScroll()) {
 		t.Errorf("jumped to %.0f, want the chapter top %.0f", a.scrollY, top)
 	}
-	if a.chapterNumber() != e.Chapter+1 {
-		t.Errorf("chapter number %d after jumping to %d", a.chapterNumber(), e.Chapter+1)
+	if loc, ok := a.currentLoc(); !ok || loc.Chapter != e.Chapter {
+		t.Errorf("the column is in chapter %d after jumping to %d", loc.Chapter, e.Chapter)
 	}
 }
 

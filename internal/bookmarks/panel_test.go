@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/locales"
 	"github.com/laix/layx/render"
+	"github.com/laix/quire/locales"
 )
 
 func panelEntries() []Entry {
@@ -108,5 +108,31 @@ func TestPanelAddDisabledAtCurrent(t *testing.T) {
 	}
 	if added != 0 {
 		t.Errorf("the add control ran at a bookmarked place")
+	}
+}
+
+// The delete control's handler takes the row out of Entries, which is the
+// list's own count: it must run after the build, or the list goes on building
+// rows the panel no longer has, and the frame panics.
+func TestPanelRemoveShrinksRowsAfterBuild(t *testing.T) {
+	p := &Panel{Entries: panelEntries(), Selected: 0}
+	p.OnRemove = func(e Entry) {
+		for i := range p.Entries {
+			if p.Entries[i].ID == e.ID {
+				p.Entries = append(p.Entries[:i], p.Entries[i+1:]...)
+				return
+			}
+		}
+	}
+	tt := ui.NewTester(func(c *ui.Context) { p.View(c) }, 320, 420)
+	tt.Frame()
+	if err := tt.Click(locales.DeleteBookmark()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Entries) != 2 {
+		t.Fatalf("panel lists %d rows after the delete, want 2", len(p.Entries))
+	}
+	if !tt.HasText(locales.BookmarkCount(2)) || tt.HasText("第一卷 风起") {
+		t.Errorf("the frame did not show the remaining rows: %q", tt.Texts())
 	}
 }

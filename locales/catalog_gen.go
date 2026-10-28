@@ -118,6 +118,20 @@ func (msgs Messages) MenuOpen() string {
 	return Catalog.Format(msgs.locale, "menuOpen", nil)
 }
 
+// MenuNewWindow says "New Window"
+// in the language the app shows.
+//
+// The File menu item that opens another reader window on the library.
+func MenuNewWindow() string { return In(i18n.Locale()).MenuNewWindow() }
+
+// MenuNewWindow says "New Window"
+// in the language of msgs.
+//
+// The File menu item that opens another reader window on the library.
+func (msgs Messages) MenuNewWindow() string {
+	return Catalog.Format(msgs.locale, "menuNewWindow", nil)
+}
+
 // MenuCopySelection says "Copy Selected Text"
 // in the language the app shows.
 //
@@ -1668,6 +1682,70 @@ func BackToLibraryTip() string { return In(i18n.Locale()).BackToLibraryTip() }
 // The tooltip of the page's left edge, which goes back to the library.
 func (msgs Messages) BackToLibraryTip() string {
 	return Catalog.Format(msgs.locale, "backToLibraryTip", nil)
+}
+
+// NavBack says "Back"
+// in the language the app shows.
+//
+// The accessibility label of the folio's back chevron, which returns to the
+// place the reader jumped from.
+func NavBack() string { return In(i18n.Locale()).NavBack() }
+
+// NavBack says "Back"
+// in the language of msgs.
+//
+// The accessibility label of the folio's back chevron, which returns to the
+// place the reader jumped from.
+func (msgs Messages) NavBack() string {
+	return Catalog.Format(msgs.locale, "navBack", nil)
+}
+
+// NavBackTip says "Back (⌘[)"
+// in the language the app shows.
+//
+// The tooltip of the folio's back chevron, which returns to the place the
+// reader jumped from.
+func NavBackTip() string { return In(i18n.Locale()).NavBackTip() }
+
+// NavBackTip says "Back (⌘[)"
+// in the language of msgs.
+//
+// The tooltip of the folio's back chevron, which returns to the place the
+// reader jumped from.
+func (msgs Messages) NavBackTip() string {
+	return Catalog.Format(msgs.locale, "navBackTip", nil)
+}
+
+// NavForward says "Forward"
+// in the language the app shows.
+//
+// The accessibility label of the folio's forward chevron, which returns to
+// a place the reader stepped back from.
+func NavForward() string { return In(i18n.Locale()).NavForward() }
+
+// NavForward says "Forward"
+// in the language of msgs.
+//
+// The accessibility label of the folio's forward chevron, which returns to
+// a place the reader stepped back from.
+func (msgs Messages) NavForward() string {
+	return Catalog.Format(msgs.locale, "navForward", nil)
+}
+
+// NavForwardTip says "Forward (⌘])"
+// in the language the app shows.
+//
+// The tooltip of the folio's forward chevron, which returns to a place the
+// reader stepped back from.
+func NavForwardTip() string { return In(i18n.Locale()).NavForwardTip() }
+
+// NavForwardTip says "Forward (⌘])"
+// in the language of msgs.
+//
+// The tooltip of the folio's forward chevron, which returns to a place the
+// reader stepped back from.
+func (msgs Messages) NavForwardTip() string {
+	return Catalog.Format(msgs.locale, "navForwardTip", nil)
 }
 
 // SelectionCopied says "Copied {count, plural, one {# character} other {# characters}}"

@@ -129,7 +129,8 @@ func startOfWeek(t time.Time) time.Time {
 }
 
 // setGoals stores the reading goals the reader picked and saves them with the
-// rest of the preferences.
+// rest of the preferences. The goals are the year's, not a window's: every
+// window's home screen measures against the same ones.
 func (a *app) setGoals(books, days int) {
 	if books <= 0 {
 		books = defaultGoalBooks
@@ -139,6 +140,15 @@ func (a *app) setGoals(books, days int) {
 	}
 	if books == a.goalBooks && days == a.goalDays {
 		return
+	}
+	if a.desk != nil {
+		a.desk.goalBooks, a.desk.goalDays = books, days
+		for _, w := range a.desk.wins {
+			w.goalBooks, w.goalDays = books, days
+			if w.win != nil {
+				w.win.Invalidate()
+			}
+		}
 	}
 	a.goalBooks, a.goalDays = books, days
 	if a.st == nil {

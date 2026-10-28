@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"image"
+	"image/png"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
+	"github.com/laix/layx/render"
 )
 
 // A glide paints the column without building the window: the view is built once
@@ -243,4 +247,87 @@ func turnGlyphs(t *testing.T, snap bool) (rastered, slots int) {
 	}
 	s := a.paint.GlyphStats()
 	return s.Rasters, s.Slots
+}
+
+// A resumed book opens on its cover and then dissolves into the place it was
+// left at: the cover rests for a moment, gives way over the page, and the frame
+// that lands draws the folio of the place. A reader who asked for no motion
+// opens straight at the place.
+func TestOpeningCoverDissolvesIntoTheSavedPlace(t *testing.T) {
+	a := newWindow(t)
+	coverBook(t, a)
+	a.instant = false
+	a.showCover = true
+	tt := ui.NewTester(a.view, 1180, 800)
+	tt.Frame()
+	a.now = tt.Now
+	coverFrame := copyImage(tt.Image())
+
+	// What opening a book with a place saved leaves behind: the cover up, the
+	// position resumed, and the dissolve armed once the layout has landed.
+	a.beginCoverIntro()
+	if a.coverIntro == nil || !a.showCover {
+		t.Fatal("the cover was not armed to dissolve")
+	}
+	// The frame that arms the dissolve is the one that asks for the next.
+	tt.Frame()
+	if alpha, moving := a.coverAlpha(); !moving || alpha != 1 {
+		t.Fatalf("the cover starts at %v (moving %v), want it to rest", alpha, moving)
+	}
+
+	// The cover holds still before it gives way.
+	tt.Advance(coverHold / 2)
+	if !a.showCover {
+		t.Fatal("the cover left before its hold was over")
+	}
+	if !tt.HasText(locales.PageLabelCover()) {
+		t.Fatalf("the folio does not name the cover during the hold: %q", tt.Texts())
+	}
+
+	// The dissolve shows the page under a thinning cover.
+	tt.Advance(coverHold/2 + coverFadeDuration/2)
+	if !a.showCover {
+		t.Fatal("the dissolve landed early")
+	}
+	sheet := sheetRect(t, tt)
+	if differs, total := differing(coverFrame, tt.Image(), crop(sheet)); differs == 0 {
+		t.Errorf("the cover did not fade into the page: %d of %d bytes drew the same", differs, total)
+	}
+
+	// The frame that lands puts the cover away and draws the page's folio.
+	tt.Advance(coverFadeDuration/2 + 50*time.Millisecond)
+	if a.showCover || a.coverIntro != nil {
+		t.Fatalf("the cover did not give way: showCover %v intro %v", a.showCover, a.coverIntro)
+	}
+	if want := locales.PageLabelPages(a.page+1, a.layout.PageCount()); !tt.HasText(want) {
+		t.Errorf("the folio does not show %q after the cover: %q", want, tt.Texts())
+	}
+}
+
+func TestReducedMotionOpensAtThePlace(t *testing.T) {
+	a := newWindow(t)
+	a.instant = true
+	a.showCover = true
+	a.beginCoverIntro()
+	if a.showCover || a.coverIntro != nil {
+		t.Error("reduced motion kept the cover on the book")
+	}
+}
+
+// coverBook gives a a cover bitmap. The sample book the tests open has none of
+// its own, and a cover with no bitmap is one no frame can draw.
+func coverBook(t *testing.T, a *app) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 12))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	a.cover = render.ImageID(4096)
+	if !a.paint.SetImage(a.cover, buf.Bytes()) {
+		t.Fatal("the cover bitmap was not decoded")
+	}
 }

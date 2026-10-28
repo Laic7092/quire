@@ -36,6 +36,10 @@
   "@menuOpen": {
     "description": "The File menu item and the library's buttons that open a book."
   },
+  "menuNewWindow": "New Window",
+  "@menuNewWindow": {
+    "description": "The File menu item that opens another reader window on the library."
+  },
   "menuCopySelection": "Copy Selected Text",
   "@menuCopySelection": {
     "description": "The Edit menu item that copies the text selected on the page."
@@ -605,6 +609,22 @@
   "backToLibraryTip": "Back to the library (Esc)",
   "@backToLibraryTip": {
     "description": "The tooltip of the page's left edge, which goes back to the library."
+  },
+  "navBack": "Back",
+  "@navBack": {
+    "description": "The accessibility label of the folio's back chevron, which returns to the place the reader jumped from."
+  },
+  "navBackTip": "Back (⌘[)",
+  "@navBackTip": {
+    "description": "The tooltip of the folio's back chevron, which returns to the place the reader jumped from."
+  },
+  "navForward": "Forward",
+  "@navForward": {
+    "description": "The accessibility label of the folio's forward chevron, which returns to a place the reader stepped back from."
+  },
+  "navForwardTip": "Forward (⌘])",
+  "@navForwardTip": {
+    "description": "The tooltip of the folio's forward chevron, which returns to a place the reader stepped back from."
   },
   "selectionCopied": "Copied {count, plural, one {# character} other {# characters}}",
   "@selectionCopied": {

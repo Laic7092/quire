@@ -19,19 +19,24 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/internal/search"
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
-// app is the reader's state. The view builds the interface from it on the UI
-// thread; background work publishes results through Window.Update.
+// app is one window's reader state. The view builds that window's interface
+// from it on the UI thread; background work publishes results through
+// Window.Update. The state the app shares between windows lives on its desk.
 type app struct {
-	win *mygo.Window
+	// desk is the app-wide state this window belongs to: the store, the reading
+	// faces, the paper and the windows beside this one. It is nil only in a
+	// reader built by hand, as the tests do.
+	desk *desk
+	win  *mygo.Window
 	// winShared is the same window for background goroutines, which must not
 	// read the UI thread's field. The UI thread writes both together.
 	winShared atomic.Pointer[mygo.Window]
@@ -44,10 +49,9 @@ type app struct {
 	fontErr             error
 	fontsLoading        bool
 
-	// ready is set once the first window exists. Open-file events that arrive
-	// during launch wait in pendingOpen until then.
-	ready       bool
-	pendingOpen string
+	// ready is set once this reader's window exists. Until then an open-file
+	// event waits on the desk (see desk.pendingOpen).
+	ready bool
 	// opening is the path being read off the UI thread, so the same file
 	// reported twice (a launch argument and OpenFile) opens once.
 	opening string
@@ -95,10 +99,12 @@ type app struct {
 	file      string
 	startPath string
 
-	// cover is the book's cover image; showCover keeps it in front of page 0
-	// until the reader turns a page.
-	cover     render.ImageID
-	showCover bool
+	// cover is the book's cover image; showCover keeps it in front of the book
+	// until the reader moves on, or until coverIntro dissolves it into the place
+	// a resumed book opens at.
+	cover      render.ImageID
+	showCover  bool
+	coverIntro *coverIntro
 
 	// Layout job bookkeeping. Only touched on the UI thread.
 	layW, layH float32
@@ -130,6 +136,15 @@ type app struct {
 
 	body ui.Handle
 	area ui.Handle
+	// headBar is the reading bar, and headLeft and headRight the groups of
+	// controls at its ends: the book's name in the middle is given the room
+	// they leave it, measured on the committed frame. headPlace is the place
+	// it was last given, so a frame that measures a different one asks for the
+	// frame that draws it.
+	headBar   ui.Handle
+	headLeft  ui.Handle
+	headRight ui.Handle
+	headPlace titlePlace
 
 	// sel is the text the reader dragged over, and selQuads its rectangles for
 	// the current layout; selDragging marks a press that is still down,
@@ -192,8 +207,12 @@ type app struct {
 	// tileH the height of one of its tiles; scrollChapter is the chapter the
 	// panels were last rebuilt for.
 	layScroll bool
-	scrollY   float32
-	tileH     float32
+	// layGen counts the layouts published for the open book, so a place the
+	// trail remembers can tell whether its scrolling offset still names the
+	// same spot or the book has been laid out again since.
+	layGen  int
+	scrollY float32
+	tileH   float32
 	// viewTop and devScale are where the column's viewport was drawn and at what
 	// ratio, as of the last frame: a glide is over when the place it owes draws
 	// the same picture as the place it stands at (see (*app).landed).
@@ -237,6 +256,10 @@ type app struct {
 	// place is named changes. jumpAt marks it pending.
 	jumpLoc render.Location
 	jumpAt  bool
+	// nav is the trail of places the reader jumped to — a table of contents
+	// row, a search hit, a link, a footnote — which the folio's chevrons step
+	// back and forward through. Page turns and scrolling are not on it.
+	nav navHistory
 	// turning is the page turn being shown, nil when the sheet is still, and
 	// turnNext the direction a key still held asked for while that turn is on
 	// its way: it waits for the slide to land rather than restarting it.
@@ -385,7 +408,7 @@ func (a *app) turn(delta int) {
 	}
 	if a.showCover {
 		// The first turn puts the cover away and keeps the reading position.
-		a.showCover = false
+		a.dismissCover()
 		return
 	}
 	if a.layout == nil {
@@ -446,32 +469,55 @@ func (a *app) gotoPage(page int) {
 		return
 	}
 	a.page = a.snapPage(clampPage(page, a.layout.PageCount()))
-	a.showCover = false
+	a.dismissCover()
 	a.turning = nil
 	a.afterPage()
 }
 
-// gotoLoc is the panels' jump: a table of contents row or a search hit, named
-// by a document location. In a scrolling layout it moves the column; in a paged
-// one it turns to the page the location falls on.
+// gotoLoc is the panels' jump: a table of contents row, a search hit, a link
+// or a footnote, named by a document location. It leaves a stop on the trail
+// the folio's chevrons step through, so the reader can come back to where the
+// jump was made from.
 func (a *app) gotoLoc(loc render.Location) {
-	if a.layout == nil {
+	from, hadFrom := a.currentPlace()
+	to, ok := a.moveTo(loc)
+	if !hadFrom || !ok {
 		return
 	}
-	a.showCover = false
+	a.nav.jump(from, to)
+}
+
+// moveTo moves the reader to a location without touching the trail, and names
+// the place it landed at. In a scrolling layout it moves the column; in a paged
+// one it turns to the page the location falls on, so the place it names is the
+// top of that page.
+func (a *app) moveTo(loc render.Location) (navPlace, bool) {
+	if a.layout == nil {
+		return navPlace{}, false
+	}
+	a.dismissCover()
 	if a.scrolling() {
 		if y, ok := a.layout.OffsetOf(loc); ok {
+			// The column lands on the line the location falls on, exactly as
+			// asked: the place to come back to is the location itself, which
+			// survives a rebuild of the layout. Only a place clamped at the end
+			// of the book is named by where the column actually stands.
+			if resting := clampf(y, 0, a.maxScroll()); resting != y {
+				a.scrollTo(resting)
+				return a.currentPlace()
+			}
 			a.scrollTo(y)
-			return
+			return navPlace{loc: loc, gen: a.layGen, scroll: y, col: true}, true
 		}
 		a.gotoChapter(loc.Chapter)
-		return
+		return a.currentPlace()
 	}
 	if page, ok := a.layout.PageOf(loc); ok {
 		a.gotoPage(page)
-		return
+		return a.currentPlace()
 	}
 	a.gotoChapter(loc.Chapter)
+	return a.currentPlace()
 }
 
 // gotoChapter jumps to the start of a chapter, which is where a table of
@@ -514,6 +560,11 @@ func (a *app) setOptions(o reader.Options) {
 		}
 	}
 	a.opts = o
+	if a.desk != nil {
+		// The window a reader opens next starts from the settings the last one
+		// was given, as the store's preferences are the app's.
+		a.desk.opts = o
+	}
 	a.optsAt = time.Now()
 	a.sheetSettled()
 	a.failed = false
@@ -617,6 +668,9 @@ func (a *app) setTurn(t reader.Turn) {
 		return
 	}
 	a.opts.Turn = t
+	if a.desk != nil {
+		a.desk.opts = a.opts
+	}
 	a.savePrefs()
 }
 
@@ -665,7 +719,14 @@ func (a *app) savePrefs() {
 // layout keeps its line boxes and pages, so the next frame repaints the pages on
 // screen and the chrome with it, whatever the book's size.
 func (a *app) setTheme(t reader.Theme) {
-	if t == a.theme {
+	if t == a.theme && !a.themeSys {
+		return
+	}
+	if a.desk != nil {
+		// Every window turns the page together: the palette the pages are laid
+		// out with is the process's, so two papers would repaint in each other's
+		// colours.
+		a.desk.setTheme(t, a)
 		return
 	}
 	// A paper change is a repaint of the same pages, so the log can say that it
@@ -908,6 +969,7 @@ func (a *app) ensureLayout(w, h float32) {
 			a.dropPreview()
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
+			a.layGen++
 			a.layScroll = opts.Scroll
 			if a.jumpAt {
 				a.jumpAt = false
@@ -937,6 +999,7 @@ func (a *app) ensureLayout(w, h float32) {
 							a.scrollY = y
 							a.resumeNote = resumeScrollNote(layout, loc, how)
 							a.say(a.resumeNote)
+							a.beginCoverIntro()
 						}
 					}
 				}
@@ -951,6 +1014,7 @@ func (a *app) ensureLayout(w, h float32) {
 						a.page = a.snapPage(page)
 						a.resumeNote = locales.ResumePage(page+1, resumeHow(how))
 						a.say(a.resumeNote)
+						a.beginCoverIntro()
 					}
 				}
 			}
@@ -1002,6 +1066,7 @@ func (a *app) repaper(sw, sh float32, opts reader.Options) bool {
 		return false
 	}
 	a.layout = reader.Recolor(a.layout)
+	a.layGen++
 	a.layPaper = paperOf(reader.Current())
 	return true
 }
@@ -1065,40 +1130,12 @@ func (a *app) chooseDir() {
 		win.Update(func() {
 			defer a.refresh(win)
 			a.pan.ImportDir(dir)
+			if a.desk != nil {
+				// A folder imported in one window joins every shelf.
+				a.desk.refreshShelves(a)
+			}
 		})
 	}()
-}
-
-// openPath starts reading a book. It runs on the UI thread — the shelf, the
-// menu bar and the system's open-file events all call it — and hands the
-// parsing to a goroutine. A book that is already open or opening is left alone:
-// a launch argument and an OpenFile event name the same file.
-func (a *app) openPath(path string) {
-	if path == "" {
-		return
-	}
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	win := a.showWindow()
-	if win == nil {
-		a.pendingOpen = path
-		return
-	}
-	if a.opening == path || (a.file == path && (a.loading || a.layout != nil)) {
-		return
-	}
-	a.opening = path
-	// The faces a book is set in are read with it, the first time a book is
-	// read: a shelf alone never pays for the system's CJK face, which costs
-	// tens of megabytes once parsed. The serif file is only read for a book set
-	// in the serif face.
-	face := a.opts.Font
-	load := !a.fontsLoading && (a.fonts == nil || face == reader.FontSerif && !a.fonts.HasSerif())
-	if load {
-		a.fontsLoading = true
-	}
-	go a.openAsync(win, path, a.fonts, face, load)
 }
 
 // loadFonts opens the faces a book is set in, for the face setting: the
@@ -1108,6 +1145,11 @@ func (a *app) openPath(path string) {
 func (a *app) loadFonts(face string) (*reader.Fonts, error) {
 	if a.fontErr != nil {
 		return nil, a.fontErr
+	}
+	if a.desk != nil {
+		// The faces are the app's: the first window parses them and every
+		// other window reads in them without a second parse.
+		return a.desk.loadFonts(face, a.fontSans, a.fontSerif)
 	}
 	serif := a.fontSerif
 	if face != reader.FontSerif {
@@ -1212,9 +1254,10 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		if a.opening == path {
 			a.opening = ""
 		}
-		if fonts != nil && fonts != a.fonts {
+		if fonts != nil && (fonts != a.fonts || a.paint == nil) {
 			// The faces this session read with, opened with the book that needed
-			// them: from here on a page can be laid out and drawn.
+			// them: from here on a page can be laid out and drawn. A window made
+			// after the parse already has them but not their painter.
 			a.fonts = fonts
 			a.paint = reader.NewUIPainter(nil, fonts)
 			a.doc = nil
@@ -1223,7 +1266,21 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		a.failed = false
 		a.book = b
 		a.cover = b.Cover
+		if a.pan != nil {
+			// The panels follow the book as it opens, before anything is drawn.
+			a.pan.Opened(b, path)
+			a.pan.Refresh(b, nil, 0)
+			if a.desk != nil {
+				// The book just opened joins the shelves of the other,
+				// still-library windows.
+				a.desk.refreshShelves(a)
+			}
+		}
+		// The book opens on its cover. A book with a place saved in the store
+		// dissolves from it into that place once the layout lands: the resume
+		// below starts the dissolve (beginCoverIntro).
 		a.showCover = b.HasCover
+		a.coverIntro = nil
 		if a.paint != nil {
 			a.paint.ClearImages()
 		}
@@ -1247,6 +1304,8 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		a.status = locales.OpenedBook(b.Title)
 		a.pendingResume = true
 		a.resumeNote = ""
+		// The trail of jumps belongs to the book that was open.
+		a.nav.reset()
 		a.layScroll = false
 		a.scrollY, a.tileH, a.scrollChapter = 0, 0, -1
 		a.scrollGoal, a.scrollAt = 0, time.Time{}
@@ -1254,10 +1313,6 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		// book before this one; this book resumes from the store instead.
 		a.jumpAt = false
 		a.hoverLink = false
-		if a.pan != nil {
-			a.pan.Opened(b, path)
-			a.pan.Refresh(b, nil, 0)
-		}
 		title := appName
 		if a.book != nil {
 			title = locales.WindowTitle(a.book.Title)
@@ -1280,14 +1335,14 @@ const appName = "Quire"
 // buttons go is the platform's own business — traffic lights at the left on
 // macOS, caption buttons at the right on Windows, whichever side the desktop
 // configures on Linux — and c.TitleBar() reports it.
-func windowOptions(view func(*ui.Context)) mygo.WindowOptions {
+func windowOptions(view func(*ui.Context), stateKey string) mygo.WindowOptions {
 	o := mygo.WindowOptions{
 		Title:         appName,
 		Width:         787,
 		Height:        590,
 		MinWidth:      640,
 		MinHeight:     420,
-		StateKey:      "main",
+		StateKey:      stateKey,
 		TitleBarStyle: mygo.TitleBarHidden,
 		// The window controls fill the reader's own bar, so that their
 		// glyphs centre on the toolbar's: Windows centres them in this
@@ -1306,62 +1361,35 @@ func windowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return o
 }
 
-// newWindow makes the reader's window and keeps a.win pointing at it. macOS
-// keeps the app running when its last window closes, so this runs again from a
-// Dock click.
-func (a *app) newWindow() {
-	win := mygo.NewWindow(windowOptions(a.view))
-	a.win = win
-	a.winShared.Store(win)
-	win.OnClose(func(*mygo.CloseEvent) {
-		// Flush the debounced writing on the way out, and let showWindow make
-		// another window if the app stays up.
-		if a.st != nil {
-			_ = a.st.Flush()
-		}
-		if a.win == win {
-			a.win = nil
-			a.winShared.Store(nil)
-		}
-	})
-}
-
-// showWindow returns the window, making one when there is none. Before Run
-// there is no window to make: open-file events wait in pendingOpen.
-func (a *app) showWindow() *mygo.Window {
-	if !a.ready {
-		return nil
+// menuAction runs a menu command against the window the reader is looking at
+// and asks that window for a frame. The same bar serves every window, and the
+// app keeps running with all of them closed on macOS, so the command makes a
+// window when none is left.
+func (a *app) menuAction(fn func(*app)) {
+	target := a
+	if a.desk != nil {
+		target = a.desk.menuApp()
 	}
-	if a.win == nil || a.win.IsDestroyed() {
-		a.newWindow()
-	}
-	return a.win
-}
-
-// refresh redraws the window the reader is showing now. Work started in one
-// window can land after the reader closed it and opened another, whose Update
-// the old window cannot ask for a frame.
-func (a *app) refresh(win *mygo.Window) {
-	if a.win != nil && a.win != win {
-		a.win.Invalidate()
-	}
-}
-
-// menuAction runs a menu command on the main thread and asks the view for a
-// frame. The menu bar works with the window closed, and brings it back.
-func (a *app) menuAction(fn func()) {
-	win := a.showWindow()
-	if win == nil {
+	if target == nil {
 		return
 	}
-	fn()
-	win.Invalidate()
+	fn(target)
+	target.refresh(target.win)
 }
 
 // menuBar is the macOS menu bar. The other platforms keep the window's own
 // shortcuts: a native UI window has no menu bar there. The labels follow the
 // language the app shows, so the bar is made again when it changes.
+//
+// The bar is the app's, and every command runs against the window the reader is
+// looking at: the closures below ask the desk for that window rather than
+// holding the one that happened to install the menu.
 func (a *app) menuBar() *mygo.Menu {
+	// onActive is the command for a window the reader is looking at now, or a
+	// new one when the last window was closed.
+	onActive := func(fn func(*app)) func(*mygo.MenuItem, *mygo.Window) {
+		return func(*mygo.MenuItem, *mygo.Window) { a.menuAction(fn) }
+	}
 	copySelection := &mygo.MenuItem{
 		ID:    "copySelection",
 		Label: locales.MenuCopySelection(),
@@ -1370,7 +1398,7 @@ func (a *app) menuBar() *mygo.Menu {
 		// No accelerator: ⌘C must reach the view for the page selection and
 		// the focused search field. An enabled menu item would take the key
 		// first and copy neither of them.
-		Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.copyPageText) },
+		Click: onActive(func(t *app) { t.copyPageText() }),
 	}
 	a.menuCopy = copySelection
 	a.menuCopyOn = len(a.selQuads) > 0
@@ -1378,35 +1406,36 @@ func (a *app) menuBar() *mygo.Menu {
 		ID:       "addNote",
 		Label:    locales.AddNote(),
 		Disabled: len(a.selQuads) == 0,
-		Click:    func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.addNoteFromSelection) },
+		Click:    onActive(func(t *app) { t.addNoteFromSelection() }),
 	}
 	a.menuAddNote = addNote
 	scroll := &mygo.MenuItem{
 		Label:   locales.MenuScrollReading(),
 		Type:    mygo.MenuItemCheckbox,
 		Checked: a.opts.Scroll,
-		Click: func(*mygo.MenuItem, *mygo.Window) {
-			a.menuAction(func() {
-				o := a.opts
-				o.Scroll = !o.Scroll
-				a.setOptions(o)
-			})
-		},
+		Click: onActive(func(t *app) {
+			o := t.opts
+			o.Scroll = !o.Scroll
+			t.setOptions(o)
+		}),
 	}
 	a.menuScroll = scroll
 	show := func(sidebar string) func(*mygo.MenuItem, *mygo.Window) {
-		return func(*mygo.MenuItem, *mygo.Window) {
-			a.menuAction(func() {
-				if a.pan != nil {
-					a.pan.Show(sidebar)
-				}
-			})
-		}
+		return onActive(func(t *app) {
+			if t.pan != nil {
+				t.pan.Show(sidebar)
+			}
+		})
 	}
-	return mygo.NewMenu([]*mygo.MenuItem{
+	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu},
 		{Label: locales.MenuFile(), Submenu: []*mygo.MenuItem{
-			{Label: locales.MenuOpen(), Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { a.chooseFile() }},
+			{Label: locales.MenuNewWindow(), Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+				if a.desk != nil && a.desk.ready {
+					a.desk.openWindow()
+				}
+			}},
+			{Label: locales.MenuOpen(), Accelerator: "CmdOrCtrl+O", Click: onActive((*app).chooseFile)},
 			{Role: mygo.RoleOpenRecent},
 			mygo.Separator(),
 			{Role: mygo.RoleClose},
@@ -1423,24 +1452,30 @@ func (a *app) menuBar() *mygo.Menu {
 			addNote,
 		}},
 		{Label: locales.MenuView(), Submenu: []*mygo.MenuItem{
-			{Label: locales.MenuSidebar(), Accelerator: "CmdOrCtrl+B", Click: func(*mygo.MenuItem, *mygo.Window) { a.menuAction(a.toggleSidebar) }},
-			{Label: locales.MenuSortByTitle(), Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: func(*mygo.MenuItem, *mygo.Window) {
-				a.menuAction(func() { a.sortByTitle = !a.sortByTitle })
-			}},
+			{Label: locales.MenuSidebar(), Accelerator: "CmdOrCtrl+B", Click: onActive((*app).toggleSidebar)},
+			{Label: locales.MenuSortByTitle(), Type: mygo.MenuItemCheckbox, Checked: a.sortByTitle, Click: onActive(func(t *app) {
+				t.sortByTitle = !t.sortByTitle
+			})},
 			scroll,
 			{Label: locales.MenuContents(), Accelerator: "CmdOrCtrl+T", Click: show(appstate.SidebarToc)},
 			{Label: locales.MenuSearch(), Accelerator: "CmdOrCtrl+F", Click: show(appstate.SidebarSearch)},
 			{Label: locales.PanelBookmarks(), Accelerator: "CmdOrCtrl+Shift+B", Click: show(appstate.SidebarBookmarks)},
 			{Label: locales.PanelNotes(), Accelerator: "CmdOrCtrl+Shift+N", Click: show(appstate.SidebarNotes)},
-			{Label: locales.MenuDisplaySettings(), Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
-				a.menuAction(func() { a.aaOpen = true })
-			}},
+			{Label: locales.MenuDisplaySettings(), Accelerator: "CmdOrCtrl+,", Click: onActive(func(t *app) { t.aaOpen = true })},
 			mygo.Separator(),
 			{Role: mygo.RoleToggleFullScreen},
 		}},
 		{Role: mygo.RoleWindowMenu},
 		{Role: mygo.RoleHelp},
 	})
+	if a.desk != nil {
+		// One bar, shared by every window: the items live on the desk so the
+		// focused window can keep them in step whichever window installed it.
+		a.desk.menuOwner = a
+		a.desk.menuCopy, a.desk.menuAddNote, a.desk.menuScroll = copySelection, addNote, scroll
+		a.desk.menuCopyOn = len(a.selQuads) > 0
+	}
+	return menu
 }
 
 func main() {
@@ -1483,36 +1518,24 @@ func main() {
 		}
 	}
 
-	a := &app{
-		opts:      reader.DefaultOptions(),
-		instant:   os.Getenv("LAYX_NO_ANIM") != "",
-		status:    "",
-		startPath: flag.Arg(0),
+	// The desk owns what every window shares: the store, the reading faces, the
+	// paper, the goals and the menu bar.
+	d := &desk{
 		st:        st,
-		pan:       appstate.New(st),
+		opts:      reader.DefaultOptions(),
+		theme:     reader.ThemeQuiet,
+		goalBooks: defaultGoalBooks,
+		goalDays:  defaultGoalDays,
 	}
-	a.goalBooks, a.goalDays = defaultGoalBooks, defaultGoalDays
-	if recovered != "" {
-		a.notice = locales.StateRecovered(recovered)
-		log.Printf("store: damaged state backed up to %s", recovered)
-	}
-	// The window opens on Books' own reading paper, the graphite one; the
-	// display settings switch it to any of the other five.
-	a.theme = reader.ThemeQuiet
-	a.themeSys = false
 	if st != nil {
 		prefs := st.State().Prefs
 		if prefs.GoalBooks > 0 {
-			a.goalBooks = prefs.GoalBooks
+			d.goalBooks = prefs.GoalBooks
 		}
 		if prefs.GoalDays > 0 {
-			a.goalDays = prefs.GoalDays
+			d.goalDays = prefs.GoalDays
 		}
-		if prefs.FontSize == 0 && prefs.Theme == "" {
-			// Record the defaults once, so the state file shows the shape.
-			a.savePrefs()
-		}
-		a.opts = reader.Options{
+		d.opts = reader.Options{
 			FontSize:   prefs.FontSize,
 			LineHeight: prefs.LineHeight,
 			Font:       prefs.Font,
@@ -1523,45 +1546,45 @@ func main() {
 			Turn:       reader.Turn(prefs.Turn),
 		}.Normalized()
 		if prefs.Theme != "" {
-			a.theme = reader.ParseTheme(prefs.Theme)
-			a.themeSys = false
+			d.theme = reader.ParseTheme(prefs.Theme)
+			d.themeSys = false
 		}
 	}
-	a.pan.OnPickDir = a.chooseDir
-	a.pan.Reading = a.currentLoc
-	a.pan.Cover = a.coverBitmap
-	a.pan.Open = a.openPath
-	a.pan.Jump = a.gotoLoc
-	a.pan.OnHits = a.refreshMarks
-	a.wireNoteActions()
-	a.pan.OnNotes = a.refreshMarks
-	a.pan.Post = func(fn func()) {
-		if win := a.winShared.Load(); win != nil {
-			win.Update(func() {
-				defer a.refresh(win)
-				fn()
-			})
-		}
-	}
-	a.syncSettingsFields()
-	// The reader floats its panels over the page, so a panel remembered from
-	// the previous session waits for the book that would show it; the library
-	// has its own source list and never floats one.
-	if a.startPath == "" && a.pan.Showing() {
-		a.pan.Show(appstate.SidebarNone)
-	}
-
 	// The reading faces are named here, not read: a parsed system CJK face costs
 	// tens of megabytes, and the shelf alone is set in the window's own Inter.
 	// The first book opens them, in the faces its setting reads in (see
-	// (*app).loadFonts).
+	// (*desk).loadFonts).
 	fontPath, fontErr := reader.FindFont(*fontFlag)
+	d.fontSans, d.fontErr = fontPath, fontErr
+	d.fontSerif = reader.FindSerif(*serifFlag)
+
+	// The first window carries the launch: the book named on the command line,
+	// the recovered state's notice, and the app's own status.
+	first := d.newApp()
+	d.add(first)
+	first.startPath = flag.Arg(0)
+	if recovered != "" {
+		first.notice = locales.StateRecovered(recovered)
+		log.Printf("store: damaged state backed up to %s", recovered)
+	}
 	if fontErr != nil {
-		a.status = fontErr.Error()
+		first.status = fontErr.Error()
 		log.Println(fontErr)
 	}
-	a.fontSans, a.fontErr = fontPath, fontErr
-	a.fontSerif = reader.FindSerif(*serifFlag)
+	if st != nil {
+		prefs := st.State().Prefs
+		if prefs.FontSize == 0 && prefs.Theme == "" {
+			// Record the defaults once, so the state file shows the shape.
+			first.savePrefs()
+		}
+	}
+	// The reader floats its panels over the page, so a panel remembered from
+	// the previous session waits for the book that would show it; the library
+	// has its own source list and never floats one.
+	if first.startPath == "" && first.pan.Showing() {
+		first.pan.Show(appstate.SidebarNone)
+	}
+
 	// The performance log, if the reader asked for one: it names the machine and
 	// the settings first, then what every frame and every layout cost. It takes
 	// the standard logger with it, so MyGo's own frame lines land in the file.
@@ -1570,78 +1593,94 @@ func main() {
 		env:       os.Getenv("LAYX_PERF"),
 		file:      os.Getenv("LAYX_PERF_FILE"),
 		statePath: statePath,
-		reading:   perfReading(a.opts, a.theme),
+		reading:   perfReading(d.opts, d.theme),
 		font:      fontPath,
 	})
 	// A file opened with the app — from the Finder, the Dock, Open Recent or a
-	// second instance — may arrive before the window exists.
-	mygo.App.OnOpenFile(a.openPath)
+	// second instance — may arrive before the window exists; the desk holds it
+	// until then and chooses the window it belongs in.
+	mygo.App.OnOpenFile(d.openExternal)
 	// A second instance only brings the reader forward; MyGo passes its files
 	// to OnOpenFile above.
 	mygo.App.OnSecondInstance(func([]string, string) {
-		if win := a.showWindow(); win != nil {
-			win.Restore()
-			win.Focus()
+		a := d.focused()
+		if a == nil {
+			a = d.focusOrOpen()
 		}
+		if a == nil {
+			return
+		}
+		a.focusWindow()
 	})
 	// The app speaks the languages of its catalogs, and MyGo's own strings,
 	// including the menu roles', follow: importing the catalogs registers them
 	// with package i18n, which is what makes those the app's languages.
 	//
-	// The menu bar and the window title are set once, so they are set again
+	// The menu bar and the window titles are set once, so they are set again
 	// when the language the app shows changes: switching it in System Settings
 	// relabels them without a restart.
 	mygo.App.OnLocaleChanged(func(string) {
 		if runtime.GOOS == "darwin" {
-			mygo.App.SetMenu(a.menuBar())
+			// Rebuild the bar with the app that installed it, whether or not
+			// its window is still open: the bar is visible with no window at
+			// all, and it must change language with the app.
+			a := d.menuOwner
+			if a == nil {
+				a = d.focusOrOpen()
+			}
+			if a != nil {
+				mygo.App.SetMenu(a.menuBar())
+			}
 		}
-		if a.win == nil {
-			return
+		for _, a := range d.wins {
+			if !a.live() {
+				continue
+			}
+			if a.book != nil {
+				a.win.SetTitle(locales.WindowTitle(a.book.Title))
+			} else {
+				a.win.SetTitle(appName)
+			}
+			a.win.Invalidate()
 		}
-		if a.book != nil {
-			a.win.SetTitle(locales.WindowTitle(a.book.Title))
-		} else {
-			a.win.SetTitle(appName)
-		}
-		a.win.Invalidate()
 	})
 	if runtime.GOOS == "darwin" {
-		// Closing the window leaves the app in the Dock, as every Mac app;
+		// Closing the last window leaves the app in the Dock, as every Mac app;
 		// clicking the icon brings back a window with the reader as it was.
 		mygo.App.OnWindowAllClosed(func() {})
 		mygo.App.OnActivate(func(hasVisibleWindows bool) {
 			if hasVisibleWindows {
 				return
 			}
-			if win := a.showWindow(); win != nil {
-				win.Show()
-				win.Focus()
+			if a := d.focusOrOpen(); a != nil && a.live() {
+				a.win.Show()
+				a.focusWindow()
 			}
 		})
-		mygo.App.SetMenu(a.menuBar())
+		mygo.App.SetMenu(first.menuBar())
 	}
 
 	mygo.App.WhenReady(func() {
-		a.ready = true
-		a.newWindow()
+		d.ready = true
+		first.newWindow()
 		// The shelf is the books the store remembers: it is listed from there on
 		// every launch, so a book opened once is still there. The flag imports a
 		// folder into that list first, and the listing shows the whole of it.
 		if *shelfFlag != "" {
-			a.pan.ImportDir(*shelfFlag)
+			first.pan.ImportDir(*shelfFlag)
 		} else {
-			a.pan.ReloadShelf()
+			first.pan.ReloadShelf()
 		}
-		if a.pendingOpen == "" && a.startPath != "" {
-			if abs, err := filepath.Abs(a.startPath); err == nil {
-				a.startPath = abs
+		if d.pendingOpen == "" && first.startPath != "" {
+			if abs, err := filepath.Abs(first.startPath); err == nil {
+				first.startPath = abs
 			}
-			a.pendingOpen = a.startPath
+			d.pendingOpen = first.startPath
 		}
-		if a.pendingOpen != "" {
-			path := a.pendingOpen
-			a.pendingOpen = ""
-			a.openPath(path)
+		if d.pendingOpen != "" {
+			path := d.pendingOpen
+			d.pendingOpen = ""
+			d.openExternal(path)
 		}
 	})
 	runErr := mygo.App.Run()

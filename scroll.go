@@ -186,7 +186,7 @@ func (a *app) scrollNow(y float32) {
 	if a.layout == nil {
 		return
 	}
-	a.showCover = false
+	a.dismissCover()
 	a.jumpAt = false
 	// A glide still on its way is cut short here, and the log counts it: the
 	// column was moved by something other than the ask it was following.
@@ -220,7 +220,7 @@ func (a *app) scrollBy(dy float32) {
 		return
 	}
 	// Any scrolling is a turn of the page as far as the cover is concerned.
-	a.showCover = false
+	a.dismissCover()
 	a.jumpAt = false
 	if a.instant {
 		a.scrollNow(a.scrollY + dy)
@@ -576,7 +576,7 @@ func (a *app) scrollKey(d float32) {
 	if a.layout == nil || d == 0 {
 		return
 	}
-	a.showCover = false
+	a.dismissCover()
 	a.jumpAt = false
 	if a.instant {
 		a.scrollNow(a.scrollY + d)

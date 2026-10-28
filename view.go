@@ -1,11 +1,13 @@
 package main
 
 import (
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/library"
@@ -13,7 +15,6 @@ import (
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/internal/widgets"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
 // Window metrics, in DIPs, as the two Books windows have them: a shallow bar
@@ -31,6 +32,15 @@ const (
 	// bookmark control after it.
 	toolbarHeight = 26
 	toolbarCell   = 27
+
+	// The book's name in the bar is centred in the window, but it is cut where
+	// the clusters of controls begin, kept a little clear of them, and capped
+	// so a long name does not run the width of a wide window. A name the bar
+	// had to cut shows whole on its tooltip; one with less room than
+	// titleMinWidth left is not worth drawing, and the bar keeps its controls.
+	titleMaxWidth = 320
+	titleGap      = 16
+	titleMinWidth = 48
 
 	// The reading panels float over the page in a card at the left, as Books
 	// floats its table of contents: they take their width from the page's
@@ -191,7 +201,7 @@ func (a *app) keys(c *ui.Context) {
 		case a.aaOpen:
 			a.aaOpen = false
 		case a.showCover:
-			a.showCover = false
+			a.dismissCover()
 		case a.pan != nil && a.pan.Showing():
 			a.pan.Show(appstate.SidebarNone)
 		case len(a.selQuads) > 0:
@@ -208,6 +218,17 @@ func (a *app) keys(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyO) {
 		a.chooseFile()
 	}
+	// The File menu carries the new-window command on macOS; the platforms
+	// without a menu bar get the key here. It asks for the window on the next
+	// main-loop turn rather than making one in the middle of a build.
+	if runtime.GOOS != "darwin" && c.Shortcut(ui.Cmd, ui.KeyN) && a.desk != nil && a.desk.ready && a.win != nil {
+		d := a.desk
+		a.win.Update(func() {
+			if d.ready {
+				d.openWindow()
+			}
+		})
+	}
 	if a.book == nil {
 		// The library's own search: ⌘F opens the field, as its row in the
 		// source list does.
@@ -222,6 +243,14 @@ func (a *app) keys(c *ui.Context) {
 	if c.Shortcut(ui.Cmd, ui.KeyC) {
 		// The selection stays after a copy, as in every other reader.
 		a.copySelection(c)
+	}
+	// The recent jumps are the folio's chevrons, with the brackets a reader
+	// already uses to go back and forward elsewhere.
+	if c.Shortcut(ui.Cmd, ui.KeyBracketLeft) {
+		a.navBack()
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyBracketRight) {
+		a.navForward()
 	}
 	if c.Shortcut(0, ui.KeyLeft) || c.Shortcut(0, ui.KeyPageUp) {
 		a.turn(-1)
@@ -263,21 +292,43 @@ func (a *app) keys(c *ui.Context) {
 	}
 }
 
-// syncMenu keeps the menu bar's state in step with the view. It costs nothing
-// when no menu was installed, as on Linux and Windows.
+// syncMenu keeps the menu bar's state in step with the window the reader is
+// looking at. One bar serves every window, so a window that is not focused
+// leaves it alone: the focused window's own frame keeps the copy command and
+// the reading mode in step. It costs nothing when no menu was installed, as on
+// Linux and Windows.
 func (a *app) syncMenu() {
-	if a.menuCopy == nil {
+	copyItem, noteItem, scrollItem := a.menuCopy, a.menuAddNote, a.menuScroll
+	// The items live on the desk when several windows share one bar: whichever
+	// window installed it, the focused window writes to the same items.
+	if a.desk != nil {
+		copyItem, noteItem, scrollItem = a.desk.menuCopy, a.desk.menuAddNote, a.desk.menuScroll
+	}
+	if copyItem == nil {
 		return
 	}
-	if on := len(a.selQuads) > 0; on != a.menuCopyOn {
+	if a.win != nil && !a.win.IsFocused() {
+		return
+	}
+	on := len(a.selQuads) > 0
+	changed := false
+	if a.desk != nil {
+		if on != a.desk.menuCopyOn {
+			a.desk.menuCopyOn = on
+			changed = true
+		}
+	} else if on != a.menuCopyOn {
 		a.menuCopyOn = on
-		a.menuCopy.SetEnabled(on)
-		if a.menuAddNote != nil {
-			a.menuAddNote.SetEnabled(on)
+		changed = true
+	}
+	if changed {
+		copyItem.SetEnabled(on)
+		if noteItem != nil {
+			noteItem.SetEnabled(on)
 		}
 	}
-	if a.menuScroll != nil && a.menuScroll.IsChecked() != a.opts.Scroll {
-		a.menuScroll.SetChecked(a.opts.Scroll)
+	if scrollItem != nil && scrollItem.IsChecked() != a.opts.Scroll {
+		scrollItem.SetChecked(a.opts.Scroll)
 	}
 }
 
@@ -294,23 +345,37 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 	pal := a.chrome
 	ui.Row(c).FillWidth().Height(max(headerHeight, bar.Height)).
 		Padding(0, 8+bar.Right, 0, 8+bar.Left).AlignItems(ui.Center).DragWindow().
-		Children(func() {
-			a.toolbarCluster(c, func() {
-				a.panelButton(c, appstate.SidebarToc, icons.ListBullet, locales.PanelContents(), locales.PanelContentsTip())
-				a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, locales.PanelBookmarks(), locales.PanelBookmarksTip())
-				a.panelButton(c, appstate.SidebarNotes, icons.NoteCard, locales.PanelNotes(), locales.PanelNotesTip())
-			})
+		Bind(&a.headBar).Children(func() {
+		a.toolbarCluster(c, func() {
+			a.panelButton(c, appstate.SidebarToc, icons.ListBullet, locales.PanelContents(), locales.PanelContentsTip())
+			a.panelButton(c, appstate.SidebarBookmarks, icons.BookMarkSquare, locales.PanelBookmarks(), locales.PanelBookmarksTip())
+			a.panelButton(c, appstate.SidebarNotes, icons.NoteCard, locales.PanelNotes(), locales.PanelNotesTip())
+		}).Bind(&a.headLeft)
 
-			// The book's name is centred in the window itself, not in the room
-			// left between the clusters, as Books sets it.
-			ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).Center().PassThrough().Children(func() {
+		// The book's name is centred in the window itself, as Books sets
+		// it, but only in the room the controls at either end leave it: a
+		// long name is cut short of them rather than running under them,
+		// and shows whole on its tooltip.
+		place := a.titleRoom(c)
+		name := ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
+			Padding(0, place.right, 0, place.left).Center().PassThrough()
+		name.Children(func() {
+			if place.w >= titleMinWidth {
 				ui.Text(c, a.book.Title).FontSize(12).FontWeight(600).
-					TextColor(t.TextMuted).SingleLine().MaxWidth(320)
-			})
-			ui.Spacer(c)
+					TextColor(t.TextMuted).SingleLine().Ellipsis("…").
+					MaxWidth(place.w).Tooltip(a.book.Title)
+			}
+		})
+		ui.Spacer(c)
 
+		// Everything right of the name, measured as one: the message about a
+		// book that failed to lay out stands in front of the controls, so the
+		// name must keep clear of it too.
+		end := ui.Row(c).AlignItems(ui.Center).Bind(&a.headRight)
+		end.Children(func() {
 			if a.failed && a.status != "" {
-				ui.Text(c, a.status).FontSize(11).TextColor(t.Danger).SingleLine().MaxWidth(180)
+				ui.Text(c, a.status).FontSize(11).TextColor(t.Danger).SingleLine().
+					MaxWidth(180).Padding(0, 6, 0, 0)
 			}
 			a.toolbarCluster(c, func() {
 				a.toolbarButton(c, icons.Share, locales.Share(), locales.Share(), nil)
@@ -343,6 +408,43 @@ func (a *app) header(c *ui.Context, t *ui.Theme) {
 				ui.Icon(c, icons.Bookmark).Size(15, 15).TextColor(reader.UIColor(ink))
 			})
 		})
+	})
+}
+
+// titlePlace is where the reading bar puts the book's name: its width, and the
+// insets from the bar's ends of the box that centres it.
+type titlePlace struct {
+	w, left, right float32
+}
+
+// titleRoom measures where the name goes: the room the two groups of controls
+// leave it, no more than titleMaxWidth, centred in the window while that keeps
+// it clear of them, as Books centres it, and centred between them when the
+// window is too narrow for both. The groups are the committed frame's, so a
+// frame that measures a place other than the one it drew asks for the frame
+// that draws it; the first frame of a window knows neither and leaves the name
+// its full width until the second.
+func (a *app) titleRoom(c *ui.Context) titlePlace {
+	place := titlePlace{w: titleMaxWidth}
+	bar, left, right := a.headBar.Bounds(c), a.headLeft.Bounds(c), a.headRight.Bounds(c)
+	if bar.W > 0 && left.W > 0 && right.W > 0 {
+		centre := bar.X + bar.W/2
+		from, to := left.X+left.W+titleGap/2, right.X-titleGap/2
+		place.w = max(0, min(place.w, to-from))
+		if half := place.w / 2; centre-half < from || centre+half > to {
+			// Too narrow for both: the name centres between the controls, in
+			// the room it has, rather than in the window.
+			place.left, place.right = max(0, from-bar.X), max(0, bar.X+bar.W-to)
+		}
+	}
+	// Whole DIPs, so that a subpixel difference between two frames cannot
+	// keep asking for frames that change nothing.
+	place = titlePlace{float32(int(place.w)), float32(int(place.left)), float32(int(place.right))}
+	if place != a.headPlace {
+		a.headPlace = place
+		c.Invalidate()
+	}
+	return place
 }
 
 // panels floats the open reading panel over the page at the left, in a card
@@ -365,8 +467,8 @@ func (a *app) panels(c *ui.Context) {
 
 // toolbarCluster is the capsule that groups the title bar's glyphs, as Books
 // draws it: a soft pill one step below the paper, with no divisions inside.
-func (a *app) toolbarCluster(c *ui.Context, build func()) {
-	ui.Row(c).Height(toolbarHeight).Radius(toolbarHeight/2).Padding(0, 1).
+func (a *app) toolbarCluster(c *ui.Context, build func()) ui.Element {
+	return ui.Row(c).Height(toolbarHeight).Radius(toolbarHeight/2).Padding(0, 1).
 		Background(reader.UIColor(a.chrome.Toolbar)).AlignItems(ui.Center).
 		Children(build)
 }
@@ -757,6 +859,10 @@ func (a *app) removeBook(path, title string) {
 		return
 	}
 	a.notice = locales.ShelfRemoved(title)
+	if a.desk != nil {
+		// The book leaves every shelf, not just the one it was removed from.
+		a.desk.refreshShelves(a)
+	}
 }
 
 // removeDialog is the question askRemoveBook raised. It is an overlay over the
@@ -1030,13 +1136,16 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Grow(1).MinWidth(0).FillHeight().Background(paper()).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
-			a.backEdge(c, t)
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
 			box := ui.Box(c).FillWidth().MaxWidth(wide).FillHeight().
 				Bind(&a.body).Label(locales.PageLabel()).Focusable().
 				Cursor(a.linkCursor()).
 				HandleInput(a.handlePageInput).
 				Draw(a.drawSheet)
+			// Built after the page so it lies over the paper's edge: the strip
+			// takes the pointer for its whole width, not only where the page
+			// leaves it clear. The paper's own margin is under it, never text.
+			a.backEdge(c, t)
 			// Only a page has a selection to act on; the cover has none.
 			if a.layout != nil && !a.showCover {
 				box.ContextMenu(func(m *ui.Menu) { a.pageMenu(c, m) })
@@ -1097,9 +1206,9 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// folio is the bar under the text, as Books draws it: the chapter at the left,
-// the page in the middle, what is left of the chapter at the right, and the
-// small scrubber pill under them at the book's own progress.
+// folio is the bar under the text, as Books draws it: the reader's jumps at the
+// left, the page in the middle, what is left of the chapter at the right, and
+// the small scrubber pill under them at the book's own progress.
 func (a *app) folio(c *ui.Context, t *ui.Theme) {
 	muted := t.TextMuted
 	ink := reader.UIColor(a.chrome.Muted)
@@ -1110,14 +1219,10 @@ func (a *app) folio(c *ui.Context, t *ui.Theme) {
 			if a.layout == nil {
 				return
 			}
-			// The left of the folio is the chapter, marked with the little
-			// page badge Books prints beside it.
-			badge := ui.Box(c).Width(13).Height(13).Radius(6.5).Center().
-				Background(reader.UIColor(a.chrome.OnToolbar))
-			badge.Children(func() {
-				ui.Icon(c, icons.Bookmark).Size(8, 8).TextColor(paper())
-			})
-			ui.Textf(c, "%d", a.chapterNumber()).FontSize(10).TextColor(muted)
+			// The left of the folio steps through the places the reader jumped
+			// to — a table of contents row, a search hit, a bookmark, a note, a
+			// link, a footnote — so a jump can be taken back and followed again.
+			a.folioNav(c, t)
 			ui.Spacer(c)
 			if left := a.chapterPagesLeft(); left != "" {
 				ui.Text(c, left).FontSize(10).TextColor(muted)
@@ -1150,15 +1255,37 @@ func (a *app) folio(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// chapterNumber is the chapter the open spread starts in, numbered from one.
-func (a *app) chapterNumber() int {
-	if a.book == nil || a.layout == nil {
-		return 0
+// folioNav draws the folio's chevrons: back through the jumps the reader made,
+// and forward again through the ones taken back, as a browser's arrows do.
+// There is nothing to draw while the reader has not jumped, and a step that
+// would go nowhere is not drawn either: the controls appear when a jump leaves
+// somewhere to go, and only the directions that go somewhere.
+func (a *app) folioNav(c *ui.Context, t *ui.Theme) {
+	back, forward := a.nav.canBack(), a.nav.canForward()
+	if !back && !forward {
+		return
 	}
-	if a.scrolling() {
-		return a.currentChapter() + 1
+	ui.Row(c).Gap(2).Children(func() {
+		if back {
+			a.folioNavButton(c, t, icons.ChevronLeft, locales.NavBack(), locales.NavBackTip(), a.navBack)
+		}
+		if forward {
+			a.folioNavButton(c, t, icons.ChevronRight, locales.NavForward(), locales.NavForwardTip(), a.navForward)
+		}
+	})
+}
+
+// folioNavButton is one of the folio's chevrons: a small target in the muted
+// ink of the folio, washed under the pointer.
+func (a *app) folioNavButton(c *ui.Context, t *ui.Theme, icon *ui.SVG, label, tip string, onClick func()) {
+	b := ui.Box(c).Width(22).Height(22).Radius(6).Center().Label(label).Tooltip(tip).
+		Cursor(ui.CursorPointer).OnClick(onClick)
+	if b.Hovered() {
+		b.Background(t.SurfaceHover)
 	}
-	return reader.ChapterOfPage(a.layout, len(a.book.Chapters), a.page) + 1
+	b.Children(func() {
+		ui.Icon(c, icon).Size(14, 14).TextColor(reader.UIColor(a.chrome.Muted))
+	})
 }
 
 // selectionHint is the small note the folio carries while text is selected or
@@ -1209,23 +1336,24 @@ func (a *app) chapterPagesLeft() string {
 	return locales.ChapterPagesLeft(left)
 }
 
-// backEdge is the way back to the library at the page's left edge: a chevron
-// that appears while the pointer rests over the margin, as Books shows its page
-// arrows, and floats over the page so the book keeps its measure. It is the only
-// edge control: turning on is the keyboard's and the folio's job.
+// backEdge is the way back to the library at the page's left edge: the whole
+// margin strip is the control, so the wash that appears under the pointer covers
+// the strip itself and every DIP of it answers the click, as Books lights the
+// margin its page arrows sit in. It floats over the page so the book keeps its
+// measure. It is the only edge control: turning on is the keyboard's and the
+// folio's job.
 func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
 	strip := ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(edgeWidth).Center().
 		Cursor(ui.CursorPointer).Label(locales.BackToLibrary()).Tooltip(locales.BackToLibraryTip())
+	if strip.Hovered() {
+		strip.Background(t.SurfaceHover)
+	}
 	strip.OnClick(a.closeBook)
 	strip.Children(func() {
 		if !strip.Hovered() {
 			return
 		}
-		button := ui.Box(c).Width(26).Height(26).Radius(13).Center().
-			Background(t.SurfaceHover)
-		button.Children(func() {
-			ui.Icon(c, icons.ChevronLeft).Size(15, 15).TextColor(t.TextMuted)
-		})
+		ui.Icon(c, icons.ChevronLeft).Size(15, 15).TextColor(t.TextMuted)
 	})
 }
 
@@ -1243,7 +1371,7 @@ func (a *app) closeBook() {
 	a.docAt = 0
 	a.layout = nil
 	a.page = 0
-	a.showCover = false
+	a.dismissCover()
 	a.file = ""
 	a.status = ""
 	a.resumeNote = ""
@@ -1270,6 +1398,12 @@ func (a *app) closeBook() {
 	if a.pan != nil {
 		a.pan.Refresh(nil, nil, 0)
 		a.pan.Show(appstate.SidebarNone)
+	}
+	if a.desk != nil {
+		// The shelf may have changed while this window read: a book opened or
+		// removed in another window belongs here now too. The library is listed
+		// again from the store rather than from the list this window remembers.
+		a.desk.refreshShelves(nil)
 	}
 }
 

@@ -269,7 +269,7 @@ func TestMenuBarCommands(t *testing.T) {
 // the reader's bar so their glyphs sit on the toolbar's line, which means the
 // shell takes the header's height: a 32 DIP bar would ride above it.
 func TestTheShellIsTheReaderHeaderEverywhere(t *testing.T) {
-	o := windowOptions(func(*ui.Context) {})
+	o := windowOptions(func(*ui.Context) {}, "main")
 	if o.TitleBarStyle != mygo.TitleBarHidden {
 		t.Errorf("TitleBarStyle = %v, want TitleBarHidden on every platform", o.TitleBarStyle)
 	}

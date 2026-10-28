@@ -1551,3 +1551,80 @@ func TestTheSheetSplitsWhereAPageStopsFitting(t *testing.T) {
 		}
 	}
 }
+
+// The bar's controls keep their room whatever the book is called: a name too
+// long for the window is cut short of the clusters at either end, and shows
+// whole on its tooltip, while one that fits is drawn entire and centred — in
+// the window while that is where it belongs, between the controls when the
+// window is too narrow for both.
+func TestHeaderKeepsTheNameClearOfTheControls(t *testing.T) {
+	long := strings.Repeat("很长的书名", 12)
+	for _, tc := range []struct {
+		name   string
+		width  int
+		bar    ui.TitleBar
+		failed bool
+	}{
+		{"a window with room to spare", 1200, ui.TitleBar{Height: headerHeight}, false},
+		{"a mac's traffic lights", 640, ui.TitleBar{Height: headerHeight, Left: 78, Right: 8}, false},
+		{"window buttons on both sides", 640, ui.TitleBar{Height: headerHeight, Left: 100, Right: 100}, false},
+		{"window buttons at the right", 640, ui.TitleBar{Height: headerHeight, Right: 100}, false},
+		{"a message beside the controls", 640, ui.TitleBar{Height: headerHeight, Right: 100}, true},
+	} {
+		a := &app{opts: reader.DefaultOptions(), instant: true}
+		a.book = &book.Book{Title: long}
+		a.failed, a.status = tc.failed, "这一页放不下"
+		var leftEnd, rightStart float32
+		var place titlePlace
+		tt := ui.NewTester(func(c *ui.Context) {
+			a.header(c, c.Theme())
+			left, right := a.headLeft.Bounds(c), a.headRight.Bounds(c)
+			leftEnd, rightStart, place = left.X+left.W, right.X, a.headPlace
+		}, tc.width, 60)
+		tt.SetTitleBar(tc.bar)
+		tt.Frame()
+
+		name, ok := tt.Find(long)
+		if !ok {
+			t.Fatalf("%s: the bar shows no name: %q", tc.name, tt.Texts())
+		}
+		if name.X < leftEnd || name.X+name.W > rightStart {
+			t.Errorf("%s: the name spans %v to %v, over controls from %v to %v",
+				tc.name, name.X, name.X+name.W, leftEnd, rightStart)
+		}
+		if place.w > titleMaxWidth {
+			t.Errorf("%s: the name was given %v, over the %v cap", tc.name, place.w, titleMaxWidth)
+		}
+		// The long name takes all the room it is given: the band between the
+		// controls is what limits it, not the cap.
+		want := min(float32(titleMaxWidth), rightStart-leftEnd-titleGap)
+		if name.W != want || place.w != want {
+			t.Errorf("%s: the long name is %v wide in %v of room, want %v",
+				tc.name, name.W, place.w, want)
+		}
+
+		// The same bar shows a short name whole, and centres it where it
+		// belongs: in the window while that keeps it clear of the controls,
+		// between them otherwise.
+		a.book.Title = "小书"
+		tt.Frame()
+		short, ok := tt.Find("小书")
+		if !ok {
+			t.Fatalf("%s: the short name is missing: %q", tc.name, tt.Texts())
+		}
+		if short.W >= place.w {
+			t.Errorf("%s: the short name is %v wide, as wide as the %v it was given",
+				tc.name, short.W, place.w)
+		}
+		centre := short.X + short.W/2
+		if got, want := absf(centre-float32(tc.width)/2), absf(centre-(leftEnd+rightStart)/2); got > 1 && want > 1 {
+			t.Errorf("%s: the short name is centred at %v, neither the window's %v nor the controls' %v",
+				tc.name, centre, float32(tc.width)/2, (leftEnd+rightStart)/2)
+		}
+		// The room settles: a bar that measured itself again every frame would
+		// ask for frames it never draws differently.
+		if tt.FramePending() {
+			t.Errorf("%s: the bar keeps asking for frames", tc.name)
+		}
+	}
+}

@@ -156,26 +156,42 @@ func (u *UIPainter) Bitmap(id paint.ImageID) *ui.Bitmap {
 
 // DrawCover fills box with the page colour and shows the cover inside it, at
 // its aspect ratio. It reports whether a cover was available.
+//
+// A painter faded with SetFade draws the cover translucent and leaves the sheet
+// under it to whoever drew it: a host dissolving the cover into the page behind
+// it, as a book opening at a saved place does, has the page there already.
 func (u *UIPainter) DrawCover(p *ui.Painter, id paint.ImageID, box ui.Rect, pad float32) bool {
 	bitmap := u.Bitmap(id)
 	if p == nil || bitmap == nil || box.W <= 0 || box.H <= 0 {
 		return false
 	}
-	p.Fill(box, uiColor(Current().Paper), 0)
+	if u.fade >= 1 {
+		p.Fill(box, uiColor(Current().Paper), 0)
+	}
+	r := coverBox(bitmap, box, pad)
+	if u.fade >= 1 {
+		p.Image(bitmap, r, ui.FillBox)
+	} else {
+		p.ImageRegion(bitmap, ui.Rect{}, r, ui.ImageOptions{Tint: ui.RGBA(0xff, 0xff, 0xff, u.fade)})
+	}
+	return true
+}
+
+// coverBox is where the cover is drawn inside box: the box less pad, holding the
+// shape the book was published in, as tall as the space allows, centred in it and
+// never stretched to fill it.
+func coverBox(bitmap *ui.Bitmap, box ui.Rect, pad float32) ui.Rect {
 	r := ui.Rect{X: box.X + pad, Y: box.Y + pad, W: box.W - 2*pad, H: box.H - 2*pad}
 	if r.W <= 0 || r.H <= 0 {
 		r = box
 	}
-	// The cover keeps the shape the book was published in: it is centred in
-	// the space, as tall as the page allows, and never stretched to fill it.
 	iw, ih := bitmap.Size()
 	if iw > 0 && ih > 0 {
 		scale := min(r.W/float32(iw), r.H/float32(ih))
 		w, h := float32(iw)*scale, float32(ih)*scale
 		r = ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y + (r.H-h)/2, W: w, H: h}
 	}
-	p.Image(bitmap, r, ui.FillBox)
-	return true
+	return r
 }
 
 // DrawPage replays a page of the render layout into the element at box,
