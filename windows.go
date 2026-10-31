@@ -20,8 +20,11 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo"
+	"github.com/laix/quire/internal/acquire"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/internal/source"
+	"github.com/laix/quire/internal/sourceconf"
 	"github.com/laix/quire/internal/store"
 )
 
@@ -65,6 +68,13 @@ type desk struct {
 	fontErr             error
 	fontMu              sync.Mutex
 	fonts               *reader.Fonts
+
+	// Book sources: configuration, registry of sources, and download manager.
+	// These are shared by every window; the source sheet reads them through the
+	// app's desk pointer.
+	srcConf *sourceconf.Store
+	sources *source.Registry
+	acq     *acquire.Manager
 
 	// The menu bar is the app's, not a window's: its items name the focused
 	// window's selection and reading mode. menuOwner is the app whose menuBar
@@ -172,6 +182,10 @@ func (d *desk) newApp() *app {
 		menuCopy:    d.menuCopy,
 		menuAddNote: d.menuAddNote,
 		menuScroll:  d.menuScroll,
+		srcConf:     d.srcConf,
+		sources:     d.sources,
+		acq:         d.acq,
+		find:        &sourceSheet{},
 	}
 	a.menuCopyOn = d.menuCopyOn
 	if a.fonts != nil {
