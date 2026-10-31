@@ -183,6 +183,9 @@ func (a *app) view(c *ui.Context) {
 	// The question that comes before a book leaves the shelf lies over whatever
 	// the window shows, so it is built beside the page rather than inside it.
 	a.removeDialog(c, t)
+	// The book-source search sheet and its settings panel float above the page.
+	a.sourceDialog(c, t)
+	a.sourceSheetSettings(c, t, reader.UIColor(a.chrome.Text), reader.UIColor(a.chrome.Muted), reader.UIColor(a.chrome.OnToolbar))
 }
 
 // openingView is a book window before its book has arrived: the paper it will
@@ -630,6 +633,17 @@ func (a *app) sourceList(c *ui.Context, t *ui.Theme, width float32) {
 		a.sourceRow(c, t, width, icons.Plus, locales.SidebarNewCollection(), false, func() {
 			a.libFilter, a.libSearch = 0, false
 		})
+
+		a.sourceHeading(c, t, locales.SidebarSources())
+		for _, id := range knownSourceIDs {
+			id := id
+			a.sourceRow(c, t, width, sourceSheetIcon(id), sourceName(a, id), false, func() {
+				if a.find == nil {
+					a.find = &sourceSheet{}
+				}
+				a.find.openSheet(id)
+			})
+		}
 
 		ui.Spacer(c)
 		a.accountRow(c, t)

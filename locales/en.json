@@ -1090,6 +1090,194 @@
       }
     }
   },
+  "sidebarSources": "Sources",
+  "@sidebarSources": {
+    "description": "The heading over the online book sources in the source list."
+  },
+  "sourceZLibrary": "Z-Library",
+  "@sourceZLibrary": {
+    "description": "The fallback name of the Z-Library source when the registry is empty."
+  },
+  "sourceLegado": "Legado",
+  "@sourceLegado": {
+    "description": "The fallback name of the Legado source when the registry is empty."
+  },
+  "sourceWenku8": "Wenku8",
+  "@sourceWenku8": {
+    "description": "The fallback name of the Wenku8 source when the registry is empty."
+  },
+  "sourceSheetTitle": "Search Book Sources",
+  "@sourceSheetTitle": {
+    "description": "The title of the book-source search sheet."
+  },
+  "sourceSheetSearchPlaceholder": "Search by title or author",
+  "@sourceSheetSearchPlaceholder": {
+    "description": "The placeholder of the source sheet's search field."
+  },
+  "sourceSheetAll": "All",
+  "@sourceSheetAll": {
+    "description": "The source sheet filter that shows every source."
+  },
+  "sourceSheetEmpty": "Type a keyword to search book sources",
+  "@sourceSheetEmpty": {
+    "description": "The source sheet's message before a search."
+  },
+  "sourceSheetNoResults": "No results",
+  "@sourceSheetNoResults": {
+    "description": "The source sheet's message when nothing was found."
+  },
+  "sourceSheetSearching": "Searching…",
+  "@sourceSheetSearching": {
+    "description": "The source sheet's status while a search runs."
+  },
+  "sourceSheetResults": "{count, plural, one {# result} other {# results}}",
+  "@sourceSheetResults": {
+    "description": "The source sheet's result count.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "sourceSheetDownload": "Download",
+  "@sourceSheetDownload": {
+    "description": "The button that downloads a search result."
+  },
+  "sourceSheetDownloading": "Downloading…",
+  "@sourceSheetDownloading": {
+    "description": "The label shown while a book is downloading."
+  },
+  "sourceSheetDownloaded": "Downloaded “{title}”",
+  "@sourceSheetDownloaded": {
+    "description": "The toast after a book was downloaded.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Walden"
+      }
+    }
+  },
+  "sourceSheetDownloadFailed": "Download failed: {error}",
+  "@sourceSheetDownloadFailed": {
+    "description": "The toast when a download failed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "not found"
+      }
+    }
+  },
+  "sourceSheetOpen": "Open",
+  "@sourceSheetOpen": {
+    "description": "The button that opens a downloaded book."
+  },
+  "sourceSheetCancel": "Cancel",
+  "@sourceSheetCancel": {
+    "description": "The button that cancels a download."
+  },
+  "sourceSheetSettings": "Settings",
+  "@sourceSheetSettings": {
+    "description": "The button that opens a source's settings."
+  },
+  "sourceSheetImport": "Import Source JSON…",
+  "@sourceSheetImport": {
+    "description": "The button that imports Legado source JSON."
+  },
+  "sourceSheetExport": "Export Sources",
+  "@sourceSheetExport": {
+    "description": "The button that exports Legado source JSON."
+  },
+  "sourceSheetImported": "Imported {count, plural, one {# source} other {# sources}}",
+  "@sourceSheetImported": {
+    "description": "The toast after importing Legado sources.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "5"
+      }
+    }
+  },
+  "sourceSheetImportFailed": "Import failed: {error}",
+  "@sourceSheetImportFailed": {
+    "description": "The toast when importing Legado sources failed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "invalid JSON"
+      }
+    }
+  },
+  "sourceSheetSave": "Save",
+  "@sourceSheetSave": {
+    "description": "The button that saves source settings."
+  },
+  "sourceSheetDone": "Done",
+  "@sourceSheetDone": {
+    "description": "The button that closes source settings."
+  },
+  "sourceSheetFrom": "from {source}",
+  "@sourceSheetFrom": {
+    "description": "The source name label on a result row.",
+    "placeholders": {
+      "source": {
+        "type": "String",
+        "example": "Z-Library"
+      }
+    }
+  },
+  "sourceSheetUnknownSize": "Unknown size",
+  "@sourceSheetUnknownSize": {
+    "description": "Shown when a result does not report its size."
+  },
+  "sourceSheetNotConfigured": "{source} is not configured",
+  "@sourceSheetNotConfigured": {
+    "description": "The status when a source has no settings yet.",
+    "placeholders": {
+      "source": {
+        "type": "String",
+        "example": "Z-Library"
+      }
+    }
+  },
+  "sourceSheetNeedsLogin": "{source} needs login",
+  "@sourceSheetNeedsLogin": {
+    "description": "The status when a source needs credentials.",
+    "placeholders": {
+      "source": {
+        "type": "String",
+        "example": "Z-Library"
+      }
+    }
+  },
+  "sourceSheetSourceError": "{source}: {error}",
+  "@sourceSheetSourceError": {
+    "description": "The per-source error line in the sheet.",
+    "placeholders": {
+      "source": {
+        "type": "String",
+        "example": "Z-Library"
+      },
+      "error": {
+        "type": "String",
+        "example": "rate limited"
+      }
+    }
+  },
+  "sourceSheetElapsed": "{ms} ms",
+  "@sourceSheetElapsed": {
+    "description": "The per-source search elapsed time.",
+    "placeholders": {
+      "ms": {
+        "type": "int",
+        "example": "240"
+      }
+    }
+  },
+  "sourceSheetSecretNote": "Secrets are stored but shown as plain text here",
+  "@sourceSheetSecretNote": {
+    "description": "A note under a secret source setting field."
+  },
   "mygo.appName": "Quire",
   "@mygo.appName": {
     "description": "The app's name, which packaging writes where systems list it."

@@ -20,10 +20,13 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/layx/render"
+	"github.com/laix/quire/internal/acquire"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/internal/search"
+	"github.com/laix/quire/internal/source"
+	"github.com/laix/quire/internal/sourceconf"
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/locales"
 )
@@ -102,6 +105,13 @@ type app struct {
 	notice    string
 	file      string
 	startPath string
+
+	// Book sources: the shared configuration, registry and download manager,
+	// and the source search sheet. These are filled from the desk in newApp.
+	srcConf *sourceconf.Store
+	sources *source.Registry
+	acq     *acquire.Manager
+	find    *sourceSheet
 
 	// cover is the book's cover image; showCover keeps it in front of the book
 	// until the reader moves on, or until coverIntro dissolves it into the place
@@ -1536,6 +1546,17 @@ func main() {
 		theme:     reader.ThemeQuiet,
 		goalBooks: defaultGoalBooks,
 		goalDays:  defaultGoalDays,
+	}
+
+	// Book sources are configured and registered before any window exists.
+	srcConfPath := ""
+	if statePath != "" {
+		srcConfPath = filepath.Join(filepath.Dir(statePath), "sources.json")
+	} else if cfgDir, err := os.UserConfigDir(); err == nil {
+		srcConfPath = filepath.Join(cfgDir, "quire", "sources.json")
+	}
+	if srcConfPath != "" {
+		d.initSources(srcConfPath)
 	}
 	if st != nil {
 		prefs := st.State().Prefs

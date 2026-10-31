@@ -2807,3 +2807,449 @@ func TimeDaysAgo(count int) string { return In(i18n.Locale()).TimeDaysAgo(count)
 func (msgs Messages) TimeDaysAgo(count int) string {
 	return Catalog.Format(msgs.locale, "timeDaysAgo", map[string]any{"count": count})
 }
+
+// SidebarSources says "Sources"
+// in the language the app shows.
+//
+// The heading over the online book sources in the source list.
+func SidebarSources() string { return In(i18n.Locale()).SidebarSources() }
+
+// SidebarSources says "Sources"
+// in the language of msgs.
+//
+// The heading over the online book sources in the source list.
+func (msgs Messages) SidebarSources() string {
+	return Catalog.Format(msgs.locale, "sidebarSources", nil)
+}
+
+// SourceZLibrary says "Z-Library"
+// in the language the app shows.
+//
+// The fallback name of the Z-Library source when the registry is empty.
+func SourceZLibrary() string { return In(i18n.Locale()).SourceZLibrary() }
+
+// SourceZLibrary says "Z-Library"
+// in the language of msgs.
+//
+// The fallback name of the Z-Library source when the registry is empty.
+func (msgs Messages) SourceZLibrary() string {
+	return Catalog.Format(msgs.locale, "sourceZLibrary", nil)
+}
+
+// SourceLegado says "Legado"
+// in the language the app shows.
+//
+// The fallback name of the Legado source when the registry is empty.
+func SourceLegado() string { return In(i18n.Locale()).SourceLegado() }
+
+// SourceLegado says "Legado"
+// in the language of msgs.
+//
+// The fallback name of the Legado source when the registry is empty.
+func (msgs Messages) SourceLegado() string {
+	return Catalog.Format(msgs.locale, "sourceLegado", nil)
+}
+
+// SourceWenku8 says "Wenku8"
+// in the language the app shows.
+//
+// The fallback name of the Wenku8 source when the registry is empty.
+func SourceWenku8() string { return In(i18n.Locale()).SourceWenku8() }
+
+// SourceWenku8 says "Wenku8"
+// in the language of msgs.
+//
+// The fallback name of the Wenku8 source when the registry is empty.
+func (msgs Messages) SourceWenku8() string {
+	return Catalog.Format(msgs.locale, "sourceWenku8", nil)
+}
+
+// SourceSheetTitle says "Search Book Sources"
+// in the language the app shows.
+//
+// The title of the book-source search sheet.
+func SourceSheetTitle() string { return In(i18n.Locale()).SourceSheetTitle() }
+
+// SourceSheetTitle says "Search Book Sources"
+// in the language of msgs.
+//
+// The title of the book-source search sheet.
+func (msgs Messages) SourceSheetTitle() string {
+	return Catalog.Format(msgs.locale, "sourceSheetTitle", nil)
+}
+
+// SourceSheetSearchPlaceholder says "Search by title or author"
+// in the language the app shows.
+//
+// The placeholder of the source sheet's search field.
+func SourceSheetSearchPlaceholder() string { return In(i18n.Locale()).SourceSheetSearchPlaceholder() }
+
+// SourceSheetSearchPlaceholder says "Search by title or author"
+// in the language of msgs.
+//
+// The placeholder of the source sheet's search field.
+func (msgs Messages) SourceSheetSearchPlaceholder() string {
+	return Catalog.Format(msgs.locale, "sourceSheetSearchPlaceholder", nil)
+}
+
+// SourceSheetAll says "All"
+// in the language the app shows.
+//
+// The source sheet filter that shows every source.
+func SourceSheetAll() string { return In(i18n.Locale()).SourceSheetAll() }
+
+// SourceSheetAll says "All"
+// in the language of msgs.
+//
+// The source sheet filter that shows every source.
+func (msgs Messages) SourceSheetAll() string {
+	return Catalog.Format(msgs.locale, "sourceSheetAll", nil)
+}
+
+// SourceSheetEmpty says "Type a keyword to search book sources"
+// in the language the app shows.
+//
+// The source sheet's message before a search.
+func SourceSheetEmpty() string { return In(i18n.Locale()).SourceSheetEmpty() }
+
+// SourceSheetEmpty says "Type a keyword to search book sources"
+// in the language of msgs.
+//
+// The source sheet's message before a search.
+func (msgs Messages) SourceSheetEmpty() string {
+	return Catalog.Format(msgs.locale, "sourceSheetEmpty", nil)
+}
+
+// SourceSheetNoResults says "No results"
+// in the language the app shows.
+//
+// The source sheet's message when nothing was found.
+func SourceSheetNoResults() string { return In(i18n.Locale()).SourceSheetNoResults() }
+
+// SourceSheetNoResults says "No results"
+// in the language of msgs.
+//
+// The source sheet's message when nothing was found.
+func (msgs Messages) SourceSheetNoResults() string {
+	return Catalog.Format(msgs.locale, "sourceSheetNoResults", nil)
+}
+
+// SourceSheetSearching says "Searching…"
+// in the language the app shows.
+//
+// The source sheet's status while a search runs.
+func SourceSheetSearching() string { return In(i18n.Locale()).SourceSheetSearching() }
+
+// SourceSheetSearching says "Searching…"
+// in the language of msgs.
+//
+// The source sheet's status while a search runs.
+func (msgs Messages) SourceSheetSearching() string {
+	return Catalog.Format(msgs.locale, "sourceSheetSearching", nil)
+}
+
+// SourceSheetResults says "{count, plural, one {# result} other {# results}}"
+// in the language the app shows.
+//
+// The source sheet's result count.
+func SourceSheetResults(count int) string { return In(i18n.Locale()).SourceSheetResults(count) }
+
+// SourceSheetResults says "{count, plural, one {# result} other {# results}}"
+// in the language of msgs.
+//
+// The source sheet's result count.
+func (msgs Messages) SourceSheetResults(count int) string {
+	return Catalog.Format(msgs.locale, "sourceSheetResults", map[string]any{"count": count})
+}
+
+// SourceSheetDownload says "Download"
+// in the language the app shows.
+//
+// The button that downloads a search result.
+func SourceSheetDownload() string { return In(i18n.Locale()).SourceSheetDownload() }
+
+// SourceSheetDownload says "Download"
+// in the language of msgs.
+//
+// The button that downloads a search result.
+func (msgs Messages) SourceSheetDownload() string {
+	return Catalog.Format(msgs.locale, "sourceSheetDownload", nil)
+}
+
+// SourceSheetDownloading says "Downloading…"
+// in the language the app shows.
+//
+// The label shown while a book is downloading.
+func SourceSheetDownloading() string { return In(i18n.Locale()).SourceSheetDownloading() }
+
+// SourceSheetDownloading says "Downloading…"
+// in the language of msgs.
+//
+// The label shown while a book is downloading.
+func (msgs Messages) SourceSheetDownloading() string {
+	return Catalog.Format(msgs.locale, "sourceSheetDownloading", nil)
+}
+
+// SourceSheetDownloaded says "Downloaded “{title}”"
+// in the language the app shows.
+//
+// The toast after a book was downloaded.
+func SourceSheetDownloaded(title string) string {
+	return In(i18n.Locale()).SourceSheetDownloaded(title)
+}
+
+// SourceSheetDownloaded says "Downloaded “{title}”"
+// in the language of msgs.
+//
+// The toast after a book was downloaded.
+func (msgs Messages) SourceSheetDownloaded(title string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetDownloaded", map[string]any{"title": title})
+}
+
+// SourceSheetDownloadFailed says "Download failed: {error}"
+// in the language the app shows.
+//
+// The toast when a download failed.
+func SourceSheetDownloadFailed(error string) string {
+	return In(i18n.Locale()).SourceSheetDownloadFailed(error)
+}
+
+// SourceSheetDownloadFailed says "Download failed: {error}"
+// in the language of msgs.
+//
+// The toast when a download failed.
+func (msgs Messages) SourceSheetDownloadFailed(error string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetDownloadFailed", map[string]any{"error": error})
+}
+
+// SourceSheetOpen says "Open"
+// in the language the app shows.
+//
+// The button that opens a downloaded book.
+func SourceSheetOpen() string { return In(i18n.Locale()).SourceSheetOpen() }
+
+// SourceSheetOpen says "Open"
+// in the language of msgs.
+//
+// The button that opens a downloaded book.
+func (msgs Messages) SourceSheetOpen() string {
+	return Catalog.Format(msgs.locale, "sourceSheetOpen", nil)
+}
+
+// SourceSheetCancel says "Cancel"
+// in the language the app shows.
+//
+// The button that cancels a download.
+func SourceSheetCancel() string { return In(i18n.Locale()).SourceSheetCancel() }
+
+// SourceSheetCancel says "Cancel"
+// in the language of msgs.
+//
+// The button that cancels a download.
+func (msgs Messages) SourceSheetCancel() string {
+	return Catalog.Format(msgs.locale, "sourceSheetCancel", nil)
+}
+
+// SourceSheetSettings says "Settings"
+// in the language the app shows.
+//
+// The button that opens a source's settings.
+func SourceSheetSettings() string { return In(i18n.Locale()).SourceSheetSettings() }
+
+// SourceSheetSettings says "Settings"
+// in the language of msgs.
+//
+// The button that opens a source's settings.
+func (msgs Messages) SourceSheetSettings() string {
+	return Catalog.Format(msgs.locale, "sourceSheetSettings", nil)
+}
+
+// SourceSheetImport says "Import Source JSON…"
+// in the language the app shows.
+//
+// The button that imports Legado source JSON.
+func SourceSheetImport() string { return In(i18n.Locale()).SourceSheetImport() }
+
+// SourceSheetImport says "Import Source JSON…"
+// in the language of msgs.
+//
+// The button that imports Legado source JSON.
+func (msgs Messages) SourceSheetImport() string {
+	return Catalog.Format(msgs.locale, "sourceSheetImport", nil)
+}
+
+// SourceSheetExport says "Export Sources"
+// in the language the app shows.
+//
+// The button that exports Legado source JSON.
+func SourceSheetExport() string { return In(i18n.Locale()).SourceSheetExport() }
+
+// SourceSheetExport says "Export Sources"
+// in the language of msgs.
+//
+// The button that exports Legado source JSON.
+func (msgs Messages) SourceSheetExport() string {
+	return Catalog.Format(msgs.locale, "sourceSheetExport", nil)
+}
+
+// SourceSheetImported says "Imported {count, plural, one {# source} other {# sources}}"
+// in the language the app shows.
+//
+// The toast after importing Legado sources.
+func SourceSheetImported(count int) string { return In(i18n.Locale()).SourceSheetImported(count) }
+
+// SourceSheetImported says "Imported {count, plural, one {# source} other {# sources}}"
+// in the language of msgs.
+//
+// The toast after importing Legado sources.
+func (msgs Messages) SourceSheetImported(count int) string {
+	return Catalog.Format(msgs.locale, "sourceSheetImported", map[string]any{"count": count})
+}
+
+// SourceSheetImportFailed says "Import failed: {error}"
+// in the language the app shows.
+//
+// The toast when importing Legado sources failed.
+func SourceSheetImportFailed(error string) string {
+	return In(i18n.Locale()).SourceSheetImportFailed(error)
+}
+
+// SourceSheetImportFailed says "Import failed: {error}"
+// in the language of msgs.
+//
+// The toast when importing Legado sources failed.
+func (msgs Messages) SourceSheetImportFailed(error string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetImportFailed", map[string]any{"error": error})
+}
+
+// SourceSheetSave says "Save"
+// in the language the app shows.
+//
+// The button that saves source settings.
+func SourceSheetSave() string { return In(i18n.Locale()).SourceSheetSave() }
+
+// SourceSheetSave says "Save"
+// in the language of msgs.
+//
+// The button that saves source settings.
+func (msgs Messages) SourceSheetSave() string {
+	return Catalog.Format(msgs.locale, "sourceSheetSave", nil)
+}
+
+// SourceSheetDone says "Done"
+// in the language the app shows.
+//
+// The button that closes source settings.
+func SourceSheetDone() string { return In(i18n.Locale()).SourceSheetDone() }
+
+// SourceSheetDone says "Done"
+// in the language of msgs.
+//
+// The button that closes source settings.
+func (msgs Messages) SourceSheetDone() string {
+	return Catalog.Format(msgs.locale, "sourceSheetDone", nil)
+}
+
+// SourceSheetFrom says "from {source}"
+// in the language the app shows.
+//
+// The source name label on a result row.
+func SourceSheetFrom(source string) string { return In(i18n.Locale()).SourceSheetFrom(source) }
+
+// SourceSheetFrom says "from {source}"
+// in the language of msgs.
+//
+// The source name label on a result row.
+func (msgs Messages) SourceSheetFrom(source string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetFrom", map[string]any{"source": source})
+}
+
+// SourceSheetUnknownSize says "Unknown size"
+// in the language the app shows.
+//
+// Shown when a result does not report its size.
+func SourceSheetUnknownSize() string { return In(i18n.Locale()).SourceSheetUnknownSize() }
+
+// SourceSheetUnknownSize says "Unknown size"
+// in the language of msgs.
+//
+// Shown when a result does not report its size.
+func (msgs Messages) SourceSheetUnknownSize() string {
+	return Catalog.Format(msgs.locale, "sourceSheetUnknownSize", nil)
+}
+
+// SourceSheetNotConfigured says "{source} is not configured"
+// in the language the app shows.
+//
+// The status when a source has no settings yet.
+func SourceSheetNotConfigured(source string) string {
+	return In(i18n.Locale()).SourceSheetNotConfigured(source)
+}
+
+// SourceSheetNotConfigured says "{source} is not configured"
+// in the language of msgs.
+//
+// The status when a source has no settings yet.
+func (msgs Messages) SourceSheetNotConfigured(source string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetNotConfigured", map[string]any{"source": source})
+}
+
+// SourceSheetNeedsLogin says "{source} needs login"
+// in the language the app shows.
+//
+// The status when a source needs credentials.
+func SourceSheetNeedsLogin(source string) string {
+	return In(i18n.Locale()).SourceSheetNeedsLogin(source)
+}
+
+// SourceSheetNeedsLogin says "{source} needs login"
+// in the language of msgs.
+//
+// The status when a source needs credentials.
+func (msgs Messages) SourceSheetNeedsLogin(source string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetNeedsLogin", map[string]any{"source": source})
+}
+
+// SourceSheetSourceError says "{source}: {error}"
+// in the language the app shows.
+//
+// The per-source error line in the sheet.
+func SourceSheetSourceError(source string, error string) string {
+	return In(i18n.Locale()).SourceSheetSourceError(source, error)
+}
+
+// SourceSheetSourceError says "{source}: {error}"
+// in the language of msgs.
+//
+// The per-source error line in the sheet.
+func (msgs Messages) SourceSheetSourceError(source string, error string) string {
+	return Catalog.Format(msgs.locale, "sourceSheetSourceError", map[string]any{"source": source, "error": error})
+}
+
+// SourceSheetElapsed says "{ms} ms"
+// in the language the app shows.
+//
+// The per-source search elapsed time.
+func SourceSheetElapsed(ms int) string { return In(i18n.Locale()).SourceSheetElapsed(ms) }
+
+// SourceSheetElapsed says "{ms} ms"
+// in the language of msgs.
+//
+// The per-source search elapsed time.
+func (msgs Messages) SourceSheetElapsed(ms int) string {
+	return Catalog.Format(msgs.locale, "sourceSheetElapsed", map[string]any{"ms": ms})
+}
+
+// SourceSheetSecretNote says "Secrets are stored but shown as plain text here"
+// in the language the app shows.
+//
+// A note under a secret source setting field.
+func SourceSheetSecretNote() string { return In(i18n.Locale()).SourceSheetSecretNote() }
+
+// SourceSheetSecretNote says "Secrets are stored but shown as plain text here"
+// in the language of msgs.
+//
+// A note under a secret source setting field.
+func (msgs Messages) SourceSheetSecretNote() string {
+	return Catalog.Format(msgs.locale, "sourceSheetSecretNote", nil)
+}
