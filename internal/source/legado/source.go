@@ -305,6 +305,9 @@ func (s *Source) Download(ctx context.Context, b source.Book, progress func(sour
 	var done int64
 	var firstErr error
 	var errOnce sync.Once
+	// Progress may be reported by any chapter goroutine; serialize it so a
+	// host callback never runs concurrently with itself.
+	var progressMu sync.Mutex
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, s.concurrency)
@@ -332,7 +335,9 @@ func (s *Source) Download(ctx context.Context, b source.Book, progress func(sour
 			htmls[idx] = html
 			n := atomic.AddInt64(&done, 1)
 			if progress != nil {
+				progressMu.Lock()
 				progress(source.Progress{Stage: "chapters", Done: n, Total: int64(len(chapters))})
+				progressMu.Unlock()
 			}
 		}(i, c)
 	}

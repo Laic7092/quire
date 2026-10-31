@@ -15,9 +15,12 @@ import (
 )
 
 var (
-	bookDetailPathRe  = regexp.MustCompile(`^/book/(\d+)(?:\.html?)?$`)
-	bookIndexPathRe   = regexp.MustCompile(`^/book/(\d+)/index\.html?$`)
-	chapterPathRe     = regexp.MustCompile(`^/book/(\d+)/([^/]+)\.html?$`)
+	bookDetailPathRe = regexp.MustCompile(`^/book/(\d+)(?:\.html?)?$`)
+	// The site has used both /book/<id>/index.htm and the older
+	// /novel/<type>/<id>/index.htm layout; accept either, and the chapter
+	// links that belong to it.
+	bookIndexPathRe   = regexp.MustCompile(`^/(?:book|novel/\d+)/(\d+)/index\.html?$`)
+	chapterPathRe     = regexp.MustCompile(`^/(?:book|novel/\d+)/(\d+)/([^/]+)\.html?$`)
 	volumeTitleRe     = regexp.MustCompile(`^第[0-9零一二三四五六七八九十百千两]+[卷部]`)
 	dateRe            = regexp.MustCompile(`\d{4}[-/年]\d{1,2}[-/月]\d{1,2}`)
 	spaceRunRe        = regexp.MustCompile(`[ \t\r\n]+`)

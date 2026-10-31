@@ -200,18 +200,30 @@ func TestSourceSheetDownloadState(t *testing.T) {
 	f := a.find
 	book := source.Book{Source: "down", Key: "d1", Title: "Downloadable"}
 	f.download(a, book)
-	if !f.downloading {
+	if !f.busy() {
 		t.Fatal("expected downloading to be true")
 	}
-	// Wait for the stub acquire.Save to finish.
-	time.Sleep(50 * time.Millisecond)
-	if f.downloading {
+	// The real acquire.Manager writes the fake EPUB into the app's temp
+	// download directory and reports the saved path back on completion.
+	deadline := time.Now().Add(2 * time.Second)
+	for f.busy() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if f.busy() {
 		t.Fatal("expected downloading to be false after completion")
 	}
-	// acquire.Manager is currently a stub and returns ErrNotConfigured, so the
-	// sheet records the error instead of a saved path.
-	if f.dlErr == nil {
-		t.Fatal("expected download error because acquire.Save is a stub")
+	if err := f.downloadErr(); err != nil {
+		t.Fatalf("download failed: %v", err)
+	}
+	saved := f.saved()
+	if saved.Path == "" {
+		t.Fatal("expected a saved path")
+	}
+	if !strings.HasPrefix(filepath.Base(saved.Path), "test-") {
+		t.Errorf("saved name %q does not carry the configured prefix", saved.Path)
+	}
+	if saved.Format != "epub" {
+		t.Errorf("saved format = %q, want epub", saved.Format)
 	}
 }
 
@@ -229,11 +241,11 @@ func TestSourceSheetDownloadCancels(t *testing.T) {
 	f := a.find
 	book := source.Book{Source: "down", Key: "d1", Title: "Downloadable"}
 	f.download(a, book)
-	if !f.downloading {
+	if !f.busy() {
 		t.Fatal("expected downloading to be true")
 	}
 	f.cancelDownload()
-	if f.downloading {
+	if f.busy() {
 		t.Fatal("expected downloading to be false after cancel")
 	}
 }
@@ -303,5 +315,36 @@ func TestSourceMetaLine(t *testing.T) {
 	}
 	if !strings.Contains(meta, "2 KB") {
 		t.Fatalf("meta should contain size, got %q", meta)
+	}
+}
+
+// initSources is the launch path: it must register all three independent
+// sources and give downloads a directory, without touching the network.
+func TestInitSourcesRegistersThree(t *testing.T) {
+	dir := t.TempDir()
+	d := &desk{}
+	d.initSources(filepath.Join(dir, "sources.json"))
+
+	want := []source.ID{"zlib", "legado", "wenku8"}
+	got := d.sources.IDs()
+	if len(got) != len(want) {
+		t.Fatalf("registered %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("source %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if d.acq == nil {
+		t.Fatal("download manager is nil")
+	}
+	if d.srcConf == nil {
+		t.Fatal("source configuration is nil")
+	}
+	// Every source either searches and downloads, or says why it cannot.
+	for _, s := range d.sources.All() {
+		if !s.Caps().Search || !s.Caps().Download {
+			t.Errorf("%s caps = %+v", s.ID(), s.Caps())
+		}
 	}
 }

@@ -39,6 +39,12 @@ python3 resources/icon.py
   `render.Location`。
 - `internal/store`：`os.UserConfigDir()/quire/state.json`，原子写 + 2s 合并，
   存书单、每本书的阅读位置与字号/面板偏好。书架就是这份书单。
+- `internal/source`：书源的唯一接口 `Source`（搜索 / 下载）、注册表与错误语义。三个书源互相
+  不 import，注册表让一个源失败只影响它自己。
+- `internal/source/zlib` / `legado` / `wenku8`：Z-Library、阅读 3.0 书源 JSON、轻小说文库。
+  各自带传输、解析、限速和离线 fixture 测试。
+- `internal/epubwrite` / `internal/acquire`：抓回来的章节拼成 EPUB，下载原子落盘到书架目录。
+- `internal/sourceconf`：书源配置单独存 `sources.json`，按源 ID 隔离。
 - `internal/appstate`：把上面几个接起来的一层（面板切换、异步刷新、索引与文档同步）。
 - `internal/icons`、`internal/widgets`：工具栏与三个面板共用的图标和小件。
 - `main.go` / `windows.go` / `view.go` / `sheet.go` / `scroll.go` / `theme.go` /
@@ -73,6 +79,20 @@ Finder 双击一本书，都会另开一扇阅读窗口，书库窗口不动，�
 书库/搜索/目录、⌘D 书签、⌘[ / ⌘] 返回/前进上次跳转、Esc 依次收起面板/封面/选区/回到书库。纸上拖动选字、⌘C 复制，
 右键是页面菜单（复制、加笔记、搜选中的词、选中本页、清选区）。翻页默认横向滑带，
 Aa 里可换淡入淡出；滚动模式的每一帧只重绘、不重建视图。
+
+## 书源
+
+首页左侧「书源」下有三行：Z-Library、阅读 3.0、轻小说文库。点一行打开搜索卡片，搜索后选
+一本下载；下载完成的书会转成 EPUB 落进 `sources.json` 同级的 `books/`，随即出现在书架，
+之后和本地书完全一样（排版、书签、笔记、统计、断网阅读）。
+
+- **Z-Library**：点齿轮填站点根 URL、邮箱、密码；站点经常换域名，所以不写死。搜索/下载
+  都走登录后的会话，凭据只存在本机 `sources.json`（0600）。
+- **阅读 3.0**：点齿轮「导入书源 JSON…」，选标准 Legado 书源文件；支持 CSS / JSONPath /
+  正则 / 模板子集，`@js:`、登录、验证码等会明确报「不支持」，不会静默给空结果。
+- **轻小说文库**：默认 `https://www.wenku8.net`，站点搬家时在齿轮里改；不需要登录。
+
+书源的接口、独立性约定、规则子集和落盘规则见 [`docs/book-sources.md`](docs/book-sources.md)。
 
 ## 环境变量与开关
 
@@ -134,6 +154,10 @@ go tool mygo vet . && go tool mygo i18n check .   # 文案：key、占位符、�
 - 滚动模式没有 Books 的惯性与卷页：滚轮按平台给的位移立刻滚，键盘一屏一屏跳，
   位置按 `Location` 记而不是像素。没有 wasm 版本。
 - 字体集只有一个字面，粗体/斜体在该字体没有对应 face 时只表现为同一字形。
+- 书源只做“搜索 → 下载成 EPUB”，不做在线流式阅读；抓回的章节 HTML 里的图片只保留 alt
+  文本，不下载插图。Z-Library 的页面结构随镜像变化，实际可用性取决于当前域名；阅读 3.0
+  只实现规则子集，`@js:` 类书源不可用。三个书源的测试全部是离线的 `httptest`/fixture，
+  真实站点结构变化时需要在对应 `parse.go` 的选择器处联调。
 
 ## 文档
 

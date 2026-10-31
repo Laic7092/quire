@@ -17,6 +17,9 @@ import (
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/internal/source"
+	"github.com/laix/quire/internal/source/legado"
+	"github.com/laix/quire/internal/source/wenku8"
+	"github.com/laix/quire/internal/source/zlib"
 	"github.com/laix/quire/internal/sourceconf"
 	"github.com/laix/quire/locales"
 )
@@ -25,6 +28,10 @@ import (
 // *app and built by sourceDialog at the end of the view.
 type sourceSheet struct {
 	shown bool
+
+	// mu guards the download fields below, which its goroutine writes while
+	// the view reads them. Search results are published on the UI thread.
+	mu sync.Mutex
 
 	query  string
 	filter source.ID // "" means all sources
@@ -285,10 +292,9 @@ func (a *app) sourceSheetResults(c *ui.Context, t *ui.Theme, text, muted, onTool
 		return
 	}
 
-	if f.downloading {
+	if f.busy() {
 		a.sourceDownloadBar(c, t, text, muted)
-	}
-	if !f.downloading && f.dlSaved.Path != "" {
+	} else if saved := f.saved(); saved.Path != "" {
 		a.sourceDownloadDoneBar(c, t, text, muted)
 	}
 
@@ -354,7 +360,7 @@ func (a *app) sourceResultRow(c *ui.Context, row ui.ListRow, r sourceRow, text, 
 				}
 			})
 
-			if !a.find.downloading {
+			if !a.find.busy() {
 				dl := ui.Box(c).Height(28).Padding(0, 12).Radius(8).Center().
 					Background(reader.UIColor(pal.Accent)).Cursor(ui.CursorPointer).
 					Label(locales.SourceSheetDownload())
@@ -371,12 +377,13 @@ func (a *app) sourceResultRow(c *ui.Context, row ui.ListRow, r sourceRow, text, 
 func (a *app) sourceDownloadBar(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	pal := a.chrome
 	f := a.find
+	prog := f.progress()
 	ui.Column(c).FillWidth().Padding(10, 16).Gap(6).Background(reader.UIColor(pal.Pressed)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(10).Children(func() {
 			ui.Spinner(c).Size(16, 16)
 			ui.Text(c, locales.SourceSheetDownloading()).FontSize(13).FontWeight(600).TextColor(text).Grow(1)
-			if f.dlProgress.Total > 0 {
-				p := float64(f.dlProgress.Done) / float64(f.dlProgress.Total)
+			if prog.Total > 0 {
+				p := float64(prog.Done) / float64(prog.Total)
 				ui.Text(c, fmt.Sprintf("%d%%", int(p*100))).FontSize(11).TextColor(muted)
 			}
 			cancel := ui.Box(c).Height(26).Padding(0, 10).Radius(6).Center().
@@ -386,8 +393,8 @@ func (a *app) sourceDownloadBar(c *ui.Context, t *ui.Theme, text, muted ui.Color
 				ui.Text(c, locales.SourceSheetCancel()).FontSize(12).FontWeight(600).TextColor(text)
 			})
 		})
-		if f.dlProgress.Total > 0 {
-			ui.Progress(c, float64(f.dlProgress.Done)/float64(f.dlProgress.Total)).FillWidth().Height(4)
+		if prog.Total > 0 {
+			ui.Progress(c, float64(prog.Done)/float64(prog.Total)).FillWidth().Height(4)
 		} else {
 			ui.Progress(c, -1).FillWidth().Height(4)
 		}
@@ -419,13 +426,14 @@ func (a *app) sourceNotConfigured(id source.ID) bool {
 
 func (a *app) sourceDownloadDoneBar(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	pal := a.chrome
+	saved := a.find.saved()
 	ui.Row(c).FillWidth().Height(40).Padding(0, 16).Gap(10).AlignItems(ui.Center).
 		Background(reader.UIColor(pal.Pressed)).Children(func() {
 		ui.Icon(c, icons.Check).Size(16, 16).TextColor(reader.UIColor(pal.Accent))
-		ui.Text(c, locales.SourceSheetDownloaded(a.find.dlSaved.Title)).FontSize(13).FontWeight(600).TextColor(text).Grow(1)
+		ui.Text(c, locales.SourceSheetDownloaded(saved.Title)).FontSize(13).FontWeight(600).TextColor(text).Grow(1)
 		openBtn := ui.Box(c).Height(26).Padding(0, 10).Radius(6).Center().
 			Background(reader.UIColor(pal.Accent)).Cursor(ui.CursorPointer).Label(locales.SourceSheetOpen())
-		openBtn.OnClick(func() { a.openPath(a.find.dlSaved.Path) })
+		openBtn.OnClick(func() { a.openPath(saved.Path) })
 		openBtn.Children(func() {
 			ui.Text(c, locales.SourceSheetOpen()).FontSize(12).FontWeight(600).TextColor(reader.UIColor(pal.OnAccent))
 		})
@@ -492,8 +500,12 @@ func (f *sourceSheet) closeSheet() {
 	f.results = nil
 	f.statuses = nil
 	f.searching = false
+	f.mu.Lock()
+	f.downloading = false
 	f.dlSaved = acquire.Saved{}
 	f.dlErr = nil
+	f.dlProgress = source.Progress{}
+	f.mu.Unlock()
 }
 
 // startSearch cancels any running search and starts a new one.
@@ -511,8 +523,10 @@ func (f *sourceSheet) startSearch(a *app) {
 	f.searching = true
 	f.results = nil
 	f.statuses = make(map[source.ID]sourceStatus)
+	f.mu.Lock()
 	f.dlErr = nil
 	f.dlSaved = acquire.Saved{}
+	f.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	f.searchCtx = ctx
@@ -555,9 +569,6 @@ func (f *sourceSheet) applyOutcomes(a *app, outcomes []source.Outcome) {
 
 // download starts downloading book from its source.
 func (f *sourceSheet) download(a *app, book source.Book) {
-	if f.downloading {
-		return
-	}
 	if a.acq == nil {
 		return
 	}
@@ -565,14 +576,19 @@ func (f *sourceSheet) download(a *app, book source.Book) {
 	if !ok {
 		return
 	}
+	f.mu.Lock()
+	if f.downloading {
+		f.mu.Unlock()
+		return
+	}
 	f.downloading = true
 	f.dlBook = book
 	f.dlProgress = source.Progress{}
 	f.dlErr = nil
 	f.dlSaved = acquire.Saved{}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	f.dlCancel = cancel
+	f.mu.Unlock()
 
 	progressMu := &sync.Mutex{}
 	var lastUpdate time.Time
@@ -581,7 +597,9 @@ func (f *sourceSheet) download(a *app, book source.Book) {
 	go func() {
 		saved, err := a.acq.Save(ctx, src, book, func(p source.Progress) {
 			progressMu.Lock()
+			f.mu.Lock()
 			f.dlProgress = p
+			f.mu.Unlock()
 			now := time.Now()
 			shouldUpdate := lastUpdate.IsZero() || now.Sub(lastUpdate) >= throttle
 			progressMu.Unlock()
@@ -598,17 +616,22 @@ func (f *sourceSheet) download(a *app, book source.Book) {
 			}
 		})
 		finish := func() {
+			f.mu.Lock()
 			f.downloading = false
 			f.dlCancel = nil
+			if err != nil {
+				f.dlErr = err
+			} else {
+				f.dlSaved = saved
+			}
+			f.mu.Unlock()
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				f.dlErr = err
 				a.notice = locales.SourceSheetDownloadFailed(err.Error())
 				return
 			}
-			f.dlSaved = saved
 			a.notice = locales.SourceSheetDownloaded(saved.Title)
 			if saved.Path != "" {
 				if a.pan != nil {
@@ -631,11 +654,42 @@ func (f *sourceSheet) download(a *app, book source.Book) {
 }
 
 func (f *sourceSheet) cancelDownload() {
-	if f.dlCancel != nil {
-		f.dlCancel()
-		f.dlCancel = nil
-	}
+	f.mu.Lock()
+	cancel := f.dlCancel
+	f.dlCancel = nil
 	f.downloading = false
+	f.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// busy reports whether a download is in flight.
+func (f *sourceSheet) busy() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.downloading
+}
+
+// progress is the last progress a download reported.
+func (f *sourceSheet) progress() source.Progress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlProgress
+}
+
+// saved is the book the last successful download wrote.
+func (f *sourceSheet) saved() acquire.Saved {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlSaved
+}
+
+// downloadErr is the failure of the last download, or nil.
+func (f *sourceSheet) downloadErr() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlErr
 }
 
 // sourceSheetSettings builds the settings panel for the current source.
@@ -857,17 +911,14 @@ func (a *app) exportSourceDefinitions(id source.ID) {
 	}()
 }
 
-// buildSources returns the concrete source implementations. On this branch it
-// returns an empty list so the UI can be built and tested without the source
-// packages. During integration, replace the body with:
-//
-//	return []source.Source{
-//		zlib.New(...),
-//		legado.New(...),
-//		wenku8.New(...),
-//	}
+// buildSources returns the concrete source implementations. Each owns its
+// transport and credentials; the registry is the only place they meet.
 func buildSources() []source.Source {
-	return nil
+	return []source.Source{
+		zlib.New(zlib.Options{}),
+		legado.New(legado.Options{}),
+		wenku8.New(wenku8.Options{}),
+	}
 }
 
 // initSources loads the source configuration, builds the registry, and
