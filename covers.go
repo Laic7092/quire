@@ -1,7 +1,6 @@
 package main
 
 import (
-	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -26,54 +25,46 @@ type coverKey struct {
 // deliberately small and fixed so memory use is predictable.
 const coverCacheLimit = 128
 
-// coverRecency records the order covers were used: least recently used first.
-// a.covers is the storage (existing callers create it themselves), while the
-// order lives here because the cache is UI-thread-only and the app struct is
-// shared by the rest of the UI.
-type coverRecency struct {
-	keys []coverKey
-}
-
-var (
-	coverCacheMu      sync.Mutex
-	coverCacheRecency = map[*app]*coverRecency{}
-)
-
-// recencyFor returns the recency list for a's cover map, rebuilding it if the
-// map was replaced or initialized outside coverBitmap.
-func recencyFor(a *app) *coverRecency {
-	r := coverCacheRecency[a]
-	if r == nil || len(r.keys) != len(a.covers) {
-		r = &coverRecency{keys: make([]coverKey, 0, len(a.covers))}
-		for key := range a.covers {
-			r.keys = append(r.keys, key)
-		}
-		coverCacheRecency[a] = r
+// syncCoverOrder rebuilds the recency list after covers was initialized or
+// replaced directly. Normal cache operations keep the two in step themselves.
+func (a *app) syncCoverOrder() {
+	if len(a.coversOrder) == len(a.covers) {
+		return
 	}
-	return r
+	a.coversOrder = make([]coverKey, 0, len(a.covers))
+	for key := range a.covers {
+		a.coversOrder = append(a.coversOrder, key)
+	}
 }
 
-// touch marks key as the most recently used.
-func (r *coverRecency) touch(key coverKey) {
-	for i := range r.keys {
-		if r.keys[i] == key {
-			copy(r.keys[i:], r.keys[i+1:])
-			r.keys[len(r.keys)-1] = key
+// touchCover marks key as the most recently used.
+func (a *app) touchCover(key coverKey) {
+	for i := range a.coversOrder {
+		if a.coversOrder[i] == key {
+			copy(a.coversOrder[i:], a.coversOrder[i+1:])
+			a.coversOrder[len(a.coversOrder)-1] = key
 			return
 		}
 	}
-	r.keys = append(r.keys, key)
+	a.coversOrder = append(a.coversOrder, key)
 }
 
-// takeOldest removes and returns the least recently used key.
-func (r *coverRecency) takeOldest() (coverKey, bool) {
-	if len(r.keys) == 0 {
-		return coverKey{}, false
+// evictOldestCover removes the least recently used entry.
+func (a *app) evictOldestCover() {
+	if len(a.coversOrder) == 0 {
+		// syncCoverOrder normally prevents this. If the recency list was
+		// emptied anyway, still drop an entry so the cache never exceeds its
+		// bound; the next cache operation rebuilds the list from the map.
+		for key := range a.covers {
+			delete(a.covers, key)
+			return
+		}
+		return
 	}
-	key := r.keys[0]
-	copy(r.keys, r.keys[1:])
-	r.keys = r.keys[:len(r.keys)-1]
-	return key, true
+	oldest := a.coversOrder[0]
+	copy(a.coversOrder, a.coversOrder[1:])
+	a.coversOrder = a.coversOrder[:len(a.coversOrder)-1]
+	delete(a.covers, oldest)
 }
 
 // coverBitmap returns the decoded cover of e, decoding it the first time and keeping
@@ -84,33 +75,18 @@ func (a *app) coverBitmap(e library.Entry) *ui.Bitmap {
 	if len(e.Cover) == 0 {
 		return nil
 	}
-
-	coverCacheMu.Lock()
-	defer coverCacheMu.Unlock()
-
 	if a.covers == nil {
 		a.covers = map[coverKey]*ui.Bitmap{}
 	}
-	r := recencyFor(a)
+	a.syncCoverOrder()
 	key := coverKey{path: e.Path, size: e.Size, modified: e.Modified}
 	if b, ok := a.covers[key]; ok {
-		r.touch(key)
+		a.touchCover(key)
 		return b
 	}
 
 	for len(a.covers) >= coverCacheLimit {
-		oldest, ok := r.takeOldest()
-		if !ok {
-			// The recency list and map got out of sync (for example, a
-			// caller replaced covers directly); drop one arbitrary entry
-			// rather than allowing the cache to exceed its bound.
-			for oldest = range a.covers {
-				break
-			}
-			delete(a.covers, oldest)
-			break
-		}
-		delete(a.covers, oldest)
+		a.evictOldestCover()
 	}
 
 	b, err := ui.DecodeBitmap(e.Cover)
@@ -121,7 +97,7 @@ func (a *app) coverBitmap(e library.Entry) *ui.Bitmap {
 		b = nil
 	}
 	a.covers[key] = b
-	r.touch(key)
+	a.touchCover(key)
 	return b
 }
 
