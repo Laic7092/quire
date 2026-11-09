@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render/paint"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/library"
@@ -17,7 +18,6 @@ import (
 	"github.com/laix/quire/internal/search"
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render/paint"
 )
 
 // newWindow builds an app with a real book, a real layout and a real shelf,
@@ -505,11 +505,14 @@ func TestSearchHitsAreHighlighted(t *testing.T) {
 // takes the focus, on the menu key too.
 func TestPageContextMenuActsOnTheSelection(t *testing.T) {
 	a := newWindow(t)
-	ix, err := search.NewIndex(a.book, a.doc)
-	if err != nil {
-		t.Fatal(err)
+	// The index is lazy: the menu must offer the selection search before the
+	// first query has built one, and choosing it must build one naturally.
+	a.pan.SetIndexBuilder(func() (*search.Index, error) {
+		return search.NewIndex(a.book, a.doc)
+	})
+	if a.pan.Index != nil {
+		t.Fatal("the selection test already has an index")
 	}
-	a.pan.SetIndex(ix)
 
 	tt := ui.NewTester(a.view, 1180, 800)
 	tt.Frame()
