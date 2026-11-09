@@ -830,34 +830,33 @@ func (a *app) ensureLayout(w, h float32) {
 	sw, sh, measured := a.layoutSheet(w, h)
 	palette := a.palette()
 	paper := paperOf(palette)
-	// The page keeps its margins whatever the window does: below three of them
-	// there is no line to lay out, so say so instead of failing the job.
-	if sw < 3*opts.Margin || sh < 3*opts.Margin {
+	gate := chooseLayoutGate(layoutGateInput{
+		width: w, height: h, sheetW: sw, sheetH: sh, measured: measured,
+		bookReady: a.book != nil, fontsReady: a.fonts != nil,
+		opts: opts, layOpts: a.layOpts, paper: paper, layPaper: a.layPaper,
+		docAt: a.docAt, hasLayout: a.layout != nil, loading: a.loading,
+		layW: a.layW, layH: a.layH,
+		failed: a.failed, failW: a.failW, failH: a.failH, failFontSize: a.failSize,
+	})
+	switch gate {
+	case layoutGateTooNarrow:
+		// The page keeps its margins whatever the window does: below three of
+		// them there is no line to lay out, so say so instead of failing the job.
 		a.cancelLayout()
 		a.dropPreview()
 		a.loading = false
 		a.failed, a.failW, a.failH, a.failSize = true, w, h, opts.FontSize
 		a.status = locales.LayoutTooNarrow()
 		return
-	}
-	if !measured {
+	case layoutGateWaitMeasure:
 		// The page area's width is what decides the sheet, and the frame that
 		// shows the reading view for the first time is the one that carries it.
 		// Waiting for it is what keeps the whole book from being laid out at a
 		// guessed width and then laid out again at the real one.
 		return
-	}
-	if a.book == nil || a.fonts == nil {
+	case layoutGateNotReady, layoutGateStableFailure, layoutGateLoading:
 		return
-	}
-	if a.failed && w == a.failW && h == a.failH && opts.FontSize == a.failSize {
-		return
-	}
-	if a.loading && sw == a.layW && sh == a.layH && opts.Same(a.layOpts) && paper == a.layPaper {
-		return
-	}
-	if !a.loading && a.layout != nil && sw == a.layW && sh == a.layH &&
-		a.docAt == opts.FontSize && opts.Same(a.layOpts) && paper == a.layPaper {
+	case layoutGateCurrent:
 		// The published layout is this very sheet, and its pages are on screen:
 		// a preview built for a size the window has since come back to is stale.
 		a.dropPreview()
