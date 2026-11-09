@@ -43,7 +43,10 @@ type app struct {
 	// winShared is the same window for background goroutines, which must not
 	// read the UI thread's field. The UI thread writes both together.
 	winShared atomic.Pointer[mygo.Window]
-	fonts     *reader.Fonts
+	// tasks owns work started for this window. It is canceled when the window
+	// closes so a late search or download result cannot reach the next reader.
+	tasks atomic.Pointer[taskScope]
+	fonts *reader.Fonts
 	// fontSans and fontSerif are the files the reading faces come from, resolved
 	// at launch and opened with the first book (see loadFonts). fontErr is why
 	// there is no face to open, and fontsLoading marks a load in flight so a

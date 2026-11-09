@@ -71,6 +71,10 @@ func testApp(t *testing.T, reg *source.Registry) (*app, func()) {
 		acq:     acquire.New(acquire.Options{Dir: filepath.Join(dir, "books"), Prefix: "test-"}),
 		find:    &sourceSheet{},
 	}
+	// These readers have no window. Run task callbacks inline so the
+	// background state they publish can be observed by the test, just as a
+	// window's Update callback would publish it on the UI thread.
+	a.tasks.Store(newTaskScope(nil, func(fn func()) { fn() }))
 	return a, func() { _ = conf.Save() }
 }
 
@@ -346,5 +350,106 @@ func TestInitSourcesRegistersThree(t *testing.T) {
 		if !s.Caps().Search || !s.Caps().Download {
 			t.Errorf("%s caps = %+v", s.ID(), s.Caps())
 		}
+	}
+}
+
+func TestSourceSearchReplacesAndCancelsOlderTask(t *testing.T) {
+	oldStarted := make(chan context.Context, 1)
+	oldReturned := make(chan struct{})
+	a, cleanup := testApp(t, testRegistry(&fakeSource{
+		id:   "slow",
+		name: "Slow",
+		search: func(ctx context.Context, q source.Query) (source.Result, error) {
+			if q.Text == "old" {
+				oldStarted <- ctx
+				<-ctx.Done()
+				close(oldReturned)
+				return source.Result{}, ctx.Err()
+			}
+			return source.Result{Books: []source.Book{{Source: "slow", Key: "new", Title: "New"}}}, nil
+		},
+	}))
+	defer cleanup()
+
+	// Keep posts queued so this test, like the UI thread, applies them one at
+	// a time after both searches have been asked for.
+	posted := make(chan func(), 4)
+	a.tasks.Store(newTaskScope(nil, func(fn func()) { posted <- fn }))
+	f := a.find
+
+	f.query = "old"
+	f.startSearch(a)
+	var oldCtx context.Context
+	select {
+	case oldCtx = <-oldStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old search did not start")
+	}
+
+	f.query = "new"
+	f.startSearch(a)
+	select {
+	case <-oldCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("starting a new search did not cancel the old task")
+	}
+	select {
+	case <-oldReturned:
+	case <-time.After(time.Second):
+		t.Fatal("old search did not return after cancellation")
+	}
+
+	var resultCallback func()
+	select {
+	case resultCallback = <-posted:
+	case <-time.After(time.Second):
+		t.Fatal("new search did not post its result")
+	}
+	resultCallback()
+
+	if len(f.results) != 1 || f.results[0].book.Key != "new" {
+		t.Fatalf("results = %+v, want only the new search's result", f.results)
+	}
+	if f.searchCancel != nil {
+		t.Fatal("completed search left a cancel handle behind")
+	}
+}
+
+func TestSourceSearchCanceledByAppScope(t *testing.T) {
+	started := make(chan context.Context, 1)
+	a, cleanup := testApp(t, testRegistry(&fakeSource{
+		id:   "slow",
+		name: "Slow",
+		search: func(ctx context.Context, q source.Query) (source.Result, error) {
+			started <- ctx
+			<-ctx.Done()
+			return source.Result{}, ctx.Err()
+		},
+	}))
+	defer cleanup()
+
+	posted := make(chan func(), 1)
+	a.tasks.Store(newTaskScope(nil, func(fn func()) { posted <- fn }))
+	f := a.find
+	f.query = "x"
+	f.startSearch(a)
+
+	var ctx context.Context
+	select {
+	case ctx = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("search did not start")
+	}
+	a.closeTasks()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("closing the app task scope did not cancel the search")
+	}
+	select {
+	case fn := <-posted:
+		fn()
+		t.Fatal("canceled app scope posted a search callback")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
