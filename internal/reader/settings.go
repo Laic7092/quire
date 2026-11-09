@@ -30,8 +30,9 @@ const (
 
 // Options are the reading choices the display settings change: the size, the
 // leading, the face, the alignment, the margins, whether two pages share the
-// window and how a page turns. Everything but the paper theme lives here,
-// because the theme is a package-level palette the document is built against.
+// window and how a page turns. The palette is not here: it rides alongside
+// these options in BuildLayoutWithPalette and the other palette-explicit
+// methods, because it changes paint rather than the shape of the book.
 type Options struct {
 	// FontSize is the reading size in CSS pixels. It is also the size the
 	// document has to be built at: the converter bakes absolute sizes into the
@@ -153,8 +154,8 @@ func (o Options) Margins() paint.Insets {
 }
 
 // BuildLayout lays out a whole document at width×height DIPs with the reading
-// options given. The caller runs it off the UI thread: it shapes every line of
-// the book.
+// options given and the palette in use. It is BuildLayoutWithPalette using
+// Current, kept for callers that still follow the process-wide theme.
 //
 // doc must have been built at opts.FontSize (book.Book.DocumentSized) — the
 // reading size. The converter resolves the book's CSS into absolute sizes, so
@@ -163,10 +164,21 @@ func (o Options) Margins() paint.Insets {
 // building the document again, which is what the reader does when the setting
 // moves.
 func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width, height float32, opts Options) (*render.Layout, error) {
+	return BuildLayoutWithPalette(ctx, doc, fonts, Current(), width, height, opts)
+}
+
+// BuildLayoutWithPalette lays out a whole document at width×height DIPs with
+// the reading options and palette given. The caller runs it off the UI thread:
+// it shapes every line of the book.
+//
+// The palette is captured in this call: changing the process-wide palette while
+// the layout runs cannot alter the reply. Callers should use this variant when
+// they keep their own palette rather than reader.Current.
+func BuildLayoutWithPalette(ctx context.Context, doc *render.Document, fonts *Fonts, palette Palette, width, height float32, opts Options) (*render.Layout, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("reader: nil document")
 	}
-	lo, err := layoutOptions(fonts, width, height, opts)
+	lo, err := layoutOptions(fonts, palette, width, height, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -178,19 +190,29 @@ func BuildLayout(ctx context.Context, doc *render.Document, fonts *Fonts, width,
 }
 
 // Relayout lays prev's document out again for the current palette and reading
-// options. The paper, the ink and the link colour are paint-only, so a theme
-// change reuses the line boxes and the page maps and only the pages on screen
-// are drawn again: the reader changes paper without re-shaping the book, however
+// options. It is RelayoutWithPalette using Current, kept for callers that still
+// follow the process-wide theme.
+//
+// The paper, the ink and the link colour are paint-only, so a theme change
+// reuses the line boxes and the page maps and only the pages on screen are
+// drawn again: the reader changes paper without re-shaping the book, however
 // long it is.
 //
 // A settings change reuses what it can too — a new line height keeps the line
 // boxes and only re-paginates — so this is the path every rebuild takes while
 // the document itself stays the same.
 func Relayout(ctx context.Context, prev *render.Layout, fonts *Fonts, width, height float32, opts Options) (*render.Layout, error) {
+	return RelayoutWithPalette(ctx, prev, fonts, Current(), width, height, opts)
+}
+
+// RelayoutWithPalette lays prev's document out again for the palette and
+// reading options given. It leaves the shape of the request to Relayout; the
+// palette is captured in this call, not read from Current while the work runs.
+func RelayoutWithPalette(ctx context.Context, prev *render.Layout, fonts *Fonts, palette Palette, width, height float32, opts Options) (*render.Layout, error) {
 	if prev == nil || prev.Document() == nil {
 		return nil, fmt.Errorf("reader: nil layout")
 	}
-	lo, err := layoutOptions(fonts, width, height, opts)
+	lo, err := layoutOptions(fonts, palette, width, height, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +226,22 @@ func Relayout(ctx context.Context, prev *render.Layout, fonts *Fonts, width, hei
 }
 
 // RelayoutRange lays the chapters in [first, last) of prev's document out again
-// for the current palette and reading options: the few chapters a host can draw
-// at once, laid out while the whole book is still too much to wait for. It is
-// Relayout with a chapter range — it shapes and paginates those chapters and
-// nothing else, and page numbers start at 0 for the range.
+// for the current palette and reading options. It is RelayoutRangeWithPalette
+// using Current, kept for callers that still follow the process-wide theme.
 //
-// It shares prev's engine and its variant cache, so a host that chains one range
-// off the last — the chapters on screen at every size the window is dragged
-// through — pays for those chapters only, and the whole book's Relayout later
-// reuses what they computed.
+// It shapes and paginates those chapters and nothing else, and page numbers
+// start at 0 for the range. It shares prev's engine and its variant cache, so a
+// host that chains one range off the last — the chapters on screen at every size
+// the window is dragged through — pays for those chapters only, and the whole
+// book's Relayout later reuses what they computed.
 func RelayoutRange(ctx context.Context, prev *render.Layout, fonts *Fonts, width, height float32, opts Options, first, last int) (*render.Layout, error) {
+	return RelayoutRangeWithPalette(ctx, prev, fonts, Current(), width, height, opts, first, last)
+}
+
+// RelayoutRangeWithPalette lays the chapters in [first, last) of prev's
+// document out again for the palette and reading options given. It leaves the
+// range checks and engine reuse to RelayoutRange.
+func RelayoutRangeWithPalette(ctx context.Context, prev *render.Layout, fonts *Fonts, palette Palette, width, height float32, opts Options, first, last int) (*render.Layout, error) {
 	if prev == nil || prev.Document() == nil {
 		return nil, fmt.Errorf("reader: nil layout")
 	}
@@ -221,7 +249,7 @@ func RelayoutRange(ctx context.Context, prev *render.Layout, fonts *Fonts, width
 		return nil, fmt.Errorf("reader: chapter range [%d,%d) outside the document's %d chapters",
 			first, last, prev.Document().ChapterCount())
 	}
-	lo, err := layoutOptions(fonts, width, height, opts)
+	lo, err := layoutOptions(fonts, palette, width, height, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -229,22 +257,29 @@ func RelayoutRange(ctx context.Context, prev *render.Layout, fonts *Fonts, width
 	return prev.Relayout(ctx, lo)
 }
 
-// Recolor prints prev's pages on the paper in use. The paper, the ink and the
-// link colour are paint-only, so nothing is shaped and no page moves: the layout
-// keeps its lines, its pages and its place, and only the pages drawn afterwards
-// are painted again. It is the theme switch — a copy of the layout, not a pass
-// over the book.
+// Recolor prints prev's pages on the palette in use. It is RecolorWithPalette
+// using Current, kept for callers that still follow the process-wide theme.
+//
+// The paper, the ink and the link colour are paint-only, so nothing is shaped
+// and no page moves: the layout keeps its lines, its pages and its place, and
+// only the pages drawn afterwards are painted again. It is the theme switch — a
+// copy of the layout, not a pass over the book.
 func Recolor(prev *render.Layout) *render.Layout {
+	return RecolorWithPalette(prev, Current())
+}
+
+// RecolorWithPalette prints prev's pages on the palette given, reusing every
+// line box and page map. A nil layout stays nil.
+func RecolorWithPalette(prev *render.Layout, palette Palette) *render.Layout {
 	if prev == nil {
 		return nil
 	}
-	palette := Current()
 	return prev.WithColors(palette.Ink, palette.Paper, palette.Link)
 }
 
-// layoutOptions is the render request for the reading options and the palette in
-// use, so a build and a relayout ask for exactly the same thing.
-func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.LayoutOptions, error) {
+// layoutOptions is the render request for the reading options and the palette
+// given, so a build and a relayout ask for exactly the same thing.
+func layoutOptions(fonts *Fonts, palette Palette, width, height float32, opts Options) (render.LayoutOptions, error) {
 	if fonts == nil || fonts.Set == nil {
 		return render.LayoutOptions{}, fmt.Errorf("reader: nil fonts")
 	}
@@ -252,7 +287,6 @@ func layoutOptions(fonts *Fonts, width, height float32, opts Options) (render.La
 	if err := checkViewport(width, height, opts); err != nil {
 		return render.LayoutOptions{}, err
 	}
-	palette := Current()
 	align := render.AlignLeft
 	if opts.Justify {
 		align = render.AlignJustify
