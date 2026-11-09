@@ -38,6 +38,10 @@ type UIPainter struct {
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one
 	// page over another. It is 1 unless SetFade says otherwise.
 	fade float32
+	// palette is the paper and ink this painter was created for. DrawCover uses
+	// its paper rather than the process-wide palette, so two painters can draw
+	// two themes at once.
+	palette Palette
 	// noCull turns off skipping the runs outside the clip, so a test can
 	// paint them and prove the skip changes no pixel. It turns off the painter's
 	// Visible as well, so the test covers both culls: the painter's own, which
@@ -75,15 +79,25 @@ func (o *glyphOutline) ink() {
 	}
 }
 
-// NewUIPainter prepares a painter for one element. The outline and image
-// caches live as long as the painter, so keep it for the whole window and
-// reuse it. Run the SetImage calls on the UI thread.
+// NewUIPainter prepares a painter for one element with the palette in use. It
+// is NewUIPainterWithPalette using Current, kept for callers that still follow
+// the process-wide theme. The outline and image caches live as long as the
+// painter, so keep it for the whole window and reuse it. Run the SetImage calls
+// on the UI thread.
 func NewUIPainter(p *ui.Painter, fonts *Fonts) *UIPainter {
+	return NewUIPainterWithPalette(p, fonts, Current())
+}
+
+// NewUIPainterWithPalette prepares a painter for one element with the palette
+// given. It captures the palette: a later SetPalette does not change the paper
+// this painter draws under a cover.
+func NewUIPainterWithPalette(p *ui.Painter, fonts *Fonts, palette Palette) *UIPainter {
 	return &UIPainter{
 		P:       p,
 		faces:   make(map[*paint.Font]*glyphFace),
 		bitmaps: make(map[paint.ImageID]*ui.Bitmap),
 		fade:    1,
+		palette: palette,
 	}
 }
 
@@ -154,8 +168,8 @@ func (u *UIPainter) Bitmap(id paint.ImageID) *ui.Bitmap {
 	return u.bitmaps[id]
 }
 
-// DrawCover fills box with the page colour and shows the cover inside it, at
-// its aspect ratio. It reports whether a cover was available.
+// DrawCover fills box with the painter's palette paper and shows the cover
+// inside it, at its aspect ratio. It reports whether a cover was available.
 //
 // A painter faded with SetFade draws the cover translucent and leaves the sheet
 // under it to whoever drew it: a host dissolving the cover into the page behind
@@ -166,7 +180,7 @@ func (u *UIPainter) DrawCover(p *ui.Painter, id paint.ImageID, box ui.Rect, pad 
 		return false
 	}
 	if u.fade >= 1 {
-		p.Fill(box, uiColor(Current().Paper), 0)
+		p.Fill(box, uiColor(u.palette.Paper), 0)
 	}
 	r := coverBox(bitmap, box, pad)
 	if u.fade >= 1 {

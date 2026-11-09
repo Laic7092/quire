@@ -51,11 +51,24 @@ type PageRenderer struct {
 	// page exported to a PNG carries the weight it has in the window (see
 	// texttone.go).
 	tones toneCache
+	// palette is the paper this renderer was created for. Its sheet is cleared
+	// to this paper rather than the process-wide palette, so two renderers can
+	// export different themes independently.
+	palette Palette
 }
 
-// NewPageRenderer returns a renderer with no surface yet: the first
-// DrawPage/DrawTile sizes it to that page.
-func NewPageRenderer() *PageRenderer { return &PageRenderer{} }
+// NewPageRenderer returns a renderer with no surface yet, using the palette in
+// use. It is NewPageRendererWithPalette using Current, kept for callers that
+// still follow the process-wide theme. The first DrawPage/DrawTile sizes the
+// surface to that page.
+func NewPageRenderer() *PageRenderer { return NewPageRendererWithPalette(Current()) }
+
+// NewPageRendererWithPalette returns a renderer with no surface yet, using the
+// palette given. The palette is captured: a later SetPalette does not change the
+// sheet the renderer clears to.
+func NewPageRendererWithPalette(palette Palette) *PageRenderer {
+	return &PageRenderer{palette: palette}
+}
 
 // SetImage decodes data and registers it for the pages drawn afterwards. It
 // reports whether the bytes were an image the reader accepts. The mapping is
@@ -85,9 +98,9 @@ func (p *PageRenderer) ClearImages() {
 
 // DrawPage rasterizes page at scale device pixels per DIP (1 is one pixel per
 // DIP, 2 is Retina). The page's own display list starts with its paper fill, so
-// the result is the reading page; the surface is also cleared to the current
-// palette's paper first, so a display list built without a background still
-// comes out on paper rather than on transparency.
+// the result is the reading page; the surface is also cleared to the
+// renderer's palette paper first, so a display list built without a background
+// still comes out on paper rather than on transparency.
 func (p *PageRenderer) DrawPage(page *render.Page, scale float32) *image.RGBA {
 	if page == nil {
 		return image.NewRGBA(image.Rect(0, 0, 0, 0))
@@ -123,7 +136,7 @@ func (p *PageRenderer) render(width, height, scale float32, draw func(paint.Pain
 	// identity transform and the full-surface clip, which is what a page and a
 	// tile both expect to start from.
 	s.Reset()
-	s.Clear(Current().Paper)
+	s.Clear(p.palette.Paper)
 	if scale != 1 {
 		s.Transform(paint.Affine{A: scale, D: scale})
 	}
