@@ -5,8 +5,13 @@
 
 断行、分页、行位置和字形位置全部来自本地 `github.com/laix/layx` 的 `render` 引擎；
 本仓库只做四件事：把书变成 `render.Document`、把 `DisplayList` 画到 `ui.Painter`、
-把窗口和面板摆出来、把状态存下来。两个 layx module 都是本地 `replace`
+把窗口和面板摆出来、把状态存下来。layx 的各个 module 都是本地 `replace`
 （`github.com/laix/layx` 排版、`github.com/laix/layx/epub` 解析 EPUB），改上层库不用发版。
+
+`go.mod` 里的 `replace` 使用相对路径 `../layx`、`../layx/epub`、`../layx/raster`，所以本仓库
+必须和 layx 检出并排（`quire/` 与 `layx/` 在同一个父目录下）；在 Git worktree 里开发时，可以
+在 worktree 旁建一个指向 layx 检出的 `layx` symlink。目录布局不同时，请用自己环境里的
+`go.work` 指向实际路径，不要把绝对路径提交进 `go.mod`。
 
 ## 名字与图标
 

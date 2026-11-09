@@ -21,7 +21,7 @@ require (
 )
 
 replace (
-	github.com/laix/layx => /home/laix/layx
-	github.com/laix/layx/epub => /home/laix/layx/epub
-	github.com/laix/layx/raster => /home/laix/layx/raster
+	github.com/laix/layx => ../layx
+	github.com/laix/layx/epub => ../layx/epub
+	github.com/laix/layx/raster => ../layx/raster
 )

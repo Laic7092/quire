@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -46,5 +47,86 @@ func TestCoverCacheFollowsTheFile(t *testing.T) {
 	}
 	if got := len(a.covers); got != 2 {
 		t.Errorf("the cache holds %d covers after the book was replaced, want 2", got)
+	}
+}
+
+// coverCacheTestEntry builds a distinct cache entry. Its cover is deliberately
+// not an image: a decode failure still exercises the cache and keeps the test
+// independent of the sample books.
+func coverCacheTestEntry(i int) library.Entry {
+	return library.Entry{
+		Path:     fmt.Sprintf("book-%03d.epub", i),
+		Size:     int64(i + 1),
+		Modified: time.Unix(int64(i), 0).UTC(),
+		Cover:    []byte("not an image"),
+	}
+}
+
+func coverCacheContains(a *app, e library.Entry) bool {
+	key := coverKey{path: e.Path, size: e.Size, modified: e.Modified}
+	_, ok := a.covers[key]
+	return ok
+}
+
+func TestCoverCacheCachesDecodeErrors(t *testing.T) {
+	a := &app{}
+	e := coverCacheTestEntry(0)
+	if got := a.coverBitmap(e); got != nil {
+		t.Fatalf("an undecodable cover returned a bitmap")
+	}
+	if !coverCacheContains(a, e) {
+		t.Fatal("the failed decode was not cached")
+	}
+	if got := a.coverBitmap(e); got != nil {
+		t.Fatalf("the cached decode error did not stay nil")
+	}
+	if got := len(a.covers); got != 1 {
+		t.Fatalf("the cache holds %d entries after reading one broken cover twice, want 1", got)
+	}
+}
+
+func TestCoverCacheEvictsOldestEntry(t *testing.T) {
+	a := &app{}
+	for i := 0; i < coverCacheLimit; i++ {
+		a.coverBitmap(coverCacheTestEntry(i))
+	}
+	if got := len(a.covers); got != coverCacheLimit {
+		t.Fatalf("the cache holds %d covers after filling it, want %d", got, coverCacheLimit)
+	}
+
+	newest := coverCacheTestEntry(coverCacheLimit)
+	a.coverBitmap(newest)
+	if got := len(a.covers); got != coverCacheLimit {
+		t.Fatalf("the cache holds %d covers after eviction, want %d", got, coverCacheLimit)
+	}
+	if coverCacheContains(a, coverCacheTestEntry(0)) {
+		t.Error("the least recently used cover survived eviction")
+	}
+	if !coverCacheContains(a, newest) {
+		t.Error("the newly decoded cover is missing")
+	}
+	if !coverCacheContains(a, coverCacheTestEntry(1)) {
+		t.Error("eviction removed more than the oldest cover")
+	}
+}
+
+func TestCoverCacheKeepsRecentlyUsedEntry(t *testing.T) {
+	a := &app{}
+	for i := 0; i < coverCacheLimit; i++ {
+		a.coverBitmap(coverCacheTestEntry(i))
+	}
+
+	recent := coverCacheTestEntry(0)
+	a.coverBitmap(recent) // a cache hit makes this the most recently used
+	a.coverBitmap(coverCacheTestEntry(coverCacheLimit))
+
+	if !coverCacheContains(a, recent) {
+		t.Error("a recently used cover was evicted")
+	}
+	if coverCacheContains(a, coverCacheTestEntry(1)) {
+		t.Error("the next least recently used cover was not evicted")
+	}
+	if got := len(a.covers); got != coverCacheLimit {
+		t.Errorf("the cache holds %d covers, want %d", got, coverCacheLimit)
 	}
 }
