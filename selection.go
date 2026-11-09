@@ -5,11 +5,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
+	"github.com/laix/layx/render/paint"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
 )
 
 // handlePageInput turns presses on the sheet into the reader's two pointer
@@ -337,8 +337,10 @@ func (a *app) pageMenu(c *ui.Context, m *ui.Menu) {
 		a.addNoteFromSelection()
 	}
 	if label := searchLabel(text); label != "" {
-		hasIndex := a.pan != nil && a.pan.Index != nil
-		if m.Item(label).Disabled(!hasIndex).Chosen() {
+		// The index may still be waiting for its first query; CanSearch also
+		// counts the document's lazy builder.
+		canSearch := a.pan != nil && a.pan.CanSearch()
+		if m.Item(label).Disabled(!canSearch).Chosen() {
 			a.searchSelection(text)
 		}
 	}

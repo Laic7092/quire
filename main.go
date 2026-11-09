@@ -909,20 +909,12 @@ func (a *app) ensureLayout(w, h float32) {
 	// the job that matters.
 	ctx, cancel := context.WithCancel(context.Background())
 	a.layCancel = cancel
-	// The index belongs to a document; a rebuild replaces both. Reading the
-	// field here is the UI thread's job, the goroutine only sees the copy.
-	var prevIndex *search.Index
-	if a.pan != nil {
-		prevIndex = a.pan.Index
-	}
-
 	go func() {
 		var images map[render.ImageID][]byte
-		index := prevIndex
 		rebuilt := false
-		// What each part of the job cost, for the log: a rebuild of the book,
-		// the search index that walks it, and the layout proper.
-		var docSky, indexSky, layoutSky time.Duration
+		// What each part of the job cost, for the log: a rebuild of the book
+		// and the layout proper. The search index is built later, on demand.
+		var docSky, layoutSky time.Duration
 		if doc == nil || docAt != size {
 			// The reader paints links itself (ThemeLinks), so the paper's link
 			// colour stays out of the document and a theme change never rebuilds
@@ -948,15 +940,6 @@ func (a *app) ensureLayout(w, h float32) {
 			doc, docAt = d, size
 			images = imgs
 			rebuilt = true
-			// Indexing walks the same nodes the layout will, so it is done
-			// with the build and published with it.
-			indexAt := time.Now()
-			if ix, err := search.NewIndex(bookPtr, d); err == nil {
-				index = ix
-			} else {
-				index = nil
-			}
-			indexSky = time.Since(indexAt)
 		}
 		// The same document can be laid out again by reusing what the previous
 		// layout already shaped: a theme change only repaints, and a settings
@@ -1051,7 +1034,12 @@ func (a *app) ensureLayout(w, h float32) {
 			a.scrollGoal, a.scrollAt = a.scrollY, time.Time{}
 			if a.pan != nil {
 				if rebuilt {
-					a.pan.SetIndex(index)
+					// The index walks the document the layout was just built
+					// from. Make it on the first query instead of paying for it
+					// on every document rebuild.
+					a.pan.SetIndexBuilder(func() (*search.Index, error) {
+						return search.NewIndex(bookPtr, doc)
+					})
 				}
 				if a.scrolling() {
 					if loc, ok := a.currentLoc(); ok {
@@ -1074,7 +1062,7 @@ func (a *app) ensureLayout(w, h float32) {
 			if scroll {
 				pages = layout.TileCount()
 			}
-			perf.laidOut(time.Since(jobAt), docSky, indexSky, layoutSky, pages, scroll)
+			perf.laidOut(time.Since(jobAt), docSky, 0, layoutSky, pages, scroll)
 		})
 	}()
 }
