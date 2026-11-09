@@ -166,6 +166,8 @@ go tool mygo vet . && go tool mygo i18n check .   # 文案：key、占位符、�
 
 ## 文档
 
+- [`docs/architecture.md`](docs/architecture.md)：窗口、排版、调色板、任务作用域、搜索索引
+  和缓存的所有权与运行时不变式。
 - [`docs/integration-notes.md`](docs/integration-notes.md)：宿主依赖 layx / MyGo 的哪些
   不变量、还缺哪些 API、宿主为此付出了什么。会被人回来查的那份。
 - [`docs/scroll-performance.md`](docs/scroll-performance.md)：滚动为什么卡、现在的绘制
