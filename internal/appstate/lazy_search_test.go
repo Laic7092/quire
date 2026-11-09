@@ -152,3 +152,34 @@ func waitSignal(t *testing.T, ch <-chan struct{}, what string) {
 		t.Fatalf("timed out waiting for %s", what)
 	}
 }
+
+// Replacing the index source for a relayout keeps the query that already ran:
+// the new document's index is built on that query's behalf, not eagerly when
+// the builder was installed.
+func TestNewDocumentBuilderRerunsAnActiveQuery(t *testing.T) {
+	bk, doc := lazySearchFixture(t)
+	a := New(nil)
+	firstCalls := 0
+	a.SetIndexBuilder(func() (*search.Index, error) {
+		firstCalls++
+		return search.NewIndex(bk, doc)
+	})
+	a.Search.Query = "阿"
+	a.Search.OnSearch(a.Search.Query)
+	if firstCalls != 1 || len(a.Search.Hits) == 0 {
+		t.Fatalf("first search: %d builds, %d hits, %q",
+			firstCalls, len(a.Search.Hits), a.Search.Status)
+	}
+
+	secondCalls := 0
+	a.SetIndexBuilder(func() (*search.Index, error) {
+		secondCalls++
+		return search.NewIndex(bk, doc)
+	})
+	if secondCalls != 1 {
+		t.Fatalf("new document builder ran %d times, want 1", secondCalls)
+	}
+	if len(a.Search.Hits) == 0 {
+		t.Errorf("the active query lost its results after the relayout: %q", a.Search.Status)
+	}
+}

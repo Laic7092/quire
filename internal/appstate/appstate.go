@@ -465,7 +465,13 @@ func (a *App) SetIndex(ix *search.Index) {
 // UI thread when Post is set, and later queries reuse the published Index. The
 // host calls this when a newly built document replaces the old one; closing the
 // book clears it. A nil builder removes the callback.
+//
+// If a query had already run against an index, it runs again against the new
+// document's index, as it does when SetIndex replaces one after a relayout.
+// That build still starts off the UI thread and only because a query exists.
 func (a *App) SetIndexBuilder(build func() (*search.Index, error)) {
+	hadIndex := a.Index != nil
+	query := a.Search.Query
 	a.Index = nil
 	a.indexBuilder = build
 	a.indexGen++
@@ -475,6 +481,9 @@ func (a *App) SetIndexBuilder(build func() (*search.Index, error)) {
 	a.Search.Status = ""
 	a.searchID++
 	a.hitsChanged()
+	if hadIndex && strings.TrimSpace(query) != "" {
+		a.search(query)
+	}
 }
 
 // CanSearch reports whether a query can produce results now or after the
