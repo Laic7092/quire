@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/internal/reader"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
+	"github.com/laix/quire/internal/reader"
 )
 
 // The sheet is the paper the book is printed on. One page at a time on a narrow
@@ -448,7 +448,7 @@ func fadeAlpha(progress float32) (leaving, arriving float32) {
 
 // drawPaper prints the sheet itself, opaque, in the paper's colour.
 func (a *app) drawPaper(p *ui.Painter, r ui.Rect) {
-	a.paint.FillRect(paint.Rect{X: r.X, Y: r.Y, Width: r.W, Height: r.H}, reader.Current().Paper)
+	a.paint.FillRect(paint.Rect{X: r.X, Y: r.Y, Width: r.W, Height: r.H}, a.palette().Paper)
 }
 
 // drawPages paints the pages that start at start, shifted by dx.

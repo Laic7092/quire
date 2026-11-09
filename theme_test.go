@@ -20,12 +20,12 @@ func TestThemeSwitchKeepsTheBook(t *testing.T) {
 	// sheet this window lays out, as the first frames of a real one would.
 	sw, sh := a.sheetSize(a.boxW, a.boxH, a.opts)
 	a.layW, a.layH, a.layOpts = sw, sh, a.opts
-	a.layPaper = paperOf(reader.Current())
+	a.layPaper = paperOf(a.palette())
 	doc, base, page := a.doc, a.layout, a.page
 
 	a.setTheme(reader.ThemeBold)
 	tt.Frame()
-	if got := reader.Current().Theme; got != reader.ThemeBold {
+	if got := a.palette().Theme; got != reader.ThemeBold {
 		t.Fatalf("paper is %q after a theme change, want %q", got, reader.ThemeBold)
 	}
 	// The palette and the page were both applied inside that frame: no job was
@@ -36,7 +36,7 @@ func TestThemeSwitchKeepsTheBook(t *testing.T) {
 	if a.layout == base {
 		t.Fatal("the frame drew the old paper")
 	}
-	if a.layPaper != paperOf(reader.Current()) {
+	if a.layPaper != paperOf(a.palette()) {
 		t.Fatal("the published layout is not on the current paper")
 	}
 	if a.doc != doc {
@@ -51,10 +51,10 @@ func TestThemeSwitchKeepsTheBook(t *testing.T) {
 	if a.page != page {
 		t.Fatalf("the reading place moved on a theme change: page %d -> %d", page, a.page)
 	}
-	if got, want := a.layout.Typography().Color, reader.Current().Ink; got != want {
+	if got, want := a.layout.Typography().Color, a.palette().Ink; got != want {
 		t.Fatalf("pages print in %v, want the paper's ink %v", got, want)
 	}
-	if got, want := a.layout.Typography().LinkColor, reader.Current().Link; got != want {
+	if got, want := a.layout.Typography().LinkColor, a.palette().Link; got != want {
 		t.Fatalf("links are drawn in %v, want the paper's link colour %v", got, want)
 	}
 }

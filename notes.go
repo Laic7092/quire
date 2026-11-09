@@ -4,7 +4,6 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/notes"
-	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
 )
 
@@ -75,7 +74,7 @@ func (a *app) drawNoteMarks(p *ui.Painter, box ui.Rect, page int) {
 	if len(a.noteQuads) == 0 {
 		return
 	}
-	a.paint.FillQuads(p, box, page, a.noteQuads, reader.Current().Note)
+	a.paint.FillQuads(p, box, page, a.noteQuads, a.palette().Note)
 }
 
 // drawScrollNoteMarks is drawNoteMarks for a scrolling column: the quads carry
@@ -85,5 +84,5 @@ func (a *app) drawScrollNoteMarks(p *ui.Painter, view ui.Rect, y float32) {
 	if len(a.noteQuads) == 0 {
 		return
 	}
-	a.paint.FillScrollQuads(p, view, a.noteQuads, reader.Current().Note, y)
+	a.paint.FillScrollQuads(p, view, a.noteQuads, a.palette().Note, y)
 }

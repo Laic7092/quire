@@ -70,6 +70,14 @@ func NewPageRendererWithPalette(palette Palette) *PageRenderer {
 	return &PageRenderer{palette: palette}
 }
 
+// SetPalette changes the sheet colour a PageRenderer clears to. The surface is
+// kept; the next DrawPage/DrawTile uses the new paper.
+func (p *PageRenderer) SetPalette(palette Palette) {
+	if p != nil {
+		p.palette = palette
+	}
+}
+
 // SetImage decodes data and registers it for the pages drawn afterwards. It
 // reports whether the bytes were an image the reader accepts. The mapping is
 // kept across draws and surfaces; ClearImages drops it when another book

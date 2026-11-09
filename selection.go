@@ -8,7 +8,6 @@ import (
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
 	"github.com/laix/quire/internal/appstate"
-	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
 )
 
@@ -307,7 +306,7 @@ func (a *app) drawMarks(p *ui.Painter, box ui.Rect, l *render.Layout, page int) 
 	if a.marksOn != l {
 		return
 	}
-	pal := reader.Current()
+	pal := a.palette()
 	a.drawNoteMarks(p, box, page)
 	on := -1
 	if a.pan != nil {

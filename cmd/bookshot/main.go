@@ -46,8 +46,8 @@ func main() {
 	}
 
 	// The palette decides the paper, ink and link colours baked into the
-	// display list, so it is set before the layout is built.
-	reader.SetPalette(reader.ForTheme(reader.ParseTheme(*theme)))
+	// display list, so it is passed explicitly to layout and export.
+	palette := reader.ForTheme(reader.ParseTheme(*theme))
 
 	fontPath, err := reader.FindFont(*fontFlag)
 	if err != nil {
@@ -75,7 +75,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("bookshot: build %s: %v", b.Title, err)
 	}
-	layout, err := reader.BuildLayout(context.Background(), doc, fonts,
+	layout, err := reader.BuildLayoutWithPalette(context.Background(), doc, fonts, palette,
 		float32(*width), float32(*height), opts)
 	if err != nil {
 		log.Fatalf("bookshot: layout: %v", err)
@@ -86,7 +86,7 @@ func main() {
 			*pageIndex, layout.PageCount(), fontPath)
 	}
 
-	renderer := reader.NewPageRenderer()
+	renderer := reader.NewPageRendererWithPalette(palette)
 	decoded := 0
 	for id, data := range images {
 		if renderer.SetImage(id, data) {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/laix/quire/internal/reader"
 	"github.com/laix/layx/render"
+	"github.com/laix/quire/internal/reader"
 )
 
 // A window resize is the one gesture the reader cannot wait out. A width change
@@ -115,7 +115,7 @@ func (a *app) buildPreview(sw, sh float32, opts reader.Options) {
 		a.dropPreview()
 		return
 	}
-	l, err := reader.RelayoutRange(context.Background(), prev, a.fonts, sw, sh, opts, first, last)
+	l, err := reader.RelayoutRangeWithPalette(context.Background(), prev, a.fonts, a.palette(), sw, sh, opts, first, last)
 	if err != nil {
 		a.dropPreview()
 		return

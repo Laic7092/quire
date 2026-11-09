@@ -632,7 +632,7 @@ func TestDisplaySettingsApplyAndPersist(t *testing.T) {
 	if err := tt.Click(locales.ThemeOriginal()); err != nil {
 		t.Fatalf("no white theme: %v", err)
 	}
-	if got := reader.Current().Theme; got != reader.ThemeWhite {
+	if got := a.palette().Theme; got != reader.ThemeWhite {
 		t.Errorf("paper is %q after choosing 白色", got)
 	}
 	if got := a.st.State().Prefs.Theme; got != string(reader.ThemeWhite) {
@@ -1022,7 +1022,7 @@ func TestTurnFadesInPlace(t *testing.T) {
 	mid := shot(to, &turnState{from: from, to: to, dir: 1,
 		at: at.Add(-turnDuration / 2)})
 
-	paper := reader.Current().Paper
+	paper := a.palette().Paper
 	ink := func(img *image.RGBA, x, y int) int {
 		r, g, b, _ := img.At(x, y).RGBA()
 		dr, dg, db := int(r>>8)-int(paper.R), int(g>>8)-int(paper.G), int(b>>8)-int(paper.B)
@@ -1134,7 +1134,7 @@ func TestSlidePaintsOneSheet(t *testing.T) {
 		at: at.Add(-turnDuration * 15 / 100)}
 	tt.Frame()
 
-	paper := reader.Current().Paper
+	paper := a.palette().Paper
 	img := tt.Image()
 	// The page's foot, well below its text: the band the edge shade used to
 	// darken on a turn this early in the slide.

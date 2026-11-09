@@ -55,7 +55,7 @@ func TestTheBarsGoAwayDownTheColumn(t *testing.T) {
 	// A pixel in the capsule at the head of the window: its fill while the bar
 	// is up, the paper's own once it has gone.
 	const x, y = 20, 20
-	p := paper()
+	p := a.palette().Paper
 	paperPixel := color.RGBA{R: p.R, G: p.G, B: p.B, A: 255}
 	if got := tt.Image().RGBAAt(x, y); got == paperPixel {
 		t.Fatalf("the bar's capsule is not drawn at (%d, %d): %v", x, y, got)

@@ -106,6 +106,15 @@ func NewUIPainterWithPalette(p *ui.Painter, fonts *Fonts, palette Palette) *UIPa
 // another. The pages start with their own opaque sheet, so drawing the arriving
 // page at f over the leaving one is a cross-fade of the two, text and paper
 // alike. f is clamped to 0..1, and drawing is opaque after SetFade(1).
+// SetPalette changes the paper a UIPainter draws under a cover. Page display
+// lists carry their own colours; this only affects painter-owned chrome such as
+// the sheet behind a cover, so glyph and image caches are preserved.
+func (u *UIPainter) SetPalette(palette Palette) {
+	if u != nil {
+		u.palette = palette
+	}
+}
+
 func (u *UIPainter) SetFade(f float32) {
 	if u == nil {
 		return

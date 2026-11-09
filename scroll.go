@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/internal/reader"
-	"github.com/laix/quire/locales"
 	"github.com/laix/layx/render"
 	"github.com/laix/layx/render/paint"
+	"github.com/laix/quire/internal/reader"
+	"github.com/laix/quire/locales"
 )
 
 // The reading page can be turned or scrolled. Scrolling builds the layout with
@@ -808,7 +808,7 @@ func roundDevices(v, scale float32) float32 {
 // column. It only fills rectangles it already has: the veils are rebuilt when
 // the layout or the results change, never while drawing.
 func (a *app) drawScrollMarks(p *ui.Painter, view ui.Rect, y float32) {
-	pal := reader.Current()
+	pal := a.palette()
 	// The notes sit under what the reader is acting on now, as they do on a
 	// page: the hits and the selection are painted over them.
 	a.drawScrollNoteMarks(p, view, y)

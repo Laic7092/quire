@@ -192,7 +192,7 @@ func (d *desk) newApp() *app {
 		// A window made after the faces were parsed can read at once: the
 		// painter is per window because it holds this window's glyphs and
 		// images, and the faces themselves are read-only and shared.
-		a.paint = reader.NewUIPainter(nil, a.fonts)
+		a.paint = reader.NewUIPainterWithPalette(nil, a.fonts, a.palette())
 	}
 	a.pan.OnPickDir = a.chooseDir
 	a.pan.Reading = a.currentLoc

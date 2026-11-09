@@ -79,6 +79,10 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		pal = systemChrome(base.Dark)
 	}
 	a.chrome = pal
+	a.pagePal = pal
+	if a.paint != nil {
+		a.paint.SetPalette(pal)
+	}
 	key := skinKey{paper: paper, dark: base.Dark, accent: base.Accent, font: base.FontSize, library: !reading}
 	if !a.skinSet || key != a.skinKey {
 		a.skin = readerTheme(base, a.chrome)
@@ -89,9 +93,6 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 	// The page's ink and paper are baked into the page display lists, so a
 	// change of paper costs a paint-only relayout: ensureLayout sees the new
 	// palette on this frame and the pages on screen are drawn again.
-	if reader.Current().Theme != paper {
-		reader.SetPalette(reader.ForTheme(paper))
-	}
 	return &a.skin
 }
 
@@ -227,8 +228,18 @@ func readerTheme(base ui.Theme, pal reader.Palette) ui.Theme {
 	return t
 }
 
-// paper is the colour of the page itself: the sheet the book is printed on,
-// which the reading theme sets.
-func paper() ui.Color {
-	return reader.UIColor(reader.Current().Paper)
+// palette is the window's captured reading palette. A reader built by hand in
+// a test may not have gone through applyTheme yet; it falls back to the legacy
+// process-wide palette so such unit fixtures remain useful.
+func (a *app) palette() reader.Palette {
+	if a.pagePal.Theme != "" {
+		return a.pagePal
+	}
+	return reader.Current()
+}
+
+// paperColor is the colour of the page itself: the sheet the book is printed
+// on, from this window's captured palette.
+func (a *app) paperColor() ui.Color {
+	return reader.UIColor(a.palette().Paper)
 }

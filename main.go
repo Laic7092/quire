@@ -204,6 +204,10 @@ type app struct {
 	skin    ui.Theme
 	skinSet bool
 	skinKey skinKey
+	// pagePal is the reading palette captured for this window: the page, ink and
+	// link colours passed explicitly to layout, painting and export. applyTheme
+	// refreshes it; unlike reader.Current it is not process-wide mutable state.
+	pagePal reader.Palette
 	// chrome is the palette the window's own furniture is drawn in this frame:
 	// the reading theme with a book open, the system's own with nothing open.
 	chrome reader.Palette
@@ -821,7 +825,8 @@ func (a *app) ensureLayout(w, h float32) {
 	}
 	opts := a.opts
 	sw, sh, measured := a.layoutSheet(w, h)
-	paper := paperOf(reader.Current())
+	palette := a.palette()
+	paper := paperOf(palette)
 	// The page keeps its margins whatever the window does: below three of them
 	// there is no line to lay out, so say so instead of failing the job.
 	if sw < 3*opts.Margin || sh < 3*opts.Margin {
@@ -948,9 +953,9 @@ func (a *app) ensureLayout(w, h float32) {
 		var err error
 		layoutAt := time.Now()
 		if doc != nil && prev != nil && prev.Document() == doc {
-			layout, err = reader.Relayout(ctx, prev, fonts, sw, sh, opts)
+			layout, err = reader.RelayoutWithPalette(ctx, prev, fonts, palette, sw, sh, opts)
 		} else {
-			layout, err = reader.BuildLayout(ctx, doc, fonts, sw, sh, opts)
+			layout, err = reader.BuildLayoutWithPalette(ctx, doc, fonts, palette, sw, sh, opts)
 		}
 		layoutSky = time.Since(layoutAt)
 		win.Update(func() {
@@ -1081,9 +1086,9 @@ func (a *app) repaper(sw, sh float32, opts reader.Options) bool {
 		sw != a.layW || sh != a.layH || !opts.Same(a.layOpts) {
 		return false
 	}
-	a.layout = reader.Recolor(a.layout)
+	a.layout = reader.RecolorWithPalette(a.layout, a.palette())
 	a.layGen++
-	a.layPaper = paperOf(reader.Current())
+	a.layPaper = paperOf(a.palette())
 	return true
 }
 
@@ -1214,7 +1219,7 @@ func (a *app) reloadFonts() {
 			a.fonts = fonts
 			// The pages on screen were set in the face before this one, and the
 			// painter holds their images: the book is built and laid out again.
-			a.paint = reader.NewUIPainter(nil, fonts)
+			a.paint = reader.NewUIPainterWithPalette(nil, fonts, a.palette())
 			a.cancelLayout()
 			a.dropPreview()
 			a.doc = nil
@@ -1275,7 +1280,7 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 			// them: from here on a page can be laid out and drawn. A window made
 			// after the parse already has them but not their painter.
 			a.fonts = fonts
-			a.paint = reader.NewUIPainter(nil, fonts)
+			a.paint = reader.NewUIPainterWithPalette(nil, fonts, a.palette())
 			a.doc = nil
 		}
 		a.cancelLayout() // drop any layout still in flight

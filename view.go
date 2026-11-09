@@ -195,7 +195,7 @@ func (a *app) view(c *ui.Context) {
 // closed.
 func (a *app) openingView(c *ui.Context, t *ui.Theme) {
 	bar := c.TitleBar()
-	ui.Column(c).Fill().Background(paper()).Children(func() {
+	ui.Column(c).Fill().Background(a.paperColor()).Children(func() {
 		// The bar of a book still opening: the room the system's buttons take,
 		// and the drag that moves the window, over the paper the book will be
 		// printed on.
@@ -1198,7 +1198,7 @@ func (a *app) readProgress(e library.Entry) float64 {
 // they leave it, so the measure the book is laid out at is the same whether the
 // bars are showing or away.
 func (a *app) reader(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().MinWidth(0).Background(paper()).
+	ui.Column(c).Fill().MinWidth(0).Background(a.paperColor()).
 		Padding(barHeight(c), 0, footerHeight, 0).Bind(&a.surface).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
