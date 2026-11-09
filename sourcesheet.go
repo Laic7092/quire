@@ -80,6 +80,9 @@ type sourceStatus struct {
 const (
 	sheetWidth  = 720
 	sheetHeight = 560
+	// dialogMargin keeps a sheet off the window edge on windows too small
+	// for its preferred size.
+	dialogMargin = 24
 )
 
 // knownSourceIDs lists the sources the UI knows about, in sidebar order.
@@ -129,17 +132,21 @@ func (a *app) sourceDialog(c *ui.Context, t *ui.Theme) {
 	bg := reader.UIColor(pal.Popover)
 	text := reader.UIColor(pal.Text)
 	muted := reader.UIColor(pal.Muted)
-	onToolbar := reader.UIColor(pal.OnToolbar)
-
-	ui.Modal(c, &a.find.shown, func() {
-		card := ui.Box(c).Width(sheetWidth).Height(sheetHeight).Radius(14).
+	// Modal would wrap the card in its own themed panel, adding a second
+	// border, background and padding around it. DialogBase gives the sheet a
+	// plain backdrop and lets the card below be the only panel on screen.
+	ui.DialogBase(c, &a.find.shown, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
+		w, h := c.Size()
+		panel.Width(min(sheetWidth, w-2*dialogMargin)).
+			Height(min(sheetHeight, h-2*dialogMargin)).Radius(14).
 			Background(bg).Border(1, reader.UIColor(pal.Line)).
 			Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.32)).Clip()
-		card.Children(func() {
-			a.sourceSheetHeader(c, t, text, muted, onToolbar)
-			a.sourceSheetFilter(c, t, text, muted, onToolbar)
+		panel.Children(func() {
+			a.sourceSheetHeader(c, t, text, muted)
+			a.sourceSheetFilter(c, t, text, muted)
 			a.sourceSheetStatus(c, t, muted)
-			a.sourceSheetResults(c, t, text, muted, onToolbar)
+			a.sourceSheetResults(c, t, text, muted)
 		})
 	})
 	if !a.find.shown {
@@ -147,7 +154,7 @@ func (a *app) sourceDialog(c *ui.Context, t *ui.Theme) {
 	}
 }
 
-func (a *app) sourceSheetHeader(c *ui.Context, t *ui.Theme, text, muted, onToolbar ui.Color) {
+func (a *app) sourceSheetHeader(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	pal := a.chrome
 	ui.Row(c).FillWidth().Height(54).Padding(0, 16).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, locales.SourceSheetTitle()).FontSize(15).FontWeight(700).TextColor(text).Grow(1)
@@ -177,7 +184,7 @@ func (a *app) sourceSheetHeader(c *ui.Context, t *ui.Theme, text, muted, onToolb
 	})
 }
 
-func (a *app) sourceSheetFilter(c *ui.Context, t *ui.Theme, text, muted, onToolbar ui.Color) {
+func (a *app) sourceSheetFilter(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	pal := a.chrome
 	sources := a.registeredSourceIDs()
 	labels := make([]string, 0, len(sources)+1)
@@ -197,8 +204,8 @@ func (a *app) sourceSheetFilter(c *ui.Context, t *ui.Theme, text, muted, onToolb
 					Cursor(ui.CursorPointer).Label(labels[i])
 				ink := muted
 				if chosen {
-					chip.Background(reader.UIColor(pal.Text))
-					ink = onToolbar
+					chip.Background(reader.UIColor(pal.Accent))
+					ink = reader.UIColor(pal.OnAccent)
 				} else if chip.Hovered() {
 					chip.Background(t.SurfaceHover)
 				}
@@ -219,7 +226,7 @@ func (a *app) sourceSheetFilter(c *ui.Context, t *ui.Theme, text, muted, onToolb
 						gid := id
 						gear.OnClick(func() { a.showSourceSettings(gid) })
 						gear.Children(func() {
-							ui.Icon(c, icons.Gear).Size(12, 12).TextColor(ink)
+							ui.Icon(c, icons.Gear).Size(12, 12).TextColor(muted)
 						})
 					}
 				}
@@ -269,7 +276,7 @@ func (a *app) sourceSheetStatus(c *ui.Context, t *ui.Theme, muted ui.Color) {
 	ui.Box(c).FillWidth().Height(1).Background(muted.Alpha(0.15))
 }
 
-func (a *app) sourceSheetResults(c *ui.Context, t *ui.Theme, text, muted, onToolbar ui.Color) {
+func (a *app) sourceSheetResults(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	f := a.find
 	rows := f.filteredResults()
 
@@ -303,14 +310,14 @@ func (a *app) sourceSheetResults(c *ui.Context, t *ui.Theme, text, muted, onTool
 			return string(rows[i].book.Source) + "\x00" + rows[i].book.Key
 		})
 	list.Rows(func(row ui.ListRow) {
-		a.sourceResultRow(c, row, rows[row.Index], text, muted, onToolbar)
+		a.sourceResultRow(c, row, rows[row.Index], text, muted)
 	})
 	if list.Submitted() && f.list.Selected != nil && *f.list.Selected >= 0 && *f.list.Selected < len(rows) {
 		f.download(a, rows[*f.list.Selected].book)
 	}
 }
 
-func (a *app) sourceResultRow(c *ui.Context, row ui.ListRow, r sourceRow, text, muted, onToolbar ui.Color) {
+func (a *app) sourceResultRow(c *ui.Context, row ui.ListRow, r sourceRow, text, muted ui.Color) {
 	pal := a.chrome
 	t := c.Theme()
 	book := r.book
@@ -356,7 +363,7 @@ func (a *app) sourceResultRow(c *ui.Context, row ui.ListRow, r sourceRow, text, 
 						desc = string([]rune(desc)[:120]) + "…"
 					}
 					ui.Text(c, desc).FontSize(11).TextColor(muted.Alpha(0.85)).
-						MaxWidth(sheetWidth - 140).MaxLines(2)
+						MaxWidthPercent(100).MaxLines(2)
 				}
 			})
 
@@ -537,7 +544,7 @@ func (f *sourceSheet) downloadErr() error {
 }
 
 // sourceSheetSettings builds the settings panel for the current source.
-func (a *app) sourceSheetSettings(c *ui.Context, t *ui.Theme, text, muted, onToolbar ui.Color) {
+func (a *app) sourceSheetSettings(c *ui.Context, t *ui.Theme, text, muted ui.Color) {
 	if a.find == nil || !a.find.settingsOpen {
 		return
 	}
@@ -546,8 +553,11 @@ func (a *app) sourceSheetSettings(c *ui.Context, t *ui.Theme, text, muted, onToo
 	pal := a.chrome
 	bg := reader.UIColor(pal.Popover)
 
-	ui.Modal(c, &a.find.settingsOpen, func() {
-		panel := ui.Box(c).Width(420).Radius(14).Background(bg).
+	ui.DialogBase(c, &a.find.settingsOpen, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
+		w, h := c.Size()
+		panel.Width(min(420, w-2*dialogMargin)).MaxHeight(h-2*dialogMargin).
+			Radius(14).Background(bg).
 			Border(1, reader.UIColor(pal.Line)).Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.32))
 		panel.Children(func() {
 			ui.Row(c).FillWidth().Height(50).Padding(0, 16).AlignItems(ui.Center).Children(func() {

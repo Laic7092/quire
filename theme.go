@@ -63,6 +63,9 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 	// book has arrived, so it opens on the paper rather than on the library's
 	// desk.
 	reading := a.book != nil || a.bookWindow
+	if !reading {
+		base.Dark = a.libraryChromeDark(base.Dark)
+	}
 	follow := !reading || a.themeSys || a.theme == ""
 	paper := a.paperTheme(base.Dark)
 	// The window's own controls are the system's, and they sit on this bar: let
@@ -72,6 +75,9 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		// frame's base theme still carries; the window follows the desktop's
 		// own from here, so the library is drawn in it on this very frame.
 		base.Dark = mygo.Theme.IsDark()
+		if !reading {
+			base.Dark = a.libraryChromeDark(base.Dark)
+		}
 		paper = a.paperTheme(base.Dark)
 	}
 	pal := reader.ForTheme(paper)
@@ -112,6 +118,16 @@ func windowSource(follow bool, paper reader.Theme) mygo.ThemeSource {
 	return mygo.ThemeLight
 }
 
+// libraryChromeDark asks the desk for the desktop appearance the library
+// should keep. A reader built by hand in a test has no desk and simply follows
+// the frame's default.
+func (a *app) libraryChromeDark(baseDark bool) bool {
+	if a.desk == nil {
+		return baseDark
+	}
+	return a.desk.libraryChromeDark(baseDark, mygo.Theme.Source() == mygo.ThemeSystem)
+}
+
 // syncWindowAppearance hands MyGo the appearance the window's controls are
 // drawn in, once per change: a new source repaints the controls, the menus and
 // the window's frame, so it costs a frame and is not a per-frame call. It
@@ -125,8 +141,8 @@ func windowSource(follow bool, paper reader.Theme) mygo.ThemeSource {
 // The appearance is the app's, like the palette: with several windows, a
 // library on the system's look and a book on a dark paper would otherwise fight
 // over it every frame. The focused window decides, so a book's controls match
-// the bar they sit on; the windows behind it keep the system's until they are
-// looked at.
+// the bar they sit on. The library remembers the desktop's own appearance while
+// a book forces another one, so it does not turn over behind the book.
 func (a *app) syncWindowAppearance(src mygo.ThemeSource) bool {
 	if runtime.GOOS == "darwin" {
 		return false

@@ -59,6 +59,36 @@ func TestThemeSwitchKeepsTheBook(t *testing.T) {
 	}
 }
 
+// TestLibraryChromeIgnoresBookAppearance pins the library to the desktop's own
+// light/dark look. A focused book window forces MyGo's process-wide appearance
+// so its title buttons match the paper; that must not turn the library behind
+// it over, or closing the book would visibly turn it back again.
+func TestLibraryChromeIgnoresBookAppearance(t *testing.T) {
+	d := &desk{}
+
+	// The desktop is light: remember that while MyGo follows it.
+	if got := d.libraryChromeDark(false, true); got {
+		t.Fatal("the library turned dark on a light desktop")
+	}
+	// A dark book forces the app's appearance; the library stays light.
+	if got := d.libraryChromeDark(true, false); got {
+		t.Fatal("a dark book turned the library's chrome dark")
+	}
+	// Closing the book returns to the desktop; still light, no visible flip.
+	if got := d.libraryChromeDark(false, true); got {
+		t.Fatal("the library changed when the book closed")
+	}
+
+	// A real desktop appearance change while the app follows it is followed.
+	if got := d.libraryChromeDark(true, true); !got {
+		t.Fatal("the library did not follow a dark desktop")
+	}
+	// A light book forced over that dark desktop leaves the library dark.
+	if got := d.libraryChromeDark(false, false); !got {
+		t.Fatal("a light book turned the library's chrome light")
+	}
+}
+
 // TestWindowControlsFollowThePaper pins the appearance the window's controls
 // are drawn in to the bar they sit on. MyGo paints minimize, maximize and close
 // (and GTK's title buttons) in the appearance it was given, not in the window's

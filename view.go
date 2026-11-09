@@ -185,7 +185,7 @@ func (a *app) view(c *ui.Context) {
 	a.removeDialog(c, t)
 	// The book-source search sheet and its settings panel float above the page.
 	a.sourceDialog(c, t)
-	a.sourceSheetSettings(c, t, reader.UIColor(a.chrome.Text), reader.UIColor(a.chrome.Muted), reader.UIColor(a.chrome.OnToolbar))
+	a.sourceSheetSettings(c, t, reader.UIColor(a.chrome.Text), reader.UIColor(a.chrome.Muted))
 }
 
 // openingView is a book window before its book has arrived: the paper it will

@@ -295,6 +295,69 @@ func TestSourceSheetUIRenders(t *testing.T) {
 	}
 }
 
+// TestSourceSheetSinglePanel guards the sheet's look: Modal puts its own
+// themed card around whatever the caller builds, so a card inside it came out
+// with a second border, background and padding. DialogBase leaves only the
+// sheet's own card on the backdrop.
+func TestSourceSheetSinglePanel(t *testing.T) {
+	a, cleanup := testApp(t, testRegistry())
+	defer cleanup()
+	a.chrome = systemChrome(false)
+	a.find.openSheet("")
+
+	const width, height = 900, 700
+	view := func(c *ui.Context) {
+		ui.Box(c).Fill().Background(ui.RGBA(255, 0, 0, 1)).Children(func() {
+			a.sourceDialog(c, c.Theme())
+		})
+	}
+	tt := ui.NewTester(view, width, height)
+
+	// This point sits just outside the sheet but inside the old Modal wrapper.
+	// It must show the dimmed backdrop, not another panel's background.
+	x := int((width-sheetWidth)/2 - 10)
+	y := int((height-sheetHeight)/2 + 10)
+	r, g, b, _ := tt.Image().At(x, y).RGBA()
+	if r>>8 > 0xd0 && g>>8 > 0xd0 && b>>8 > 0xd0 {
+		t.Fatalf("pixel at (%d,%d) is %02x%02x%02x, want the dimmed backdrop: the sheet has an extra panel",
+			x, y, r>>8, g>>8, b>>8)
+	}
+}
+
+// TestSourceSheetSelectedFilterReadable pins the selected filter's contrast:
+// it used a palette ink meant for the reading toolbar, which is transparent in
+// the library, leaving a solid pill with no label.
+func TestSourceSheetSelectedFilterReadable(t *testing.T) {
+	a, cleanup := testApp(t, testRegistry())
+	defer cleanup()
+	a.chrome = systemChrome(false)
+	a.find.openSheet("")
+
+	view := func(c *ui.Context) {
+		ui.Box(c).Fill().Background(c.Theme().Background).Children(func() {
+			a.sourceDialog(c, c.Theme())
+		})
+	}
+	tt := ui.NewTester(view, 900, 700)
+	label, ok := tt.Find(locales.SourceSheetAll())
+	if !ok {
+		t.Fatal("selected filter label is not in the frame")
+	}
+	img := tt.Image()
+	bright := 0
+	for y := int(label.Y); y < int(label.Y+label.H); y++ {
+		for x := int(label.X); x < int(label.X+label.W); x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 > 0xc0 && g>>8 > 0xc0 && b>>8 > 0xc0 {
+				bright++
+			}
+		}
+	}
+	if bright == 0 {
+		t.Fatal("selected filter label has no contrasting pixels; it is invisible on the selected fill")
+	}
+}
+
 func TestSourceNameFallback(t *testing.T) {
 	a, cleanup := testApp(t, testRegistry())
 	defer cleanup()

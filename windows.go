@@ -56,6 +56,12 @@ type desk struct {
 	opts     reader.Options
 	theme    reader.Theme
 	themeSys bool
+	// systemDark is the desktop's appearance as last seen while MyGo followed
+	// it. A focused book window may force the process-wide appearance so its
+	// title buttons match the paper; the library still draws its own chrome on
+	// this remembered desktop appearance.
+	systemDark    bool
+	systemDarkSet bool
 	// goalBooks and goalDays are the reading goals the home screen measures
 	// against; every window shows the same year.
 	goalBooks int
@@ -332,6 +338,22 @@ func (d *desk) setTheme(t reader.Theme, from *app) {
 		from.theme, from.themeSys = t, false
 		from.savePrefs()
 	}
+}
+
+// libraryChromeDark returns the light/dark appearance the library's chrome
+// should use. current is the frame's default theme, which MyGo derives from the
+// process-wide appearance a focused book window may have forced. followsSystem
+// says whether that appearance is the desktop's own; only then is current
+// allowed to replace what the library remembered.
+func (d *desk) libraryChromeDark(current, followsSystem bool) bool {
+	if followsSystem {
+		d.systemDark, d.systemDarkSet = current, true
+		return current
+	}
+	if d.systemDarkSet {
+		return d.systemDark
+	}
+	return current
 }
 
 // hasBook reports whether this window is reading or opening a book, as opposed
