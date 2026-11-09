@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/layx/render"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/bookmarks"
 	"github.com/laix/quire/internal/library"
@@ -24,7 +25,6 @@ import (
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/internal/toc"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
 )
 
 // Sidebar identifiers, also what Prefs.Sidebar stores. SidebarNone closes the
@@ -48,7 +48,7 @@ type App struct {
 	// BookKey is the store key of the open book, "" for none.
 	BookKey string
 	// Index is the full-text index of the current document; nil until the host
-	// publishes one after a build.
+	// publishes one or a query asks the index builder to make one.
 	Index *search.Index
 
 	Shelf     library.Panel
@@ -87,6 +87,13 @@ type App struct {
 	layout   *render.Layout
 	page     int
 	searchID int
+	// indexBuilder builds the current document's full-text index on demand.
+	// indexGen identifies the document and index source the builder belongs
+	// to, so a late build of an old document cannot publish over a newer one.
+	// indexBuilding keeps repeated queries from starting the same build again.
+	indexBuilder  func() (*search.Index, error)
+	indexGen      int
+	indexBuilding bool
 	// shelfID counts shelf publications, so a reload that lost the race with a
 	// newer reload or an import does not install its older list.
 	shelfID int
@@ -378,6 +385,21 @@ func (a *App) refreshAt(bk *book.Book, layout *render.Layout, loc render.Locatio
 	if bk == nil && layout == nil {
 		a.clearBook()
 	}
+	// A different book owns a different document, even if a caller forgot to
+	// send the close through Refresh(nil, nil, 0) first. The first Refresh of a
+	// new App installs the book, so keep a builder it was given just before.
+	if a.book != nil && bk != a.book {
+		a.Index = nil
+		a.indexBuilder = nil
+		a.indexGen++
+		a.indexBuilding = false
+		a.Search.Query = ""
+		a.Search.Hits = nil
+		a.Search.Selected = -1
+		a.Search.Status = ""
+		a.searchID++
+		a.hitsChanged()
+	}
 	a.layout, a.page = layout, page
 	a.book = bk
 	a.placed = a.BookKey
@@ -400,6 +422,9 @@ func (a *App) clearBook() {
 	a.book, a.layout = nil, nil
 	a.loc, a.hasLoc, a.page = render.Location{}, false, 0
 	a.Index = nil
+	a.indexBuilder = nil
+	a.indexGen++
+	a.indexBuilding = false
 	a.Toc.Entries, a.Toc.Selected = nil, -1
 	a.Bookmarks.Entries, a.Bookmarks.Selected = a.Bookmarks.Entries[:0], -1
 	a.Notes.Entries, a.Notes.Selected = a.Notes.Entries[:0], -1
@@ -420,6 +445,11 @@ func (a *App) clearBook() {
 // the panel empty under a word it never answered.
 func (a *App) SetIndex(ix *search.Index) {
 	a.Index = ix
+	// A supplied index is authoritative; a lazy build from before it must not
+	// replace it when it lands.
+	a.indexBuilder = nil
+	a.indexGen++
+	a.indexBuilding = false
 	a.Search.Hits = nil
 	a.Search.Selected = -1
 	a.Search.Status = ""
@@ -428,6 +458,38 @@ func (a *App) SetIndex(ix *search.Index) {
 	if strings.TrimSpace(a.Search.Query) != "" {
 		a.search(a.Search.Query)
 	}
+}
+
+// SetIndexBuilder installs the callback that makes the current document's
+// full-text index. Nothing is built here: the first query asks for it, off the
+// UI thread when Post is set, and later queries reuse the published Index. The
+// host calls this when a newly built document replaces the old one; closing the
+// book clears it. A nil builder removes the callback.
+//
+// If a query had already run against an index, it runs again against the new
+// document's index, as it does when SetIndex replaces one after a relayout.
+// That build still starts off the UI thread and only because a query exists.
+func (a *App) SetIndexBuilder(build func() (*search.Index, error)) {
+	hadIndex := a.Index != nil
+	query := a.Search.Query
+	a.Index = nil
+	a.indexBuilder = build
+	a.indexGen++
+	a.indexBuilding = false
+	a.Search.Hits = nil
+	a.Search.Selected = -1
+	a.Search.Status = ""
+	a.searchID++
+	a.hitsChanged()
+	if hadIndex && strings.TrimSpace(query) != "" {
+		a.search(query)
+	}
+}
+
+// CanSearch reports whether a query can produce results now or after the
+// current document's index is built on demand.
+func (a *App) CanSearch() bool {
+	return a.Index != nil || a.indexBuilder != nil
 }
 
 // Opened records bk as the open book, remembers it in the store and returns its
@@ -610,6 +672,9 @@ func (a *App) hitsChanged() {
 
 // search runs the query against the current index. Obsolete runs are dropped by
 // the id counter, so a slow search of an old query cannot overwrite a new one.
+// When the document's index has not been built yet, the first query starts its
+// builder instead; later queries wait for that one build and then run against
+// the index it publishes.
 func (a *App) search(query string) {
 	a.searchID++
 	id := a.searchID
@@ -620,13 +685,74 @@ func (a *App) search(query string) {
 		a.hitsChanged()
 		return
 	}
-	ix := a.Index
-	if ix == nil {
+	if ix := a.Index; ix != nil {
+		a.runSearch(ix, query, id)
+		return
+	}
+	build := a.indexBuilder
+	if build == nil {
 		a.Search.Hits = nil
 		a.Search.Status = locales.SearchNoIndex()
 		a.hitsChanged()
 		return
 	}
+	a.Search.Status = locales.SearchSearching()
+	if a.indexBuilding {
+		return
+	}
+	a.indexBuilding = true
+	gen := a.indexGen
+	a.async(func() func() {
+		ix, err := build()
+		return func() {
+			if gen != a.indexGen {
+				return // the book or document changed while it was building
+			}
+			a.indexBuilding = false
+			if err != nil || ix == nil {
+				a.Index = nil
+				a.indexBuilder = nil
+				a.indexBuildFailed()
+				return
+			}
+			// The build may have outlived a relayout that produced another
+			// document. Its locations name the old geometry, so never publish
+			// it over the layout on screen.
+			if a.layout != nil {
+				if doc := a.layout.Document(); doc != nil && ix.Stale(doc) {
+					a.Index = nil
+					a.indexBuilder = nil
+					a.indexBuildFailed()
+					return
+				}
+			}
+			a.Index = ix
+			// The build is done, but the reader may have typed another query
+			// while it ran. Run the query current now, not the one that started
+			// the build.
+			a.indexBuilder = nil
+			if strings.TrimSpace(a.Search.Query) != "" {
+				a.search(a.Search.Query)
+			}
+		}
+	})
+}
+
+// indexBuildFailed drops the results of a build that could not provide the
+// current document's index. It leaves an empty query alone: the reader cleared
+// the field while the build ran, so there is no query left to report on.
+func (a *App) indexBuildFailed() {
+	if strings.TrimSpace(a.Search.Query) == "" {
+		return
+	}
+	a.Search.Hits = nil
+	a.Search.Selected = -1
+	a.Search.Status = locales.SearchNoIndex()
+	a.hitsChanged()
+}
+
+// runSearch runs one query against a built index, off the UI thread.
+func (a *App) runSearch(ix *search.Index, query string, id int) {
 	a.Search.Status = locales.SearchSearching()
 	a.async(func() func() {
 		hits := ix.Search(query, 100)
