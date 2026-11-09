@@ -188,6 +188,10 @@ func (d *desk) newApp() *app {
 		find:        &sourceSheet{},
 	}
 	a.menuCopyOn = d.menuCopyOn
+	// The scope belongs to this window even before it has been made: the first
+	// search or download starts only after the window exists, but every task
+	// must be cancelable by the time it does.
+	a.tasks.Store(newTaskScope(nil, a.post))
 	if a.fonts != nil {
 		// A window made after the faces were parsed can read at once: the
 		// painter is per window because it holds this window's glyphs and
@@ -202,14 +206,7 @@ func (d *desk) newApp() *app {
 	a.pan.OnHits = a.refreshMarks
 	a.wireNoteActions()
 	a.pan.OnNotes = a.refreshMarks
-	a.pan.Post = func(fn func()) {
-		if win := a.winShared.Load(); win != nil {
-			win.Update(func() {
-				defer a.refresh(win)
-				fn()
-			})
-		}
-	}
+	a.pan.Post = a.post
 	a.syncSettingsFields()
 	return a
 }
@@ -473,6 +470,9 @@ func (a *app) newWindow() {
 	a.winShared.Store(win)
 	a.ready = true
 	win.OnClose(func(*mygo.CloseEvent) {
+		// Nothing this window started may land in the next one. Cancel it
+		// before the window and its shared pointer go away.
+		a.closeTasks()
 		// Flush the debounced writing on the way out, and let the next window
 		// carry the app.
 		if a.st != nil {
