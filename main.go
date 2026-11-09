@@ -330,8 +330,11 @@ type app struct {
 	uiSize    float64
 	uiLeading float64
 	uiMargin  float64
-	// covers caches decoded shelf covers, keyed by path and size.
-	covers map[coverKey]*ui.Bitmap
+	// covers caches decoded shelf covers, keyed by path and size. coversOrder
+	// lists the same keys from least to most recently used; both are owned by
+	// the UI thread, like the bitmaps themselves.
+	covers      map[coverKey]*ui.Bitmap
+	coversOrder []coverKey
 }
 
 // pageLabel is the folio's name for where the reader is: the cover, the page

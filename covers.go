@@ -19,9 +19,58 @@ type coverKey struct {
 	modified time.Time
 }
 
+// coverCacheLimit bounds the decoded cover cache. A shelf only paints a handful
+// of covers at once; keeping every cover ever seen would make memory use grow
+// with the library and with every replacement the reader opens. The value is
+// deliberately small and fixed so memory use is predictable.
+const coverCacheLimit = 128
+
+// syncCoverOrder rebuilds the recency list after covers was initialized or
+// replaced directly. Normal cache operations keep the two in step themselves.
+func (a *app) syncCoverOrder() {
+	if len(a.coversOrder) == len(a.covers) {
+		return
+	}
+	a.coversOrder = make([]coverKey, 0, len(a.covers))
+	for key := range a.covers {
+		a.coversOrder = append(a.coversOrder, key)
+	}
+}
+
+// touchCover marks key as the most recently used.
+func (a *app) touchCover(key coverKey) {
+	for i := range a.coversOrder {
+		if a.coversOrder[i] == key {
+			copy(a.coversOrder[i:], a.coversOrder[i+1:])
+			a.coversOrder[len(a.coversOrder)-1] = key
+			return
+		}
+	}
+	a.coversOrder = append(a.coversOrder, key)
+}
+
+// evictOldestCover removes the least recently used entry.
+func (a *app) evictOldestCover() {
+	if len(a.coversOrder) == 0 {
+		// syncCoverOrder normally prevents this. If the recency list was
+		// emptied anyway, still drop an entry so the cache never exceeds its
+		// bound; the next cache operation rebuilds the list from the map.
+		for key := range a.covers {
+			delete(a.covers, key)
+			return
+		}
+		return
+	}
+	oldest := a.coversOrder[0]
+	copy(a.coversOrder, a.coversOrder[1:])
+	a.coversOrder = a.coversOrder[:len(a.coversOrder)-1]
+	delete(a.covers, oldest)
+}
+
 // coverBitmap returns the decoded cover of e, decoding it the first time and keeping
 // the bitmap afterwards. The cache lives on the UI thread, like every other
-// bitmap: MyGo keeps a bitmap on the GPU as long as it is used.
+// bitmap: MyGo keeps a bitmap on the GPU as long as it is used. It is bounded to
+// coverCacheLimit entries, evicting the least recently used cover first.
 func (a *app) coverBitmap(e library.Entry) *ui.Bitmap {
 	if len(e.Cover) == 0 {
 		return nil
@@ -29,15 +78,26 @@ func (a *app) coverBitmap(e library.Entry) *ui.Bitmap {
 	if a.covers == nil {
 		a.covers = map[coverKey]*ui.Bitmap{}
 	}
+	a.syncCoverOrder()
 	key := coverKey{path: e.Path, size: e.Size, modified: e.Modified}
 	if b, ok := a.covers[key]; ok {
+		a.touchCover(key)
 		return b
 	}
+
+	for len(a.covers) >= coverCacheLimit {
+		a.evictOldestCover()
+	}
+
 	b, err := ui.DecodeBitmap(e.Cover)
 	if err != nil {
+		// A broken cover is cached too: retrying it on every shelf frame
+		// would decode-fail just as often, and the key changes when the
+		// file does.
 		b = nil
 	}
 	a.covers[key] = b
+	a.touchCover(key)
 	return b
 }
 
