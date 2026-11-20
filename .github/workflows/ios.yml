@@ -23,6 +23,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # go.mod 里钉的 mygo CLI 是 v0.6.3，还没有 `-platform ios`。用新版 CLI
+      # 单独装一个，App 依赖的 mygo 库版本不动。
+      - name: Install the mygo CLI
+        run: |
+          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Report Xcode
         run: xcodebuild -version
 

@@ -104,7 +104,7 @@ echo "::endgroup::"
 
 echo "::group::Build the device app"
 cd "$root"
-go tool mygo build -platform ios
+mygo build -platform ios
 ipa="$(ls build/ios-arm64/*.ipa | head -1)"
 echo "built $ipa"
 echo "::endgroup::"
