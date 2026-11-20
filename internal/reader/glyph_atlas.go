@@ -187,7 +187,7 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 	// Everything below is in device pixels: a glyph of size S DIPs at DPR d is
 	// S*d tall, and its coverage belongs to the pixels of the screen, so the
 	// size and the ratio both name the bitmap.
-	dpr := u.P.Scale()
+	dpr := u.scale()
 	if !(dpr > 0) {
 		dpr = 1
 	}
@@ -220,11 +220,12 @@ func (u *UIPainter) drawGlyphsAtlas(run paint.GlyphRun, gf *glyphFace, upem floa
 			continue
 		}
 		src := ui.Rect{X: float32(slot.x), Y: float32(slot.y), W: float32(slot.w), H: float32(slot.h)}
+		z := u.z()
 		dst := ui.Rect{
-			X: float32(ix+slot.kx) / dpr,
-			Y: float32(iy+slot.ky) / dpr,
-			W: float32(slot.w) / dpr,
-			H: float32(slot.h) / dpr,
+			X: float32(ix+slot.kx) / dpr * z,
+			Y: float32(iy+slot.ky) / dpr * z,
+			W: float32(slot.w) / dpr * z,
+			H: float32(slot.h) / dpr * z,
 		}
 		u.P.ImageRegion(slot.layer.bmp, src, dst, opts)
 	}

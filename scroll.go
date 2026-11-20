@@ -850,8 +850,8 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 				continue
 			}
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
-			if bmp := a.tileBitmap(column, i, tile, p.Scale()); bmp != nil {
-				drawTileBitmap(p, bmp, box, p.Scale(), a.tiles.entry[i].above)
+			if cv := a.tileCanvas(p, column, i, tile, p.Scale()); cv != nil {
+				drawTileCanvas(p, cv, box, p.Scale(), a.tiles.entry[i].above)
 				continue
 			}
 			// The performance log keeps how long each tile took: a tile built on the
@@ -861,12 +861,12 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	})
 	// The tile the column is heading for is rastered now, so the frame that
 	// first shows it is a composite too, rather than the frame that stalls.
-	if a.tiles.renderer != nil {
+	if a.tiles.entry != nil {
 		next := last + 1
 		if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
 			next = first - 1
 		}
-		a.prefetchTile(column, next, p.Scale())
+		a.prefetchTile(p, column, next, p.Scale())
 		a.trimTiles(func(i int) bool { return i >= first && i <= last })
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie

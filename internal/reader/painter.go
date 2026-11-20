@@ -38,6 +38,14 @@ type UIPainter struct {
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one
 	// page over another. It is 1 unless SetFade says otherwise.
 	fade float32
+	// dpr overrides the ratio the painter draws at, for drawing into a surface
+	// of its own: a canvas of device pixels, whose painter is in canvas pixels
+	// and so reports 1. Zero follows the window's painter.
+	dpr float32
+	// zoom multiplies every coordinate handed to the surface: a canvas painter
+	// works in its own pixels, so a display list in DIPs is drawn through this.
+	// Zero means 1, the window's own painter.
+	zoom float32
 	// palette is the paper and ink this painter was created for. DrawCover uses
 	// its paper rather than the process-wide palette, so two painters can draw
 	// two themes at once.
@@ -132,6 +140,39 @@ func (u *UIPainter) Fade() float32 {
 		return 1
 	}
 	return u.fade
+}
+
+// SetScale makes the painter draw as if the window's ratio were dpr, which is
+// what an offscreen surface needs: its own painter reports 1, while the pixels
+// it holds are a device pixel each. Zero follows the painter it is given.
+func (u *UIPainter) SetScale(dpr float32) {
+	if u == nil {
+		return
+	}
+	u.dpr = dpr
+}
+
+// z is how many surface pixels a DIP becomes: the canvas's zoom, or 1 for the
+// window's own painter.
+func (u *UIPainter) z() float32 {
+	if u == nil || u.zoom <= 0 {
+		return 1
+	}
+	return u.zoom
+}
+
+// scale is the ratio this painter draws at: the canvas's, when it has one.
+func (u *UIPainter) scale() float32 {
+	if u == nil {
+		return 1
+	}
+	if u.dpr > 0 {
+		return u.dpr
+	}
+	if u.P != nil && u.P.Scale() > 0 {
+		return u.P.Scale()
+	}
+	return 1
 }
 
 // faded is c with the painter's fade in its alpha.
@@ -243,14 +284,35 @@ func (u *UIPainter) DrawPage(p *ui.Painter, page *render.Page, box ui.Rect) {
 // view, the visible part of the scrolling column. The tile is a display list in
 // its own coordinates, so box is wherever its top edge lands this frame.
 func (u *UIPainter) DrawTile(p *ui.Painter, tile *render.Tile, box ui.Rect, view ui.Rect) {
+	u.drawTileZoom(p, tile, box, view, 0)
+}
+
+// DrawTileZoom draws one tile of a scrolling layout into a painter of its own:
+// an offscreen canvas whose pixels are device pixels, at zoom of them a DIP.
+// Everything the painter draws is taken through the same glyph atlas and the
+// same tone table as the window's own column, so a tile kept as a bitmap holds
+// the text the reader would have seen drawn directly — not a second rasterizer's
+// idea of it. clip is in DIPs, the canvas's coordinates are zoom times that.
+func (u *UIPainter) DrawTileZoom(p *ui.Painter, tile *render.Tile, box, view ui.Rect, zoom float32) {
+	u.drawTileZoom(p, tile, box, view, zoom)
+}
+
+func (u *UIPainter) drawTileZoom(p *ui.Painter, tile *render.Tile, box, view ui.Rect, zoom float32) {
 	if u == nil || p == nil || tile == nil || box.W <= 0 || box.H <= 0 {
 		return
 	}
 	u.P = p
 	u.dx, u.dy = box.X, box.Y
-	p.Clip(view, 0, func() {
+	prevZoom, prevDPR, prevCull := u.zoom, u.dpr, u.noCull
+	if zoom > 0 {
+		u.zoom, u.dpr, u.noCull = zoom, zoom, true
+	}
+	z := u.z()
+	clip := ui.Rect{X: view.X * z, Y: view.Y * z, W: view.W * z, H: view.H * z}
+	p.Clip(clip, 0, func() {
 		tile.Draw(u)
 	})
+	u.zoom, u.dpr, u.noCull = prevZoom, prevDPR, prevCull
 }
 
 func (u *UIPainter) Save()    {}
@@ -301,7 +363,7 @@ func (u *UIPainter) baseline(y float32) float32 {
 	if u.P == nil || !textGrid {
 		return y
 	}
-	return gridBaseline(u.dy, y, u.P.Scale())
+	return gridBaseline(u.dy, y, u.scale())
 }
 
 // gridBaseline is y, a baseline in the coordinates of a box at dy, moved to the
@@ -495,12 +557,22 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 		path.Close()
 	}
 	if any {
-		u.P.FillPath(&path, uiColor(u.faded(run.Color)))
-		if run.EmulateBold && !fakeBoldOff {
-			// A path is not corrected or grown the way the atlas is, but a
-			// weight the book asks for and the face does not have is still
-			// asked for: the outline is stroked as synthetic bold.
-			u.P.StrokePath(&path, max(0.35, run.Size*0.028), uiColor(u.faded(run.Color)))
+		z := u.z()
+		if z != 1 {
+			u.P.Transform(ui.Scaling(z, z), 0, 0, func() {
+				u.P.FillPath(&path, uiColor(u.faded(run.Color)))
+				if run.EmulateBold && !fakeBoldOff {
+					u.P.StrokePath(&path, max(0.35, run.Size*0.028), uiColor(u.faded(run.Color)))
+				}
+			})
+		} else {
+			u.P.FillPath(&path, uiColor(u.faded(run.Color)))
+			if run.EmulateBold && !fakeBoldOff {
+				// A path is not corrected or grown the way the atlas is, but a
+				// weight the book asks for and the face does not have is still
+				// asked for: the outline is stroked as synthetic bold.
+				u.P.StrokePath(&path, max(0.35, run.Size*0.028), uiColor(u.faded(run.Color)))
+			}
 		}
 	}
 }
@@ -568,7 +640,8 @@ func (gf *glyphFace) outline(gid uint32) *glyphOutline {
 }
 
 func (u *UIPainter) rect(r paint.Rect) ui.Rect {
-	return ui.Rect{X: u.dx + r.X, Y: u.dy + r.Y, W: r.Width, H: r.Height}
+	z := u.z()
+	return ui.Rect{X: (u.dx + r.X) * z, Y: (u.dy + r.Y) * z, W: r.Width * z, H: r.Height * z}
 }
 
 func uiColor(c paint.Color) ui.Color {

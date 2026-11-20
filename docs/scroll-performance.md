@@ -65,27 +65,21 @@
 冷栅格约 3.2–3.3 µs/字形（精确面积积分，0 分配；`x/image/vector` 是 1.6 µs 但每字形
 31 次分配），所以新页/新 tile 的第一帧冷栅格约 3.2 ms——这笔落在翻页第一帧，不是每帧。
 
-### tile 位图合成（`tiles.go`）
+### tile 画布合成（`tiles.go`）
 
-- 每个 tile 的显示列表用 `reader.PageRenderer.DrawTilePad` 光栅一次（layx-raster，与导出
-  PNG 同一条路、同一张 `raster.Tone` 表），存进 `ui.Bitmap`；`drawScroll` 之后每帧只发
-  一个 `p.Image`／tile，与字数无关（`TestScrollFramesCompositeTiles` 断言合成帧的
-  `GlyphStats().Glyphs == 0`）。
-- 位图按**整设备像素**落位（`roundDevices`），否则每帧重采样、整屏字都发虚；位置变化只
-  是平移这张图。
-- tile 自带 clip 到自身高度，而行的墨迹会越过「顶边在哪个 tile」的边界：紧排时上沿也能
-  出头。`DrawTileSpan` 在表面上下各留一条并丢掉 tile 自己的 clip（`unclipped`），两条都
-  **清成透明**而不是纸色——不透明的纸条会盖住下/上一个 tile 的首/末行（曾被拦腰截断）。
-- `PageRenderer` 复用一块表面，`ui.NewBitmap` 直接接管传入的像素（不复制），所以缓存前
-  必须拷贝，否则所有 tile 都会显示最后光栅的那一张。
-- 合成粗体：layx-raster 的实现是把整行**再画一遍、右移 `size/24`**，1.5×/2×/3× 下就是每个
-  字的重影和灰色毛边（「字很脏」）。`renderPainter` 关掉它的偏移，改成**同一点上击打两遍**
-  （double strike）：覆盖率变深、边缘变厚，但没有任何位移，不会出灰影；墨色仍走同一张
-  `Tone` 表，离屏页面与屏幕的墨量比保持 1.0×（`TestPageRendererPrintsTheSameWeightAsTheScreen`）。
-- 失效键：布局指针、屏幕比例、列宽、tile 高、fade、纸色。换字号/主题/缩放/书即整块作废
-  （`dropTiles`）。每帧在滚动方向前方**预取一个** tile，视口外的旧 tile 按 48 MB 预算 LRU
-  丢弃，视口内的永不丢。tile 高 512 DIP 而不是一个视口：390×512@3× ≈ 7 MB/张
-  （之前 390×844@3× ≈ 12 MB），首次光栅的停顿与预取粒度都跟着变小；宽仍是整列。
+- 每个 tile 用 **`ui.Canvas`**（离屏 render-to-texture）画一次：`cv.Draw` 得到一块画布
+  painter，`UIPainter.DrawTileZoom` 把 tile 的显示列表按屏幕比例画进去。字形、合成粗体、
+  墨色、基线吸附全部走**屏幕同一条 `UIPainter` + 字形图集**，没有第二套光栅器，两条路径
+  不存在"调不一致"的问题；`PageRenderer`/layx-raster 只留给导出 PNG。
+- `ui.Canvas.Draw` 的 painter 固定按 1 像素/DIP；`UIPainter` 因此有 `zoom`：所有坐标
+  （矩形、图片、字形 quad、路径）乘 zoom 交给画布，`dpr` 同步为 zoom，图集按设备分辨率
+  栅格、quad 落在整设备像素上。
+- 画布上下各留一条（一行 + 1em）且清成透明：行属于"顶边所在的 tile"，但墨迹会越界；
+  不透明的纸条会盖住相邻 tile 的首/末行（曾把文字拦腰截断）。
+- 位图按整设备像素落位；缓存键 = 布局/比例/列宽/tile 高/fade/纸色。每帧在滚动方向前方
+  预取一个 tile，视口外按 48 MB 预算 LRU 丢弃；新建画布的那一帧会多要一帧（画布与字形
+  图集都晚一帧显示）。
+- tile 高 `reader.ScrollTileHeight` = 512 DIP，与视口解耦（390×512@3× ≈ 7 MB/张）。
 - 回滚/AB：`QUIRE_TILE_BITMAPS=0` 走原来的显示列表路径。
 
 ### 墨色修正（`raster.Tone`）

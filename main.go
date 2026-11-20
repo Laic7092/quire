@@ -238,12 +238,9 @@ type app struct {
 	layGen  int
 	scrollY float32
 	tileH   float32
-	// tiles holds the scrolling column's tiles as bitmaps, rastered once for the
+	// tiles holds the scrolling column's tiles as canvases, drawn once for the
 	// layout, paper and screen scale and composited after that (see tileCache).
-	// images are the book's encoded pictures, from the build that made the
-	// document, which a rastered tile needs for a picture it holds.
-	tiles  tileCache
-	images map[render.ImageID][]byte
+	tiles tileCache
 	// viewTop and devScale are where the column's viewport was drawn and at what
 	// ratio, as of the last frame: a glide is over when the place it owes draws
 	// the same picture as the place it stands at (see (*app).landed).
@@ -1023,9 +1020,6 @@ func (a *app) ensureLayout(w, h float32) {
 				return
 			}
 			// Decoding belongs on the UI thread and happens once per build.
-			if rebuilt {
-				a.images = images
-			}
 			if rebuilt && a.paint != nil {
 				for id, data := range images {
 					a.paint.SetImage(id, data)
@@ -1362,7 +1356,6 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		if a.paint != nil {
 			a.paint.ClearImages()
 		}
-		a.images = nil
 		a.dropTiles()
 		a.doc = nil
 		a.docAt = 0
