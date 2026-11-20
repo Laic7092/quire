@@ -455,54 +455,56 @@ func TestTilePadDoesNotCoverTheTileBelow(t *testing.T) {
 	}
 }
 
-// The rasterizer fakes bold by stamping a second copy of the run to the right;
-// the offscreen path shifts the run back by half that so the two copies sit
-// either side of where the type belongs. A second copy a full step to the right
-// is a ghost at 2x and 3x, which is what every glyph looked like before.
-func TestRenderPainterCentresBold(t *testing.T) {
+// Synthetic bold is struck twice in the same place, not stamped a size/24 to the
+// right as the rasterizer would: an offset copy is nearly a pixel away at 1.5x
+// and above, which reads as a grey fringe on every stem instead of weight.
+func TestRenderPainterStrikesBoldInPlace(t *testing.T) {
 	rec := &runRecorder{p: NewPageRenderer()}
 	rp := renderPainter{rec, rec.p, 1}
 
 	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 24, EmulateBold: true})
-	if got, want := rec.run.X, float32(9.5); got != want {
-		t.Errorf("bold run starts at %.2f, want %.2f", got, want)
+	if len(rec.runs) != 2 {
+		t.Fatalf("a bold run was drawn %d times, want 2", len(rec.runs))
 	}
-	if !rec.run.EmulateBold {
-		t.Error("the bold flag was taken off the run, so it would not be bold")
+	for i, run := range rec.runs {
+		if run.X != 10 {
+			t.Errorf("copy %d starts at %.2f, want 10: an offset copy is a ghost", i, run.X)
+		}
 	}
-	if !rec.boldSeen {
+	for i, run := range rec.runs {
+		if run.EmulateBold {
+			t.Errorf("copy %d kept the flag, so the rasterizer would fake it again", i)
+		}
+	}
+	if !rec.boldSeen[0] {
 		t.Error("the tone was not told the run is bold")
 	}
 	if rec.p.bold {
 		t.Error("the renderer kept the bold flag after the run")
 	}
 
-	// A size that would shift by more than the cap is held to it.
-	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 240, EmulateBold: true})
-	if got, want := rec.run.X, float32(9.25); got != want {
-		t.Errorf("a large bold run starts at %.2f, want %.2f", got, want)
-	}
-
-	// A regular run is drawn where it was.
+	// A regular run is drawn once, where it was.
+	rec.runs = nil
+	rec.boldSeen = nil
 	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 24})
-	if got := rec.run.X; got != 10 {
-		t.Errorf("a regular run moved to %.2f", got)
+	if len(rec.runs) != 1 || rec.runs[0].X != 10 {
+		t.Errorf("a regular run drew %d copies", len(rec.runs))
 	}
-	if rec.boldSeen {
+	if rec.boldSeen[0] {
 		t.Error("a regular run was reported as bold")
 	}
 }
 
-// runRecorder keeps the last run handed to it and whether the renderer said it
+// runRecorder keeps the runs handed to it and whether the renderer said each
 // was bold at the time.
 type runRecorder struct {
 	paint.Painter
 	p        *PageRenderer
-	run      paint.GlyphRun
-	boldSeen bool
+	runs     []paint.GlyphRun
+	boldSeen []bool
 }
 
 func (r *runRecorder) DrawGlyphs(run paint.GlyphRun) {
-	r.run = run
-	r.boldSeen = r.p.bold
+	r.runs = append(r.runs, run)
+	r.boldSeen = append(r.boldSeen, r.p.bold)
 }

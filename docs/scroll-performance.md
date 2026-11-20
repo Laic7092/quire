@@ -78,10 +78,10 @@
   **清成透明**而不是纸色——不透明的纸条会盖住下/上一个 tile 的首/末行（曾被拦腰截断）。
 - `PageRenderer` 复用一块表面，`ui.NewBitmap` 直接接管传入的像素（不复制），所以缓存前
   必须拷贝，否则所有 tile 都会显示最后光栅的那一张。
-- 合成粗体：layx-raster 的实现是把整行**再画一遍、右移 `size/24`**，2×/3× 下就是每个字的
-  重影（「字很脏」）。`renderPainter` 把这一遍的位移折半、左右对称地铺开（`run.X -= dx/2`），
-  笔画变粗而不是发虚；墨色仍走同一张 `Tone` 表，离屏页面与屏幕的墨量比保持 1.0×
-  （`TestPageRendererPrintsTheSameWeightAsTheScreen`）。
+- 合成粗体：layx-raster 的实现是把整行**再画一遍、右移 `size/24`**，1.5×/2×/3× 下就是每个
+  字的重影和灰色毛边（「字很脏」）。`renderPainter` 关掉它的偏移，改成**同一点上击打两遍**
+  （double strike）：覆盖率变深、边缘变厚，但没有任何位移，不会出灰影；墨色仍走同一张
+  `Tone` 表，离屏页面与屏幕的墨量比保持 1.0×（`TestPageRendererPrintsTheSameWeightAsTheScreen`）。
 - 失效键：布局指针、屏幕比例、列宽、tile 高、fade、纸色。换字号/主题/缩放/书即整块作废
   （`dropTiles`）。每帧在滚动方向前方**预取一个** tile，视口外的旧 tile 按 48 MB 预算 LRU
   丢弃，视口内的永不丢。tile 高 512 DIP 而不是一个视口：390×512@3× ≈ 7 MB/张

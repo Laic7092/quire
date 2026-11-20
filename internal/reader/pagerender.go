@@ -174,20 +174,19 @@ func (b renderPainter) DrawGlyphs(run paint.GlyphRun) {
 	if textGrid {
 		run.Y = gridBaseline(0, run.Y, b.scale)
 	}
-	b.p.bold = run.EmulateBold && !fakeBoldOff
-	if b.p.bold {
-		// The rasterizer fakes bold by stamping a second copy of the run to the
-		// right, which at 2x and 3x lands far enough away to read as a ghost of
-		// every glyph. Shifting the run back by half that distance puts the two
-		// copies either side of where the type belongs: the same weight, spread
-		// as a stroke instead of a drop shadow.
-		dx := run.Size / 24
-		if dx > 1.5 {
-			dx = 1.5
-		}
-		run.X -= dx / 2
-	}
+	bold := run.EmulateBold && !fakeBoldOff
+	b.p.bold = bold
+	// The weight is drawn here rather than by the rasterizer, which would stamp
+	// a second copy a whole size/24 to the right: at 1.5x and above that copy
+	// lands about a pixel away, so every stem comes out with a grey fringe
+	// instead of a heavier stroke. Struck twice in the same place, the coverage
+	// darkens and the edge thickens without moving anything — a double strike,
+	// which is what a face without a bold is given here.
+	run.EmulateBold = false
 	b.Painter.DrawGlyphs(run)
+	if bold {
+		b.Painter.DrawGlyphs(run)
+	}
 	b.p.bold = false
 }
 
