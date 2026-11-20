@@ -6,7 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/internal/widgets"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // Panel is the reader's search panel. It owns only plain Go state and rebuilds its

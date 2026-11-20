@@ -3,7 +3,7 @@
 // The data layer is Build: one Entry per row, with the global page the row
 // points at, all taken from render.Layout. Nothing is parsed here: the EPUB
 // navigation document is already reduced to chapters and to Book.Toc by
-// github.com/laix/layx/epub, so this package needs neither internal/reader nor
+// github.com/laic7092/layx/epub, so this package needs neither internal/reader nor
 // a second pass over the archive.
 //
 // The panel shows the book's own table of contents when the book has one:
@@ -30,7 +30,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // Entry is one line of the table of contents.

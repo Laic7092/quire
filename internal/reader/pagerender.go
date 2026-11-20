@@ -8,9 +8,9 @@ import (
 	_ "image/png"  // DecodeImage
 	"math"
 
-	"github.com/laix/layx/raster"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/raster"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 	_ "golang.org/x/image/bmp"  // DecodeImage
 	_ "golang.org/x/image/webp" // DecodeImage
 )
@@ -31,7 +31,7 @@ func DecodeImage(data []byte) (image.Image, error) {
 }
 
 // PageRenderer rasterizes paged and scrolling output offscreen through
-// github.com/laix/layx/raster, without MyGo, a window or a GPU. It is the
+// github.com/laic7092/layx/raster, without MyGo, a window or a GPU. It is the
 // headless sibling of UIPainter: the app still draws through the native painter,
 // while a tool, a test or an exporter uses this to get pixels. Nothing here lays
 // out or re-derives style - the page coordinates and the palette are already

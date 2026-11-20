@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/laix/layx/raster"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/raster"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // Text reaches the screen here through a glyph atlas and reaches an exported PNG

@@ -11,7 +11,7 @@ import (
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // The view builds headlessly, as MyGo's tester draws frames without a window.

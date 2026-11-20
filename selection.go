@@ -2,11 +2,13 @@ package main
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/locales"
 )
@@ -69,10 +71,22 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.selQuads = a.sel.Quads(a.showing())
 		a.selCopied = 0
 		a.pressX, a.pressY = ev.X, ev.Y
+		a.pressAt = a.clock()
 		a.selMoved = false
 		a.selDragging = true
+		a.swipePage = false
+		a.dragScroll = false
 		return true
 	case ui.InputPointerMove:
+		// A finger dragging the scrolling column owns the move from the first
+		// DIP past the slop; a page swipe owns it until the finger lifts.
+		if a.dragScroll {
+			a.dragScrollTo(ev)
+			return true
+		}
+		if a.swipePage {
+			return true
+		}
 		// A move with no press on the sheet is the pointer passing over the
 		// text, which is when a link under it shows the hand cursor.
 		if !a.selDragging {
@@ -82,7 +96,26 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		if a.layout == nil {
 			return false
 		}
-		if dx, dy := ev.X-a.pressX, ev.Y-a.pressY; dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
+		dx, dy := ev.X-a.pressX, ev.Y-a.pressY
+		if a.phone && !a.selMoved && (dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop) {
+			// A quick finger on a scrolling column is a scroll, not a selection:
+			// holding still first is what selects, as on the system's own text.
+			if a.scrolling() && a.clock().Sub(a.pressAt) < touchHold {
+				a.startScrollDrag()
+				a.dragScrollTo(ev)
+				return true
+			}
+			// A quick sideways finger on a paged book turns the page, as the
+			// system's readers do.
+			if !a.scrolling() && absf(dx) > absf(dy)*1.2 && absf(dx) > swipePageMin &&
+				a.clock().Sub(a.pressAt) < touchHold {
+				a.swipePage = true
+				a.clearSelection()
+				a.selDragging = false
+				return true
+			}
+		}
+		if dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
 			a.selMoved = true
 		}
 		loc, ok := a.pageLocation(ev.X, ev.Y)
@@ -94,18 +127,44 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.selCopied = 0
 		return true
 	case ui.InputPointerUp:
+		if a.dragScroll {
+			a.endScrollDrag()
+			return true
+		}
+		if a.swipePage {
+			a.swipePage = false
+			a.selDragging = false
+			delta := 1
+			if ev.X > a.pressX {
+				delta = -1
+			}
+			a.turn(delta)
+			mygo.Haptics.Light()
+			return true
+		}
 		if !a.selDragging {
 			return false
 		}
 		a.selDragging = false
 		// A release that did not leave its press is a click. A click on a link
-		// follows it, and any other click turns the page: inside the window a
-		// pointer may wobble a little without meaning to select anything. A
-		// scrolling column has no page to turn, so its click only clears the
-		// selection.
+		// follows it. On a phone the middle of the page shows and hides the
+		// chrome, and the sides turn the page; on a desktop a click on either
+		// half turns it. A scrolling column has no page to turn, so its click
+		// only clears the selection.
 		if !a.selMoved {
 			if link, ok := a.linkAt(a.pressX, a.pressY); ok {
 				a.openLink(link)
+				return true
+			}
+			if a.phone {
+				zone := a.tapZone(a.pressX)
+				switch {
+				case zone == 0:
+					a.toggleChrome()
+				case !a.scrolling():
+					a.turn(zone)
+					mygo.Haptics.Light()
+				}
 				return true
 			}
 			if !a.scrolling() {
@@ -115,6 +174,73 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		return true
 	}
 	return false
+}
+
+// touchHold is how long a finger may stay still on the sheet before its drag is
+// taken as selecting text rather than as scrolling the column or turning the
+// page. It is about the system's own long-press.
+const touchHold = 350 * time.Millisecond
+
+// swipePageMin is how far a finger must go sideways before a paged book reads
+// it as a swipe rather than as a tap.
+const swipePageMin = 36
+
+// startScrollDrag hands the press to the scrolling column: the selection the
+// press began is dropped, and the column follows the finger from where it was.
+func (a *app) startScrollDrag() {
+	a.clearSelection()
+	a.dragScroll = true
+	a.selDragging = false
+	a.dragFrom = a.scrollY
+	a.dragY = a.pressY
+	a.dragAt = a.clock()
+	a.dragV = 0
+	a.stopScroll()
+}
+
+// dragScrollTo moves the column with the finger: content follows it, so a finger
+// going down takes the page back up the flow.
+func (a *app) dragScrollTo(ev ui.InputEvent) {
+	now := a.clock()
+	if dt := now.Sub(a.dragAt).Seconds(); dt > 0 {
+		a.dragV = 0.7*a.dragV + 0.3*float32(-(ev.Y-a.dragY)/float32(dt))
+		a.dragAt = now
+	}
+	a.dragY = ev.Y
+	a.scrollNow(a.dragFrom - (ev.Y - a.pressY))
+}
+
+// endScrollDrag lets the column keep the finger's speed for a moment, as a
+// fling, and then settle.
+func (a *app) endScrollDrag() {
+	a.dragScroll = false
+	a.selDragging = false
+	if absf(a.dragV) > 120 {
+		a.scrollBy(a.dragV * 0.12)
+	}
+	a.dragV = 0
+}
+
+// toggleChrome shows or hides the reading bars, as a tap in the middle of the
+// page does: on a phone it works in a paged book too, where scrolling never asks
+// for the room.
+func (a *app) toggleChrome() {
+	a.chromeAway = !a.chromeAway
+	mygo.Haptics.Light()
+}
+
+// tapZone maps a tap at x to what it does on a phone: the left side turns back,
+// the right side turns on, and the middle shows or hides the bars.
+func (a *app) tapZone(x float32) int {
+	switch {
+	case a.boxW <= 0:
+		return 0
+	case x < a.boxW*0.28:
+		return -1
+	case x > a.boxW*0.72:
+		return 1
+	}
+	return 0
 }
 
 // clickSlop is how far a pointer may wobble during a click, in DIPs, before the

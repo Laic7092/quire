@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // A serif file that names the sans file is one face in the set, and it still is

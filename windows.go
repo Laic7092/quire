@@ -173,6 +173,7 @@ func (d *desk) nextBookKey() string {
 func (d *desk) newApp() *app {
 	a := &app{
 		desk:        d,
+		phone:       onPhone(),
 		st:          d.st,
 		opts:        d.opts,
 		theme:       d.theme,
@@ -487,7 +488,16 @@ func (a *app) newWindow() {
 	if a.desk != nil && a.bookWindow {
 		key = a.desk.nextBookKey()
 	}
-	win := mygo.NewWindow(windowOptions(a.view, key))
+	opts := windowOptions(a.view, key)
+	if a.phone {
+		// A phone's window is the screen: there is no desk to size, and the
+		// edges around the view take the colour of what it shows rather than a
+		// desktop's grey.
+		opts.MinWidth, opts.MinHeight = 0, 0
+		opts.Width, opts.Height = 390, 844
+		opts.BackgroundColor = a.phoneStartColor()
+	}
+	win := mygo.NewWindow(opts)
 	a.win = win
 	a.winShared.Store(win)
 	a.ready = true

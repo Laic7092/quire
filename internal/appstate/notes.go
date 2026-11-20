@@ -7,7 +7,7 @@ import (
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/notes"
 	"github.com/laix/quire/internal/store"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // rebuildNotes republishes the notes panel from the store for the open book and

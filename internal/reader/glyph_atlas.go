@@ -7,8 +7,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	ot "github.com/go-text/typesetting/font/opentype"
-	"github.com/laix/layx/raster"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/raster"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // Drawing a page's glyphs from their outlines costs the painter more than the
@@ -21,7 +21,7 @@ import (
 // The atlas holds white with the coverage in its alpha, so its colours follow
 // the run's tint and a theme or a fade change rebuilds nothing.
 //
-// The coverage itself comes from github.com/laix/layx/raster: its Coverage
+// The coverage itself comes from github.com/laic7092/layx/raster: its Coverage
 // draws the outline once, exactly, and the result is copied into the layer.
 // That is the same rasterizer the headless page renderer uses, so a glyph on
 // screen and a glyph in a PNG are the same pixels. A warm frame is a lookup

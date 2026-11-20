@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/laix/layx/epub"
+	"github.com/laic7092/layx/epub"
 )
 
 // Open opens an EPUB or a plain text book. The extension decides; with an

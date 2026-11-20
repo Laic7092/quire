@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // selectionBook is a two-chapter book whose text wraps a few times on a narrow

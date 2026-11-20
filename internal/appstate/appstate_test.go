@@ -13,7 +13,7 @@ import (
 	"github.com/laix/quire/internal/search"
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 func newStore(t *testing.T) *store.Store {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 func sampleIndex(t *testing.T) (*book.Book, *render.Document, *Index) {

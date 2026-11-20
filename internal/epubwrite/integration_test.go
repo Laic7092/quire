@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laix/layx/epub"
+	"github.com/laic7092/layx/epub"
 )
 
 // TestOpenWithLayx is the acceptance test: the archive this package writes must

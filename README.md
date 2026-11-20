@@ -3,15 +3,11 @@
 用 MyGo 原生 UI（`package ui`，没有 webview / TypeScript 前端）写的 EPUB / TXT 阅读器，
 分页与滚动两种模式，外观照 macOS Books 26 的阅读页摆。
 
-断行、分页、行位置和字形位置全部来自本地 `github.com/laix/layx` 的 `render` 引擎；
+断行、分页、行位置和字形位置全部来自 `github.com/laic7092/layx` 的 `render` 引擎；
 本仓库只做四件事：把书变成 `render.Document`、把 `DisplayList` 画到 `ui.Painter`、
-把窗口和面板摆出来、把状态存下来。layx 的各个 module 都是本地 `replace`
-（`github.com/laix/layx` 排版、`github.com/laix/layx/epub` 解析 EPUB），改上层库不用发版。
-
-`go.mod` 里的 `replace` 使用相对路径 `../layx`、`../layx/epub`、`../layx/raster`，所以本仓库
-必须和 layx 检出并排（`quire/` 与 `layx/` 在同一个父目录下）；在 Git worktree 里开发时，可以
-在 worktree 旁建一个指向 layx 检出的 `layx` symlink。目录布局不同时，请用自己环境里的
-`go.work` 指向实际路径，不要把绝对路径提交进 `go.mod`。
+把窗口和面板摆出来、把状态存下来。layx 的各个 module 按 GitHub 上的 tag 引入
+（`github.com/laic7092/layx` 排版、`github.com/laic7092/layx/epub` 解析 EPUB、
+`github.com/laic7092/layx/raster` 栅格化），改上层库后发新 tag 再升级依赖即可。
 
 ## 名字与图标
 
@@ -84,6 +80,20 @@ Finder 双击一本书，都会另开一扇阅读窗口，书库窗口不动，�
 书库/搜索/目录、⌘D 书签、⌘[ / ⌘] 返回/前进上次跳转、Esc 依次收起面板/封面/选区/回到书库。纸上拖动选字、⌘C 复制，
 右键是页面菜单（复制、加笔记、搜选中的词、选中本页、清选区）。翻页默认横向滑带，
 Aa 里可换淡入淡出；滚动模式的每一帧只重绘、不重建视图。
+
+## 手机（iOS / Android）
+
+同一份 Go 代码用 `mygo build -platform ios` / `-platform android` 出包。窗口在手机上占满
+屏幕，根视图自动避开状态栏、刘海和 Home 指示条；`mobile.go` 只改摆放，不改阅读器本身：
+
+- 书库换成手机的形状：大标题、右上搜索、底部 Home / All / Reading / Sources 四个目的地，
+  封面按屏宽排成两到三列的网格；Mac 的源列表收进 Sources。打开一本书仍是一扇盖在书库
+  上的全屏窗口，顶栏左侧的返回箭头回到书库。
+- 阅读页的栏按手指的尺寸重排：顶栏是返回、书名、Aa、书签；页脚是目录、搜索、书签、笔记
+  和进度。左右两侧轻点翻页，中间轻点显隐栏（分页和滚动模式都一样）。
+- 滚动模式可以用手指拖动正文，松手带一点惯性；按住再拖仍是选字。系统栏图标随纸色
+  变深或变浅，窗口底色跟着纸色，刘海和 Home 指示条周围不会露出桌面的灰。
+
 
 ## 书源
 

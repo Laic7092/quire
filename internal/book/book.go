@@ -1,14 +1,14 @@
 // Package book opens a book for the reader: an EPUB, or a plain text file.
 //
 // EPUB is not parsed here. The container, OPF, navigation document and the
-// XHTML → render.Document conversion live in github.com/laix/layx/epub, a
+// XHTML → render.Document conversion live in github.com/laic7092/layx/epub, a
 // separate module of the render library, so the host does not maintain its own
 // copy of them. Book and Chapter are that module's types; this package only
 // adds the plain text path, which turns a .txt file into the same chapters an
 // EPUB would produce so the rest of the pipeline never knows the difference.
 package book
 
-import "github.com/laix/layx/epub"
+import "github.com/laic7092/layx/epub"
 
 // Book is a book opened for reading. An EPUB keeps its archive path and image
 // IDs in the fields the module owns; a text book is the same struct with only

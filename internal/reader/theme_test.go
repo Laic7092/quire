@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // luma is how light a colour reads, on the weights contrast follows: the

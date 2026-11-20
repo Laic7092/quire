@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/internal/reader"
 )
 

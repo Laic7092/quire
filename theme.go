@@ -5,7 +5,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 	"github.com/laix/quire/internal/reader"
 )
 
@@ -96,6 +96,10 @@ func (a *app) applyTheme(c *ui.Context) *ui.Theme {
 		a.skinKey = key
 	}
 	c.SetTheme(&a.skin)
+	// A phone paints the window behind the safe area in the same colour, and
+	// colours the system's bar icons for what lies under them. Both cost a call
+	// to the system only when the look changes, not every frame.
+	a.syncPhoneChrome(&a.skin)
 	// The page's ink and paper are baked into the page display lists, so a
 	// change of paper costs a paint-only relayout: ensureLayout sees the new
 	// palette on this frame and the pages on screen are drawn again.

@@ -14,6 +14,12 @@ github.com/go-text/typesetting-utils v0.0.0-20260419141703-4ffe8874dabc h1:8FGo2
 github.com/go-text/typesetting-utils v0.0.0-20260419141703-4ffe8874dabc/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
 github.com/klauspost/compress v1.18.6 h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXDjuao=
 github.com/klauspost/compress v1.18.6/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+github.com/laic7092/layx v0.1.0 h1:Iz4yn3vZ4K9Er8maC32hlnQcYJEBG3NEb8hAjwTf7zs=
+github.com/laic7092/layx v0.1.0/go.mod h1:RejdXWhADUHC9a9RtItyVgHBVhbSKLAFFl+uNaTl+lI=
+github.com/laic7092/layx/epub v0.1.0 h1:TFFO4lRjK4ET9Fvtxm/B6iCWLTjrItAeXGExjliNLWM=
+github.com/laic7092/layx/epub v0.1.0/go.mod h1:DpYR5xkSNu1WVLPlf+p/wPTMeP/AqxMKQHig8le8SNs=
+github.com/laic7092/layx/raster v0.1.0 h1:75ZQMXT0scgalfeZ7r05fFVFlG0SLN+mVqoqo3Qvp84=
+github.com/laic7092/layx/raster v0.1.0/go.mod h1:ZxbBID/LfQBU6ZkzHEu7vsAF4z389sgkE6qUvVJBntM=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

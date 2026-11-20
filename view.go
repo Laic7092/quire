@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/library"
@@ -84,6 +84,9 @@ type homeMetrics struct {
 	firstGap, bandGap, goalsGap float32
 	// ring is the diameter of the year's ring in the goals card.
 	ring float32
+	// cols is how many covers a phone's grid puts in a row. The desk's shelf
+	// scrolls sideways instead, and leaves it zero.
+	cols int
 }
 
 // homeMetricsFor measures the library for a window w DIPs wide, with or without
@@ -199,7 +202,7 @@ func (a *app) openingView(c *ui.Context, t *ui.Theme) {
 		// The bar of a book still opening: the room the system's buttons take,
 		// and the drag that moves the window, over the paper the book will be
 		// printed on.
-		ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(barHeight(c)).
+		ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(a.barRoom(c)).
 			Padding(0, 8+bar.Right, 0, 8+bar.Left).DragWindow()
 		ui.Column(c).Grow(1).Center().Padding(32).Gap(10).Children(func() {
 			if a.opening != "" {
@@ -382,6 +385,10 @@ func barHeight(c *ui.Context) float32 { return max(headerHeight, c.TitleBar().He
 // caption buttons at the right on Windows, either side on Linux — and drags the
 // window, as Books' toolbar does.
 func (a *app) header(c *ui.Context, t *ui.Theme) {
+	if a.compact(c) {
+		a.mobileHeader(c, t)
+		return
+	}
 	bar := c.TitleBar()
 	pal := a.chrome
 	row := ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(barHeight(c)).
@@ -505,9 +512,19 @@ func (a *app) panels(c *ui.Context) {
 		return
 	}
 	pal := a.chrome
-	card := ui.Box(c).Absolute().Left(panelMargin).Top(barHeight(c)+panelTop).
-		Bottom(panelMargin).
-		Width(panelWidth).Radius(14).Background(reader.UIColor(pal.Popover)).
+	// On a phone the panel is a card over the page still, but it keeps clear of
+	// the bar at the head and the bar of tools at the foot, and takes all the
+	// width the margins leave it rather than a Mac panel's 300 DIPs.
+	top, bottom, width := a.barRoom(c)+panelTop, float32(panelMargin), float32(panelWidth)
+	if a.compact(c) {
+		bottom = a.footerRoom(c) + panelTop
+		if w, _ := c.Size(); w > 0 {
+			width = min(width, w-2*panelMargin)
+		}
+	}
+	card := ui.Box(c).Absolute().Left(panelMargin).Top(top).
+		Bottom(bottom).
+		Width(width).Radius(14).Background(reader.UIColor(pal.Popover)).
 		Border(1, reader.UIColor(pal.Line)).Clip().
 		Shadow(0, 12, 32, 0, ui.RGBA(0, 0, 0, 0.24)).Label(a.pan.Title())
 	card.Children(func() {
@@ -571,6 +588,10 @@ func (a *app) toolbarTextButton(c *ui.Context, text, label, tip string) ui.Eleme
 // library is the window with nothing open: the source list at the left and the
 // home page at the right, as Books' own library has it.
 func (a *app) library(c *ui.Context, t *ui.Theme) {
+	if a.compact(c) {
+		a.mobileLibrary(c, t)
+		return
+	}
 	w, _ := c.Size()
 	m := homeMetricsFor(w, !a.libSideOff)
 	ui.Row(c).Fill().Background(t.Background).Children(func() {
@@ -1199,7 +1220,7 @@ func (a *app) readProgress(e library.Entry) float64 {
 // bars are showing or away.
 func (a *app) reader(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().MinWidth(0).Background(a.paperColor()).
-		Padding(barHeight(c), 0, footerHeight, 0).Bind(&a.surface).Children(func() {
+		Padding(a.barRoom(c), 0, a.footerRoom(c), 0).Bind(&a.surface).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
@@ -1278,10 +1299,14 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 // the foot of the sheet, and goes away with the bar at the head when the reader
 // moves down the column.
 func (a *app) folio(c *ui.Context, t *ui.Theme) {
+	if a.compact(c) {
+		a.mobileFolio(c, t)
+		return
+	}
 	muted := t.TextMuted
 	ink := reader.UIColor(a.chrome.Muted)
 	w, _ := c.Size()
-	bar := ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Height(footerHeight)
+	bar := ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Height(a.footerRoom(c))
 	if bar.Hovered() {
 		// The pointer at the foot of the window brings the bars back, as the one
 		// at its head does.
@@ -1418,6 +1443,12 @@ func (a *app) chapterPagesLeft() string {
 // measure. It is the only edge control: turning on is the keyboard's and the
 // folio's job.
 func (a *app) backEdge(c *ui.Context, t *ui.Theme) {
+	if a.compact(c) {
+		// A phone goes back with the bar's chevron: the edge belongs to the
+		// left page-turn zone, and a swipe from the screen's edge is the
+		// system's.
+		return
+	}
 	strip := ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(edgeWidth).Center().
 		Cursor(ui.CursorPointer).Label(locales.BackToLibrary()).Tooltip(locales.BackToLibraryTip())
 	if strip.Hovered() {

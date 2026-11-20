@@ -4,7 +4,7 @@ import (
 	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // Theme names the paper a book is read on. Books offers six: the page, its

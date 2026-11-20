@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 	"github.com/laix/quire/internal/reader"
 )
 

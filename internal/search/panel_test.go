@@ -6,7 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 func testPanel() *Panel {

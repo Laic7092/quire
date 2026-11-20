@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // A size that is not a number takes the default it stands in for. Every

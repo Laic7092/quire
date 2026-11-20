@@ -9,7 +9,7 @@ import (
 	"github.com/laix/quire/internal/bookmarks"
 	"github.com/laix/quire/internal/store"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // rebuildBookmarks republishes the bookmarks panel from the store for the open

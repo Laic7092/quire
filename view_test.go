@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/library"

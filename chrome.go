@@ -27,11 +27,10 @@ func (a *app) chromeTarget() float32 {
 }
 
 // chromeShown reports whether the bars stand out. A scrolling column puts them
-// away as the reader moves down it; anything the reader may need them for
-// brings them back — a panel, the display settings, a selection to act on, the
-// cover, the note the folio is carrying, or the pointer resting where the bars
-// are. They are never away in a paged book: its pages are turned, not scrolled,
-// so nothing asks for the room.
+// away as the reader moves down it, and a tap in the middle of a phone's page
+// puts them away in either mode; anything the reader may need them for brings
+// them back — a panel, the display settings, a selection to act on, the cover,
+// the note the folio is carrying, or the pointer resting where the bars are.
 func (a *app) chromeShown() bool {
 	if !a.chromeAway {
 		return true

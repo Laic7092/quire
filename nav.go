@@ -1,6 +1,6 @@
 package main
 
-import "github.com/laix/layx/render"
+import "github.com/laic7092/layx/render"
 
 // navPlace is one stop on the reader's trail: a place in the book, or the
 // cover in front of it. A scrolling place also remembers the exact content

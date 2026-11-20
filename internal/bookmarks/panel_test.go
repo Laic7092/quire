@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/locales"
 )
 

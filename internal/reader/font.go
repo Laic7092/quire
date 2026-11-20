@@ -12,7 +12,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/go-text/typesetting/font"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // The family names the layout asks for. Every face of the set is a fallback for

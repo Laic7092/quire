@@ -6,7 +6,7 @@ import (
 )
 
 // The EPUB path is not this package's code any more: it opens the file through
-// github.com/laix/layx/epub. This test only checks the wiring — that Open
+// github.com/laic7092/layx/epub. This test only checks the wiring — that Open
 // returns the module's book with its navigation titles, cover and document —
 // because the parsing itself is covered by that module's own tests.
 func TestOpenEPUBFromModule(t *testing.T) {

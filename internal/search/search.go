@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // Hit is one occurrence of the query.

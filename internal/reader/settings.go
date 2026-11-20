@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // Font choices the display settings offer. A book is set in either the serif

@@ -10,7 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // A glide paints the column without building the window: the view is built once

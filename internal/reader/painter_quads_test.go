@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // selectionQuads is a drag across the top of page 0 of the two-chapter book.

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // The painter implements render's optional culling: the replay skips an op whose

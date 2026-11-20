@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 const (

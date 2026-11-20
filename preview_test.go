@@ -11,7 +11,7 @@ import (
 
 	"github.com/laix/quire/internal/book"
 	"github.com/laix/quire/internal/reader"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // longBookApp is the reader on a book with enough chapters for a preview to

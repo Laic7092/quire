@@ -7,8 +7,8 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/locales"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // passageLocations is two places on the page being read, down the first lines:

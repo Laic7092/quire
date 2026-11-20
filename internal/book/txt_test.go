@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 func writeTmp(t *testing.T, name string, data []byte) string {

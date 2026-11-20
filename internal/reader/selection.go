@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // Selection is a run of text between two document locations: the anchor where

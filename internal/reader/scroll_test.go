@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/laix/quire/internal/book"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 )
 
 // scrollBook builds a book long enough to scroll: many paragraphs over two

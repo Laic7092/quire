@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
-	"github.com/laix/layx/render/paint"
+	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 )
 
 // paintViewport replays the viewport of a scrolling column into a fresh frame,

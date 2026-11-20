@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/laix/layx/epub"
+	"github.com/laic7092/layx/epub"
 )
 
 // errNotArchive reports a file that cannot be opened as a zip. Scan skips
@@ -22,7 +22,7 @@ type epubMeta struct {
 
 // readEPUBMeta reads the package document and the cover image, and nothing
 // else: spine items are never opened, so this costs a few kilobytes rather
-// than the whole book. The parsing belongs to github.com/laix/layx/epub, which
+// than the whole book. The parsing belongs to github.com/laic7092/layx/epub, which
 // keeps a shelf's needs next to the reader's.
 func readEPUBMeta(file string) (epubMeta, error) {
 	m, err := epub.ReadMetadata(file)

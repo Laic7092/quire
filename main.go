@@ -19,7 +19,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/layx/render"
+	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/internal/acquire"
 	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/internal/book"
@@ -294,10 +294,30 @@ type app struct {
 	// readers need.
 	instant bool
 	// chromeAway puts the reading bar and the folio away while the reader moves
-	// down a scrolling column, and the frames between fade them (see
-	// chromeTarget). Nothing is laid out from it: both are a layer over the
-	// sheet, never a row of it.
+	// down a scrolling column, or when the reader taps the middle of a phone's
+	// page, and the frames between fade them (see chromeTarget). Nothing is laid
+	// out from it: both are a layer over the sheet, never a row of it.
 	chromeAway bool
+
+	// phone marks a window on a phone's system (iOS or Android), where the
+	// library drops the Mac source list for a tab bar, the reading bars take a
+	// finger's sizes, and the middle of the page toggles the bars. It is set
+	// once from the platform, so a test can turn it on in a desktop build.
+	phone bool
+	// pressAt, swipePage and dragScroll are the phone's finger gestures on the
+	// sheet: when the press began, whether it has become a page swipe, and
+	// whether it is dragging the scrolling column instead of selecting text.
+	pressAt    time.Time
+	swipePage  bool
+	dragScroll bool
+	dragFrom   float32
+	dragAt     time.Time
+	dragY      float32
+	dragV      float32
+	// winBG and sysBar are what the native window was last told: the colour that
+	// fills the safe-area edges and the style of the system's bar icons.
+	winBG  string
+	sysBar mygo.BarStyle
 
 	// now is the clock the page turn is measured against; nil means time.Now,
 	// and a test that wants a fixed slide pins it.
@@ -311,6 +331,9 @@ type app struct {
 	libQuery    string
 	libSideOff  bool
 	sortByTitle bool
+	// libTab is the phone library's bottom bar: Home, All, Reading or Sources.
+	// It chooses the filter the shelf is listed under, so the two never disagree.
+	libTab int
 
 	// goalBooks and goalDays are the reading goals the home screen measures
 	// against: books a year, days a week. goalsOpen is the small panel that
