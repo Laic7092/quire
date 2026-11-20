@@ -174,7 +174,8 @@ func TestResizePreviewPlacesTheColumn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.layout, a.layScroll, a.layW, a.layH, a.tileH = col, true, w, h, h
+	a.layout, a.layScroll, a.layW, a.layH = col, true, w, h
+	a.tileH = col.Tile(0).Height()
 	a.scrollY = 900
 	place, ok := a.currentLoc()
 	if !ok {

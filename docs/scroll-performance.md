@@ -15,6 +15,9 @@
   覆盖率分配上），而且屏幕与离屏 PNG 现在是同一套光栅器 + 同一张墨色表（PNG/窗口
   墨量 1.01×）。
 - 再往下要降只能把 tile 预光栅成位图（见「待办」），那是策略层的活，不是排版层的。
+- **tile 位图已完成**：滚动列每个 tile（高 `reader.ScrollTileHeight` = 512 DIP）只光栅
+  一次进 `ui.Bitmap`，之后每帧只合成几个 quad。同一 tile 高度下 A/B：显示列表 0.53 ms、
+  位图合成 **0.11 ms**（`BenchmarkScrollFrame`，headless 1180×800）。
 
 ## 三个根因（为什么是图集）
 
@@ -61,6 +64,29 @@
 
 冷栅格约 3.2–3.3 µs/字形（精确面积积分，0 分配；`x/image/vector` 是 1.6 µs 但每字形
 31 次分配），所以新页/新 tile 的第一帧冷栅格约 3.2 ms——这笔落在翻页第一帧，不是每帧。
+
+### tile 位图合成（`tiles.go`）
+
+- 每个 tile 的显示列表用 `reader.PageRenderer.DrawTilePad` 光栅一次（layx-raster，与导出
+  PNG 同一条路、同一张 `raster.Tone` 表），存进 `ui.Bitmap`；`drawScroll` 之后每帧只发
+  一个 `p.Image`／tile，与字数无关（`TestScrollFramesCompositeTiles` 断言合成帧的
+  `GlyphStats().Glyphs == 0`）。
+- 位图按**整设备像素**落位（`roundDevices`），否则每帧重采样、整屏字都发虚；位置变化只
+  是平移这张图。
+- tile 自带 clip 到自身高度，而行的墨迹会越过「顶边在哪个 tile」的边界：紧排时上沿也能
+  出头。`DrawTileSpan` 在表面上下各留一条并丢掉 tile 自己的 clip（`unclipped`），两条都
+  **清成透明**而不是纸色——不透明的纸条会盖住下/上一个 tile 的首/末行（曾被拦腰截断）。
+- `PageRenderer` 复用一块表面，`ui.NewBitmap` 直接接管传入的像素（不复制），所以缓存前
+  必须拷贝，否则所有 tile 都会显示最后光栅的那一张。
+- 合成粗体：layx-raster 的实现是把整行**再画一遍、右移 `size/24`**，2×/3× 下就是每个字的
+  重影（「字很脏」）。`renderPainter` 把这一遍的位移折半、左右对称地铺开（`run.X -= dx/2`），
+  笔画变粗而不是发虚；墨色仍走同一张 `Tone` 表，离屏页面与屏幕的墨量比保持 1.0×
+  （`TestPageRendererPrintsTheSameWeightAsTheScreen`）。
+- 失效键：布局指针、屏幕比例、列宽、tile 高、fade、纸色。换字号/主题/缩放/书即整块作废
+  （`dropTiles`）。每帧在滚动方向前方**预取一个** tile，视口外的旧 tile 按 48 MB 预算 LRU
+  丢弃，视口内的永不丢。tile 高 512 DIP 而不是一个视口：390×512@3× ≈ 7 MB/张
+  （之前 390×844@3× ≈ 12 MB），首次光栅的停顿与预取粒度都跟着变小；宽仍是整列。
+- 回滚/AB：`QUIRE_TILE_BITMAPS=0` 走原来的显示列表路径。
 
 ### 墨色修正（`raster.Tone`）
 
@@ -127,11 +153,11 @@ FreeType 5.0 µs、3.3–3.6 ms、0.122/255。差别来自精确面积积分比�
 
 ## 待办
 
-1. tile 预光栅成位图（`ui.Render` + `ui.NewBitmap`，整像素吸附）：每帧 3 个 quad 而不是
-   900 个。代价是显存（620×700×4B ≈ 1.7 MB/tile，2× 约 7 MB）、主题/字号/缩放变化时
-   作废，以及失去逐帧亚像素定位。
-2. 未定：`TileHeight` 取视口高还是更小（更小 + 裁剪 = 更贴合，但 tile 数与显示列表重建
-   次数上升）；瓦片尺寸是否与核心的 `TileHeight` 解耦（浏览器是 256–512 固定、与视口无关）。
+1. ~~tile 预光栅成位图~~（已做，见「tile 位图合成」）。剩下的：横向切分——现在一张
+   tile 仍是整列宽（1180 DIP 桌面 @2× = 9.7 MB/张），要降到 1–3 MB 需要把宽也切开，
+   `render.Tile` 不支持横向切片，得在宿主侧 crop，或上游给固定宽高的切片接口。
+2. 未定：瓦片尺寸是否与核心的 `TileHeight` 完全解耦（浏览器 256–512 固定、宽也固定、
+   与视口无关）；现在是高封顶 512、宽整列。
 3. 未定：纯 Go 后端在 macOS 上与 CoreText 的画质差能否接受；不能就补平台后端，不必改 mygo。
 4. 适配层（policy 的 A/D/E 三块，我们 app 里已验证过的逻辑）搬进 `layx-raster`，仍未开始。
 5. **列表的触摸不是这条链路上的，是 mygo 的 `ui.Scroll`/`ui.List` 自己的 pan + 惯性**：
@@ -153,6 +179,7 @@ go test -run 'TestGlidePaintsWithoutBuilding|TestTurnPaintsWithoutBuilding|TestR
 
 # A/B：强制走旧路径（=1 反过来）
 LAYX_GLYPH_ATLAS=0 go test -run XXX -bench 'BenchmarkScrollFrame' -benchtime 3s .
+QUIRE_TILE_BITMAPS=0 go test -run XXX -bench 'BenchmarkScrollFrame' -benchtime 3s .
 ```
 
 真窗口（`cmd/glyphprobe` 滑这本书，报 cpu/frame、命中率与内存，跑完自己退出）。

@@ -46,7 +46,7 @@ func newScrollWindowView(t *testing.T, wrap func(*ui.Context, func(*ui.Context))
 	}
 	a.layout = layout
 	a.layScroll = true
-	a.tileH = a.boxH
+	a.tileH = layout.Tile(0).Height()
 	a.page = 0
 	a.scrollY = 0
 	a.scrollChapter = -1
@@ -129,6 +129,48 @@ func TestScrollModeScrollsTheColumn(t *testing.T) {
 	}
 	if !tt.HasText("0%") {
 		t.Errorf("the top of the book is not 0%%: %q", tt.Texts())
+	}
+}
+
+// A scrolling frame composites the column's tiles from bitmaps: the glyphs are
+// rastered once into a tile and the frames after that submit one quad a tile,
+// not one a glyph. Without it every frame re-submits the whole viewport's
+// glyphs, which is what made a phone drop to 30 frames.
+func TestScrollFramesCompositeTiles(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	tt.Frame()
+	tt.Frame()
+	if len(a.tiles.entry) == 0 {
+		t.Fatal("no tile was rastered for the scrolling column")
+	}
+
+	// The next frame draws the book through the bitmaps and asks the glyph
+	// painter for nothing at all.
+	a.paint.ResetGlyphStats()
+	tt.Frame()
+	if s := a.paint.GlyphStats(); s.Glyphs != 0 || s.Runs != 0 {
+		t.Errorf("a composited frame drew %d glyphs in %d runs", s.Glyphs, s.Runs)
+	}
+	if len(a.tiles.entry) == 0 {
+		t.Error("compositing dropped the tile bitmaps")
+	}
+}
+
+// The tile beside the viewport is rastered ahead of it, so scrolling into it
+// composites that frame instead of stalling on its display list.
+func TestScrollPrefetchesTheNextTile(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.instant = true
+	tt.Frame()
+	a.scrollTo(a.tileH * 2)
+	tt.Frame()
+
+	// The frame that landed rastered the tile below it; the next frame
+	// composites everything on screen.
+	a.paint.ResetGlyphStats()
+	tt.Frame()
+	if s := a.paint.GlyphStats(); s.Glyphs != 0 {
+		t.Errorf("a frame after a jump drew %d glyphs; the tiles on screen were not cached", s.Glyphs)
 	}
 }
 

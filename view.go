@@ -1514,6 +1514,8 @@ func (a *app) closeBook() {
 	if a.paint != nil {
 		a.paint.ClearImages()
 	}
+	a.images = nil
+	a.dropTiles()
 	if a.win != nil {
 		a.win.SetTitle(appName)
 		a.win.SetRepresentedFile("")

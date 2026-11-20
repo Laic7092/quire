@@ -62,8 +62,8 @@ func TestBuildLayoutScrolls(t *testing.T) {
 	if first == nil {
 		t.Fatal("tile 0 is nil")
 	}
-	if first.Height() != 560 {
-		t.Errorf("tile height = %.0f, want the layout viewport's 560", first.Height())
+	if want := min(float32(560), ScrollTileHeight); first.Height() != want {
+		t.Errorf("tile height = %.0f, want %.0f", first.Height(), want)
 	}
 	rec := &recorder{}
 	first.Draw(rec)
@@ -162,7 +162,9 @@ func TestScrollColumnStartsLikePageZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const w, h float32 = 420, 600
+	// The viewport is shorter than a tile so the first tile covers the page's
+	// whole text block: the two modes can then be compared row for row.
+	const w, h float32 = 420, 500
 	opts := Options{FontSize: DefaultFontSize}
 	paged, err := BuildLayout(context.Background(), doc, fonts, w, h, opts)
 	if err != nil {

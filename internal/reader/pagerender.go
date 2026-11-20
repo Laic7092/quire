@@ -55,6 +55,10 @@ type PageRenderer struct {
 	// to this paper rather than the process-wide palette, so two renderers can
 	// export different themes independently.
 	palette Palette
+	// bold tells the tone cache the run being drawn is a synthetic bold, since
+	// the renderer draws that weight itself rather than letting the rasterizer
+	// stamp a second, shifted copy of every glyph over the first.
+	bold bool
 }
 
 // NewPageRenderer returns a renderer with no surface yet, using the palette in
@@ -119,14 +123,89 @@ func (p *PageRenderer) DrawPage(page *render.Page, scale float32) *image.RGBA {
 
 // DrawTile rasterizes one tile of a scrolling layout, the same way.
 func (p *PageRenderer) DrawTile(tile *render.Tile, scale float32) *image.RGBA {
+	return p.DrawTileSpan(tile, scale, 0, 0)
+}
+
+// DrawTilePad is DrawTileSpan with the same strip above and below.
+func (p *PageRenderer) DrawTilePad(tile *render.Tile, scale, pad float32) *image.RGBA {
+	return p.DrawTileSpan(tile, scale, pad, pad)
+}
+
+// DrawTileSpan rasterizes one tile into a surface above DIPs taller at its top
+// and below taller at its bottom than the tile itself.
+//
+// A line belongs to the tile that holds its top edge. Its ink can still reach
+// past that edge on both sides — overhanging into the tile beneath, and rising
+// above the tile's own top when the leading is tight — so a host that keeps a
+// tile as a bitmap needs a strip on either side, and the display list of a tile
+// is painted with its clip dropped into it.
+func (p *PageRenderer) DrawTileSpan(tile *render.Tile, scale, above, below float32) *image.RGBA {
 	if tile == nil {
 		return image.NewRGBA(image.Rect(0, 0, 0, 0))
 	}
+	if above < 0 {
+		above = 0
+	}
+	if below < 0 {
+		below = 0
+	}
 	size := tile.Size()
-	return p.render(size.Width, size.Height, scale, tile.Draw)
+	// The strips are cleared to nothing, not to paper: they lie over the tiles
+	// above and beneath, and opaque paper strips would cover the lines that
+	// start just past the boundaries — the text would come out cut in half.
+	// Only the ink that reaches into them is painted there.
+	return p.renderCleared(paint.Color{}, size.Width, above, size.Height+above+below, scale, func(painter paint.Painter) {
+		// A tile clips itself to its own height. The surface is taller than that
+		// on purpose, so the clip is dropped and the surface's own one stands.
+		tile.Draw(unclipped{painter})
+	})
 }
 
+// renderPainter is what the display list is replayed into: it puts a run's
+// baseline on the device grid, as the window's painter does (see
+// UIPainter.baseline), and it centres the rasterizer's fake bold on the run.
+type renderPainter struct {
+	paint.Painter
+	p     *PageRenderer
+	scale float32
+}
+
+func (b renderPainter) DrawGlyphs(run paint.GlyphRun) {
+	if textGrid {
+		run.Y = gridBaseline(0, run.Y, b.scale)
+	}
+	b.p.bold = run.EmulateBold && !fakeBoldOff
+	if b.p.bold {
+		// The rasterizer fakes bold by stamping a second copy of the run to the
+		// right, which at 2x and 3x lands far enough away to read as a ghost of
+		// every glyph. Shifting the run back by half that distance puts the two
+		// copies either side of where the type belongs: the same weight, spread
+		// as a stroke instead of a drop shadow.
+		dx := run.Size / 24
+		if dx > 1.5 {
+			dx = 1.5
+		}
+		run.X -= dx / 2
+	}
+	b.Painter.DrawGlyphs(run)
+	b.p.bold = false
+}
+
+// unclipped passes everything to a painter but the clip: a page or tile asked
+// for into a surface that is deliberately larger than its own bounds.
+type unclipped struct{ paint.Painter }
+
+func (unclipped) ClipRect(paint.Rect) {}
+
 func (p *PageRenderer) render(width, height, scale float32, draw func(paint.Painter)) *image.RGBA {
+	return p.renderCleared(p.palette.Paper, width, 0, height, scale, draw)
+}
+
+// renderCleared is the render both entry points are made of: the surface is
+// cleared to clear first, so a page comes out on paper and a tile's overhang
+// strips come out transparent. above is room the drawing is moved down by, for
+// a surface that starts above the content it holds.
+func (p *PageRenderer) renderCleared(clear paint.Color, width, above, height, scale float32, draw func(paint.Painter)) *image.RGBA {
 	// A ratio that is not a real positive number is 1: an export asked for at an
 	// impossible ratio draws the page at 1x, where a NaN or an infinite one used
 	// to come out as an empty image — a file with no page in it.
@@ -144,11 +223,15 @@ func (p *PageRenderer) render(width, height, scale float32, draw func(paint.Pain
 	// identity transform and the full-surface clip, which is what a page and a
 	// tile both expect to start from.
 	s.Reset()
-	s.Clear(p.palette.Paper)
-	if scale != 1 {
-		s.Transform(paint.Affine{A: scale, D: scale})
+	s.Clear(clear)
+	if scale != 1 || above > 0 {
+		s.Transform(paint.Affine{A: scale, D: scale, F: above * scale})
 	}
-	draw(s)
+	// The window's painter puts every baseline on the device grid, so a column
+	// has one type phase down its whole length; an offscreen render has to do
+	// the same, or a page exported to PNG and the same page on screen would
+	// break their lines at different places.
+	draw(renderPainter{s, p, scale})
 	return s.Image()
 }
 
@@ -156,7 +239,7 @@ func (p *PageRenderer) surfaceFor(w, h int) *raster.Rasterizer {
 	if p.surface == nil || p.w != w || p.h != h {
 		s := raster.New(w, h)
 		s.ToneFor = func(run paint.GlyphRun) *raster.Tone {
-			return p.tones.toneFor(run.Color, run.Size, run.EmulateBold && !fakeBoldOff)
+			return p.tones.toneFor(run.Color, run.Size, p.bold)
 		}
 		for id, img := range p.images {
 			s.SetImage(id, img)

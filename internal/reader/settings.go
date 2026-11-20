@@ -291,12 +291,16 @@ func layoutOptions(fonts *Fonts, palette Palette, width, height float32, opts Op
 	if opts.Justify {
 		align = render.AlignJustify
 	}
-	// Scroll mode stacks the chapters into one flow and slices it into tiles
-	// one viewport tall, which is what the reader draws while it scrolls.
+	// Scroll mode stacks the chapters into one flow and slices it into tiles.
+	// The tile height is capped rather than taken from the viewport: a tile is
+	// rastered once and kept as a bitmap, so its size is memory and the stall of
+	// the frame that first shows it. A tile as tall as a tablet's window would be
+	// one huge bitmap per screenful; 512 DIP keeps both bounded and lets the
+	// prefetch work in smaller pieces.
 	mode := render.ModePaged
 	var tileHeight float32
 	if opts.Scroll {
-		mode, tileHeight = render.ModeScroll, height
+		mode, tileHeight = render.ModeScroll, min(height, ScrollTileHeight)
 	}
 	return render.LayoutOptions{
 		Viewport: render.Viewport{Width: width, Height: height},
@@ -315,6 +319,12 @@ func layoutOptions(fonts *Fonts, palette Palette, width, height float32, opts Op
 		TileHeight: tileHeight,
 	}, nil
 }
+
+// ScrollTileHeight is how tall a scrolling column's tile is, in DIPs. It is
+// smaller than a window on purpose: a tile is the unit a host rasterizes and
+// keeps as a bitmap, so a shorter one means a smaller bitmap, a shorter stall
+// on the frame that first shows it, and a finer prefetch.
+const ScrollTileHeight float32 = 512
 
 // checkViewport reports whether a viewport can hold a page laid out with opts.
 // A size that is not a number, or an infinite one, is refused rather than passed

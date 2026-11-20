@@ -62,9 +62,13 @@ func (c *countPainter) DrawGlyphs(run paint.GlyphRun) {
 // reader's draw callback does, counting the glyphs it hands the painter.
 func drawViewport(l *render.Layout, p *ui.Painter, counter *countPainter, scrollY float32) {
 	view := ui.Rect{X: 0, Y: 0, W: 620, H: 700}
+	tileH := view.H
+	if tile := l.Tile(0); tile != nil {
+		tileH = tile.Height()
+	}
 	p.Clip(view, 0, func() {
-		first := max(int(scrollY/700)-1, 0)
-		last := min(int((scrollY+view.H)/700), l.TileCount()-1)
+		first := max(int(scrollY/tileH)-1, 0)
+		last := min(int((scrollY+view.H)/tileH), l.TileCount()-1)
 		for i := last; i >= first; i-- {
 			tile := l.Tile(i)
 			if tile == nil {
@@ -79,8 +83,8 @@ func drawViewport(l *render.Layout, p *ui.Painter, counter *countPainter, scroll
 
 // BenchmarkScrollViewportPaint paints the tiles a 620×700 viewport covers, as
 // the reader does per frame, with and without skipping the runs that lie
-// outside the column: a tile is one viewport tall, so the column asks for
-// about three viewports' worth of glyphs.
+// outside the column: the tiles are shorter than a viewport, so the column asks
+// for a couple of viewports' worth of glyphs.
 func BenchmarkScrollViewportPaint(b *testing.B) {
 	const scrollY float32 = 4000
 	for _, skip := range []bool{false, true} {

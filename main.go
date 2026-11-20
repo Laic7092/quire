@@ -238,6 +238,12 @@ type app struct {
 	layGen  int
 	scrollY float32
 	tileH   float32
+	// tiles holds the scrolling column's tiles as bitmaps, rastered once for the
+	// layout, paper and screen scale and composited after that (see tileCache).
+	// images are the book's encoded pictures, from the build that made the
+	// document, which a rastered tile needs for a picture it holds.
+	tiles  tileCache
+	images map[render.ImageID][]byte
 	// viewTop and devScale are where the column's viewport was drawn and at what
 	// ratio, as of the last frame: a glide is over when the place it owes draws
 	// the same picture as the place it stands at (see (*app).landed).
@@ -312,9 +318,15 @@ type app struct {
 	// pressAt, swipePage and dragScroll are the phone's finger gestures on the
 	// sheet: when the press began, whether it has become a page swipe, and
 	// whether it is dragging the scrolling column instead of selecting text.
+	// selHold is whether this press earned its long press and so may mark text:
+	// until it does, a finger scrolls, swipes or taps and selects nothing.
+	// pressDead marks a quick drag that is none of those, and so does nothing
+	// until the finger lifts.
 	pressAt    time.Time
 	swipePage  bool
 	dragScroll bool
+	selHold    bool
+	pressDead  bool
 	dragFrom   float32
 	dragAt     time.Time
 	dragY      float32
@@ -1011,6 +1023,9 @@ func (a *app) ensureLayout(w, h float32) {
 				return
 			}
 			// Decoding belongs on the UI thread and happens once per build.
+			if rebuilt {
+				a.images = images
+			}
 			if rebuilt && a.paint != nil {
 				for id, data := range images {
 					a.paint.SetImage(id, data)
@@ -1021,6 +1036,7 @@ func (a *app) ensureLayout(w, h float32) {
 			a.dropPreview()
 			a.doc, a.docAt = doc, docAt
 			a.layout = layout
+			a.dropTiles()
 			a.layGen++
 			a.layScroll = opts.Scroll
 			if a.jumpAt {
@@ -1040,8 +1056,13 @@ func (a *app) ensureLayout(w, h float32) {
 			a.status = ""
 			a.tileH = 0
 			if a.scrolling() {
-				// The scroll flow is sliced into tiles one layout viewport tall.
+				// The scroll flow is sliced into tiles no taller than a reader's
+				// bitmap should be (see reader.ScrollTileHeight); the layout says
+				// how tall the ones it made are.
 				a.tileH = sh
+				if board := layout.Tile(0); board != nil {
+					a.tileH = board.Height()
+				}
 				a.page = 0
 				a.scrollY = clampf(a.scrollY, 0, a.maxScroll())
 				if a.pendingResume && a.pan != nil {
@@ -1341,6 +1362,8 @@ func (a *app) openAsync(win *mygo.Window, path string, fonts *reader.Fonts, face
 		if a.paint != nil {
 			a.paint.ClearImages()
 		}
+		a.images = nil
+		a.dropTiles()
 		a.doc = nil
 		a.docAt = 0
 		a.layout = nil

@@ -125,6 +125,15 @@ func (u *UIPainter) SetFade(f float32) {
 	u.fade = min(max(f, 0), 1)
 }
 
+// Fade returns the translucency the painter draws at, 1 when opaque. A host
+// that bakes what it draws into a bitmap keys that bitmap on it.
+func (u *UIPainter) Fade() float32 {
+	if u == nil {
+		return 1
+	}
+	return u.fade
+}
+
 // faded is c with the painter's fade in its alpha.
 func (u *UIPainter) faded(c paint.Color) paint.Color {
 	if u.fade >= 1 {
@@ -252,9 +261,8 @@ func (u *UIPainter) Restore() {}
 // to the element and to the region being shown, so an op whose rectangle misses
 // this draws nothing of itself; render's replay skips those before the painter
 // is handed them, which is the dispatch a tile's hidden lines cost otherwise.
-// A tile is one viewport tall and the column replays the tiles around the
-// viewport, so a frame is handed about three viewports' worth of ops for one
-// viewport of pixels.
+// A tile is shorter than the viewport and the column replays the tiles around
+// it, so a frame is handed a tile or two beyond what it shows.
 //
 // The painter asked not to cull — a test painting a column whole, to prove the
 // cull changes no pixel — reports everything visible.
@@ -427,8 +435,8 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	if upem <= 0 {
 		return
 	}
-	// A tile is one viewport tall and the column replays the tiles around the
-	// viewport, so most of the runs handed here lie outside it. Turning their
+	// A tile is shorter than the viewport and the column replays the tiles
+	// around it, so runs handed here can lie outside it. Turning their
 	// outlines into a path, flattening and hashing it costs the painter more
 	// than drawing the glyph does, and nothing below the clip would show:
 	// skip them before any of that work. run.Y is the baseline in the tile's

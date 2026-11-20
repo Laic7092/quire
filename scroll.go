@@ -17,7 +17,7 @@ import (
 
 // The reading page can be turned or scrolled. Scrolling builds the layout with
 // render.ModeScroll: the chapters stack into one flow with no page slots, and
-// the engine slices that flow into tiles one viewport tall. The reader keeps a
+// the engine slices that flow into tiles (see reader.ScrollTileHeight). The reader keeps a
 // content offset — scrollY is the flow's y at the top of the column — and draws
 // the tiles the viewport covers. Positions, selection rectangles and search
 // hits then live in the same content coordinates in both modes, which is why
@@ -83,8 +83,11 @@ const (
 	flingMax   = 6000
 	// flingIdle is how long the finger has to have rested before it lifted for
 	// the lift to be no flick: the speed it had belongs to the moves, not to the
-	// pause it took to let go.
-	flingIdle = 100 * time.Millisecond
+	// pause it took to let go. flingSample is the shortest gap two moves are
+	// read over: anything shorter is event jitter, and dividing by it turns a
+	// twitch into a throw.
+	flingIdle   = 100 * time.Millisecond
+	flingSample = 6 * time.Millisecond
 )
 
 // platformScrollLine is how many DIPs the toolkit gives one of the platform's
@@ -834,15 +837,37 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// boundary overhangs into the next tile's area: drawing the lower tile
 	// first lets that overhang land on top of its paper instead of being
 	// covered by it.
-	for i := last; i >= first; i-- {
-		tile := column.Tile(i)
-		if tile == nil {
-			continue
+	//
+	// Each tile is composited from the bitmap the cache rastered for it: a frame
+	// submits one quad a tile, not one a glyph. A tile the cache does not have
+	// yet — the first frame of a new place, or one the budget dropped — is
+	// replayed from its display list this once, and rastered after the frame
+	// (see prefetchTile).
+	p.Clip(view, 0, func() {
+		for i := last; i >= first; i-- {
+			tile := column.Tile(i)
+			if tile == nil {
+				continue
+			}
+			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
+			if bmp := a.tileBitmap(column, i, tile, p.Scale()); bmp != nil {
+				drawTileBitmap(p, bmp, box, p.Scale(), a.tiles.entry[i].above)
+				continue
+			}
+			// The performance log keeps how long each tile took: a tile built on the
+			// frame it is shown is what a scroll stutter looks like.
+			perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
 		}
-		box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
-		// The performance log keeps how long each tile took: a tile built on the
-		// frame it is shown is what a scroll stutter looks like.
-		perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
+	})
+	// The tile the column is heading for is rastered now, so the frame that
+	// first shows it is a composite too, rather than the frame that stalls.
+	if a.tiles.renderer != nil {
+		next := last + 1
+		if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
+			next = first - 1
+		}
+		a.prefetchTile(column, next, p.Scale())
+		a.trimTiles(func(i int) bool { return i >= first && i <= last })
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.

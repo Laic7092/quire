@@ -5,14 +5,15 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"math"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/internal/book"
 	"github.com/laic7092/layx/render"
 	"github.com/laic7092/layx/render/paint"
+	"github.com/laix/quire/internal/book"
 )
 
 func differsFromPaper(img *image.RGBA, paper paint.Color) int {
@@ -393,4 +394,115 @@ func TestPageRendererScaleIsSane(t *testing.T) {
 			t.Errorf("a %s scale drew %v, want the 1x page %v", name, got, want)
 		}
 	}
+}
+
+// A tile keeps a strip below itself for the line that overhangs it, and that
+// strip lies over the top of the tile beneath. It must carry the overhanging ink
+// and nothing else: cleared to paper it would paint the tile below's first line
+// out, and the text would come out cut in half at the boundary.
+func TestTilePadDoesNotCoverTheTileBelow(t *testing.T) {
+	l, _, _ := benchScrollColumn(t)
+	if l.TileCount() < 2 {
+		t.Skip("the sample book has one tile")
+	}
+	upper, lower := l.Tile(0), l.Tile(1)
+	if upper == nil || lower == nil {
+		t.Fatal("the column has no second tile")
+	}
+	const pad float32 = 60
+	pr := NewPageRenderer()
+	copyOf := func(img *image.RGBA) *image.RGBA {
+		out := image.NewRGBA(img.Rect)
+		copy(out.Pix, img.Pix)
+		return out
+	}
+	low := copyOf(pr.DrawTile(lower, 1))
+	up := copyOf(pr.DrawTileSpan(upper, 1, 0, pad))
+
+	paper := Current().Paper
+	dst := image.NewRGBA(low.Bounds())
+	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.RGBA{R: paper.R, G: paper.G, B: paper.B, A: 0xff}),
+		image.Point{}, draw.Src)
+	draw.Draw(dst, dst.Bounds(), low, image.Point{}, draw.Over)
+
+	band := int(pad)
+	before := 0
+	for y := 2; y < band; y++ {
+		for x := 0; x < low.Bounds().Dx(); x++ {
+			p := low.RGBAAt(x, y)
+			if p.R != paper.R || p.G != paper.G || p.B != paper.B {
+				before++
+			}
+		}
+	}
+	// The upper tile's strip is the part below its own bottom edge.
+	draw.Draw(dst, dst.Bounds(), up, image.Pt(0, int(math.Ceil(float64(upper.Height())))), draw.Over)
+	after := 0
+	for y := 2; y < band; y++ {
+		for x := 0; x < dst.Bounds().Dx(); x++ {
+			p := dst.RGBAAt(x, y)
+			if p.R != paper.R || p.G != paper.G || p.B != paper.B {
+				after++
+			}
+		}
+	}
+	if before == 0 {
+		t.Skip("no line starts just under the boundary to check")
+	}
+	if after < before {
+		t.Errorf("the strip below the tile covered the tile below: %d of %d ink pixels left under the boundary",
+			after, before)
+	}
+}
+
+// The rasterizer fakes bold by stamping a second copy of the run to the right;
+// the offscreen path shifts the run back by half that so the two copies sit
+// either side of where the type belongs. A second copy a full step to the right
+// is a ghost at 2x and 3x, which is what every glyph looked like before.
+func TestRenderPainterCentresBold(t *testing.T) {
+	rec := &runRecorder{p: NewPageRenderer()}
+	rp := renderPainter{rec, rec.p, 1}
+
+	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 24, EmulateBold: true})
+	if got, want := rec.run.X, float32(9.5); got != want {
+		t.Errorf("bold run starts at %.2f, want %.2f", got, want)
+	}
+	if !rec.run.EmulateBold {
+		t.Error("the bold flag was taken off the run, so it would not be bold")
+	}
+	if !rec.boldSeen {
+		t.Error("the tone was not told the run is bold")
+	}
+	if rec.p.bold {
+		t.Error("the renderer kept the bold flag after the run")
+	}
+
+	// A size that would shift by more than the cap is held to it.
+	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 240, EmulateBold: true})
+	if got, want := rec.run.X, float32(9.25); got != want {
+		t.Errorf("a large bold run starts at %.2f, want %.2f", got, want)
+	}
+
+	// A regular run is drawn where it was.
+	rp.DrawGlyphs(paint.GlyphRun{X: 10, Size: 24})
+	if got := rec.run.X; got != 10 {
+		t.Errorf("a regular run moved to %.2f", got)
+	}
+	if rec.boldSeen {
+		t.Error("a regular run was reported as bold")
+	}
+}
+
+// runRecorder keeps the last run handed to it and whether the renderer said it
+// was bold at the time.
+type runRecorder struct {
+	paint.Painter
+	p        *PageRenderer
+	run      paint.GlyphRun
+	boldSeen bool
+}
+
+func (r *runRecorder) DrawGlyphs(run paint.GlyphRun) {
+	r.run = run
+	r.boldSeen = r.p.bold
 }
