@@ -38,6 +38,18 @@ var serifBook []byte
 //go:embed fonts/Inter-Regular.ttf
 var uiSans []byte
 
+// cjkFallback is the face a sandbox reads CJK in: phones give an app no path to
+// the system's fonts, so the reading faces have nothing to measure Chinese,
+// Japanese and Korean with. It is the last face of the set on every platform,
+// after the system's own, so desktops keep their own shapes.
+//
+//go:embed fonts/DroidSansFallback.ttf
+var cjkFallback []byte
+
+// BundledFont is what FindFont returns when the system has no CJK face the app
+// can read: OpenFonts takes it as the path of the embedded cjkFallback.
+const BundledFont = "bundled:DroidSansFallback"
+
 // uiFontReady says the chrome's face has been registered with MyGo. The faces
 // are read on a goroutine, off the UI thread, and the chrome asks for the family
 // on that thread while they load: the flag is atomic so the answer does not race
@@ -115,9 +127,13 @@ func OpenFont(path string) (*Fonts, error) {
 // that may read in either face passes the serif path only for a book set in it,
 // and loads the other set later if the reader changes their mind.
 func OpenFonts(sansPath, serifPath string) (*Fonts, error) {
-	sans, err := os.ReadFile(sansPath)
-	if err != nil {
-		return nil, fmt.Errorf("reader: font: %w", err)
+	sans := cjkFallback
+	if sansPath != BundledFont {
+		var err error
+		sans, err = os.ReadFile(sansPath)
+		if err != nil {
+			return nil, fmt.Errorf("reader: font: %w", err)
+		}
 	}
 	f := &Fonts{Path: sansPath}
 	// The chrome is set in the bundled Inter, and the book's serif choice in
@@ -200,7 +216,9 @@ func FindFont(explicit string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("reader: no font found; set LAYX_FONT or pass -font")
+	// No CJK face the app can read: a phone, or a desktop without one. The
+	// bundled face stands in, so a book still opens instead of failing.
+	return BundledFont, nil
 }
 
 // FindSerif resolves the serif face, or "" when the system has none: then the

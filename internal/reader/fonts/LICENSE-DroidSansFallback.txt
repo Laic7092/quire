@@ -1,0 +1,11 @@
+DroidSansFallback.ttf
+=====================
+
+Copyright (C) 2006-2010 Google Corp. Droid is a trademark of Google Corp.
+Licensed under the Apache License, Version 2.0.
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+The face travels with the app as the last-resort CJK face: platforms that
+give an app no paths to the system's fonts (iOS, sandboxes) have nothing
+else to measure and draw Chinese, Japanese and Korean with.
