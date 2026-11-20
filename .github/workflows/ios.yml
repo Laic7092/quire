@@ -44,5 +44,5 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ios-unsigned-ipa
-          path: build/ios-arm64/*-unsigned.ipa
+          path: quire/build/ios-arm64/*-unsigned.ipa
           if-no-files-found: error
