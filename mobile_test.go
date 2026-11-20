@@ -286,6 +286,161 @@ func TestPhoneSelectionAsksForTheMenu(t *testing.T) {
 	}
 }
 
+// A finger that moves before the hold selects nothing: a quick drag is a
+// scroll or a page swipe, or on a paged book a gesture the page does not use.
+// Only the hold turns a press into a selection, as the system's own text does.
+func TestPhoneQuickDragSelectsNothing(t *testing.T) {
+	a := newWindow(t)
+	a.phone = true
+	at := time.Unix(0, 0)
+	a.now = func() time.Time { return at }
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+	tt.Frame()
+
+	x, y := pressPoint(t, a)
+	down := func(x, y float32) {
+		if !a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerDown, X: x, Y: y}) {
+			t.Fatalf("the press at %.0f,%.0f was not taken", x, y)
+		}
+	}
+	move := func(x, y float32) {
+		a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerMove, X: x, Y: y})
+	}
+	up := func(x, y float32) {
+		a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerUp, X: x, Y: y})
+	}
+
+	// A quick vertical drag on a paged book: no selection, no card, no turn.
+	page := a.page
+	down(x, y)
+	move(x+20, y+60)
+	move(x+30, y+120)
+	if len(a.selQuads) != 0 {
+		t.Fatal("a quick drag marked text without the hold")
+	}
+	up(x+30, y+120)
+	if a.selMenu {
+		t.Error("a quick drag asked for the commands")
+	}
+	if a.page != page {
+		t.Errorf("a quick drag turned the page to %d", a.page)
+	}
+
+	// A quick sideways drag on a paged book is the swipe: also no selection.
+	down(0.8*a.boxW, y)
+	move(0.4*a.boxW, y)
+	up(0.4*a.boxW, y)
+	if len(a.selQuads) != 0 {
+		t.Fatal("a swipe marked text")
+	}
+
+	// A hold that lifts without moving marks nothing, and does not turn the
+	// page it was pressed on either.
+	page = a.page
+	down(x, y)
+	at = at.Add(touchHold + 100*time.Millisecond)
+	up(x, y)
+	if a.selMenu || len(a.selQuads) != 0 {
+		t.Error("a hold alone marked text")
+	}
+	if a.page != page {
+		t.Errorf("a long press without a drag turned the page to %d", a.page)
+	}
+}
+
+// A quick sideways drag on a phone's scrolling column is not a selection either:
+// the column only marks text once the hold is granted.
+func TestPhoneQuickDragOnColumnSelectsNothing(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.phone = true
+	at := time.Unix(0, 0)
+	a.now = func() time.Time { return at }
+	tt.Frame()
+
+	x, y := pressPoint(t, a)
+	a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerDown, X: x, Y: y})
+	at = at.Add(120 * time.Millisecond)
+	a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerMove, X: x + 60, Y: y + 6})
+	if len(a.selQuads) != 0 {
+		t.Fatal("a quick sideways drag marked text without the hold")
+	}
+	a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerUp, X: x + 60, Y: y + 6})
+	if a.selMenu {
+		t.Error("a quick drag asked for the commands")
+	}
+	if len(a.selQuads) != 0 {
+		t.Errorf("the selection survived the release: %d quads", len(a.selQuads))
+	}
+}
+
+// A drag that goes one way and comes back leaves the column where it began, and
+// the lift has nothing to throw: the page must not spring off on its own. A
+// one-way flick still flies, as a throw should.
+func TestPhoneBackAndForthDragDoesNotSpring(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.phone = true
+	a.instant = false
+	at := time.Unix(0, 0)
+	a.now = func() time.Time { return at }
+	tt.Frame()
+
+	down := func(x, y float32) {
+		a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerDown, X: x, Y: y})
+	}
+	move := func(x, y float32) {
+		a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerMove, X: x, Y: y})
+	}
+	up := func(x, y float32) {
+		a.handlePageInput(ui.InputEvent{Kind: ui.InputPointerUp, X: x, Y: y})
+	}
+
+	// Down the column and back, lifting where the finger landed.
+	start := a.scrollY
+	down(500, 500)
+	for i := 1; i <= 10; i++ {
+		at = at.Add(16 * time.Millisecond)
+		move(500, 500-float32(i)*10)
+	}
+	for i := 9; i >= 0; i-- {
+		at = at.Add(16 * time.Millisecond)
+		move(500, 500-float32(i)*10)
+	}
+	up(500, 500)
+	if a.scrollY != start {
+		t.Fatalf("the back-and-forth drag left the column at %.1f, from %.1f", a.scrollY, start)
+	}
+	if a.flingV != 0 {
+		t.Errorf("the lift flung the column at %.0f DIPs a second after a back-and-forth drag", a.flingV)
+	}
+	for i := 0; i < 40; i++ {
+		at = at.Add(16 * time.Millisecond)
+		a.stepColumn()
+	}
+	if a.scrollY != start {
+		t.Errorf("the page sprung %.1f DIPs after the finger lifted", a.scrollY-start)
+	}
+
+	// One stroke the whole way: that is a flick, and it carries on.
+	down(500, 500)
+	for i := 1; i <= 6; i++ {
+		at = at.Add(16 * time.Millisecond)
+		move(500, 500-float32(i)*20)
+	}
+	up(500, 380)
+	if a.flingV == 0 {
+		t.Fatal("a one-way flick was not carried on after the lift")
+	}
+	lifted := a.scrollY
+	for i := 0; i < 40; i++ {
+		at = at.Add(16 * time.Millisecond)
+		a.stepColumn()
+	}
+	if a.scrollY <= lifted {
+		t.Errorf("the flick stopped at %.1f, from %.1f", a.scrollY, lifted)
+	}
+}
+
 // A phone has no secondary button, so the page does not register a system
 // context menu: nothing pops up over an empty page but the selection's own card.
 func TestPhonePageHasNoSystemContextMenu(t *testing.T) {

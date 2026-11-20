@@ -13,10 +13,11 @@ import (
 	"github.com/laix/quire/locales"
 )
 
-// handlePageInput turns presses on the sheet into the reader's two pointer
-// gestures: a click turns the page, and a press that moves selects text. The
-// gesture is decided on release, by whether the pointer left its press, so the
-// turn does not have to claim a strip of the text where a drag may begin.
+// handlePageInput turns presses on the sheet into the reader's pointer
+// gestures: a click turns the page, and a press that holds still on a phone — or
+// any drag of a mouse — marks text. The gesture is decided on release, by
+// whether the pointer left its press, so the turn does not have to claim a strip
+// of the text where a drag may begin.
 //
 // The page box takes the pointer when it is pressed, so its moves and its
 // release come here wherever the pointer goes; a drag past the edge of the
@@ -73,11 +74,13 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.pressX, a.pressY = ev.X, ev.Y
 		a.pressAt = a.clock()
 		a.selMoved = false
+		a.selHold = false
 		a.selDragging = true
 		a.hapticPlayed = false
 		a.selMenu = false
 		a.swipePage = false
 		a.dragScroll = false
+		a.pressDead = false
 		return true
 	case ui.InputPointerMove:
 		// A finger dragging the scrolling column owns the move from the first
@@ -87,6 +90,12 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return true
 		}
 		if a.swipePage {
+			return true
+		}
+		if a.pressDead {
+			// The press already turned into a gesture the page does not use
+			// (a quick drag on a page that is not a swipe): it stays quiet
+			// until the finger lifts.
 			return true
 		}
 		// A move with no press on the sheet is the pointer passing over the
@@ -99,28 +108,44 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			return false
 		}
 		dx, dy := ev.X-a.pressX, ev.Y-a.pressY
-		if a.phone && !a.selMoved && (dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop) {
-			// A quick finger on a scrolling column is a scroll, not a selection:
-			// holding still first is what selects, as on the system's own text.
-			if a.scrolling() && a.clock().Sub(a.pressAt) < touchHold {
-				a.startScrollDrag()
-				a.dragScrollTo(ev)
+		past := dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop
+		if a.phone && !a.selHold {
+			if !past {
+				// Still within the slop of the press: neither a scroll nor a
+				// swipe has been asked for, and the hold may yet make this a
+				// selection. Nothing is marked before that.
 				return true
 			}
-			// A quick sideways finger on a paged book turns the page, as the
-			// system's readers do.
-			if !a.scrolling() && absf(dx) > absf(dy)*1.2 && absf(dx) > swipePageMin &&
-				a.clock().Sub(a.pressAt) < touchHold {
-				a.swipePage = true
-				a.clearSelection()
-				a.selDragging = false
+			if a.clock().Sub(a.pressAt) >= touchHold {
+				// The finger stayed long enough, so from here on its drag marks
+				// text. This is the only way a selection begins on a phone.
+				a.selHold = true
+				a.longPressHaptic()
+			} else {
+				// A finger that moves before the hold selects nothing: on a
+				// scrolling column it drags the column, on a paged book a quick
+				// sideways drag swipes, and a drag that is neither leaves the
+				// page alone.
+				if a.scrolling() {
+					a.startScrollDrag()
+					a.dragScrollTo(ev)
+					return true
+				}
+				if absf(dx) > absf(dy)*1.2 && absf(dx) > swipePageMin {
+					a.swipePage = true
+					a.clearSelection()
+					a.selDragging = false
+					return true
+				}
+				a.pressDead = true
 				return true
 			}
 		}
-		if dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
-			if !a.selMoved {
-				a.longPressHaptic()
-			}
+		if !past {
+			return true
+		}
+		if !a.selMoved {
+			a.longPressHaptic()
 			a.selMoved = true
 		}
 		loc, ok := a.pageLocation(ev.X, ev.Y)
@@ -146,16 +171,30 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			a.turn(delta)
 			return true
 		}
+		if a.pressDead {
+			a.pressDead = false
+			a.selDragging = false
+			return true
+		}
 		if !a.selDragging {
 			return false
 		}
 		a.selDragging = false
+		if a.phone && !a.selHold && a.clock().Sub(a.pressAt) >= touchHold {
+			// The finger held without moving: that is the hold, and a hold that
+			// marks nothing does not also turn the page under it.
+			a.selHold = true
+			a.longPressHaptic()
+		}
 		// A release that did not leave its press is a click. A click on a link
 		// follows it. On a phone the middle of the page shows and hides the
 		// chrome, and the sides turn the page; on a desktop a click on either
 		// half turns it. A scrolling column has no page to turn, so its click
 		// only clears the selection.
 		if !a.selMoved {
+			if a.phone && a.selHold {
+				return true
+			}
 			if link, ok := a.linkAt(a.pressX, a.pressY); ok {
 				a.openLink(link)
 				return true
@@ -174,7 +213,7 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 				a.turn(a.turnAt(a.pressX))
 			}
 		}
-		if a.phone && a.selMoved && len(a.selQuads) > 0 {
+		if a.phone && a.selHold && len(a.selQuads) > 0 {
 			// The selection is made, so now its commands come: the card opens
 			// at the finger that finished it. Nothing opens it before that —
 			// a long press on the page selects, it does not pop a menu over
@@ -215,8 +254,12 @@ func (a *app) startScrollDrag() {
 // going down takes the page back up the flow.
 func (a *app) dragScrollTo(ev ui.InputEvent) {
 	now := a.clock()
-	if dt := now.Sub(a.dragAt).Seconds(); dt > 0 {
-		a.dragV = 0.7*a.dragV + 0.3*float32(-(ev.Y-a.dragY)/float32(dt))
+	// A speed read over a gap shorter than flingSample is mostly the noise of
+	// when two events happened to arrive, and a spike there throws the column
+	// much further than the hand ever moved. The gap is measured from the last
+	// sample that counted, and the position is still the newest one.
+	if dt := now.Sub(a.dragAt); dt >= flingSample {
+		a.dragV = 0.7*a.dragV + 0.3*float32(-(ev.Y-a.dragY)/float32(dt.Seconds()))
 		a.dragAt = now
 	}
 	a.dragY = ev.Y
@@ -232,7 +275,13 @@ func (a *app) endScrollDrag() {
 		// The finger rested before it let go: it stopped, and a stop is no flick.
 		a.dragV = 0
 	}
-	a.startFling(a.dragV)
+	// Only a flick that went the way the drag went carries the column on. A hand
+	// that scrolled up and back is leaving the column where it put it, and the
+	// last stroke's speed, pointing the other way, is not a throw: carrying it
+	// on would make the page spring back a section after the finger lifted.
+	if net := a.scrollY - a.dragFrom; net*a.dragV > 0 {
+		a.startFling(a.dragV)
+	}
 	a.dragV = 0
 }
 
@@ -332,6 +381,7 @@ func (a *app) clearSelection() {
 	a.selMoved = false
 	a.selCopied = 0
 	a.selMenu = false
+	a.pressDead = false
 }
 
 // copySelection puts the selected text on the clipboard, read from the document
