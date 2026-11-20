@@ -984,6 +984,48 @@ func (msgs Messages) LibrarySearchPlaceholder() string {
 	return Catalog.Format(msgs.locale, "librarySearchPlaceholder", nil)
 }
 
+// LibrarySearchHint says "Type a title or an author to find a book on the shelf"
+// in the language the app shows.
+//
+// The hint on the library's search screen while no query is typed.
+func LibrarySearchHint() string { return In(i18n.Locale()).LibrarySearchHint() }
+
+// LibrarySearchHint says "Type a title or an author to find a book on the shelf"
+// in the language of msgs.
+//
+// The hint on the library's search screen while no query is typed.
+func (msgs Messages) LibrarySearchHint() string {
+	return Catalog.Format(msgs.locale, "librarySearchHint", nil)
+}
+
+// HomeNothingInProgress says "Nothing in progress — pick a book in your library"
+// in the language the app shows.
+//
+// What the phone's home screen says when no book has been started.
+func HomeNothingInProgress() string { return In(i18n.Locale()).HomeNothingInProgress() }
+
+// HomeNothingInProgress says "Nothing in progress — pick a book in your library"
+// in the language of msgs.
+//
+// What the phone's home screen says when no book has been started.
+func (msgs Messages) HomeNothingInProgress() string {
+	return Catalog.Format(msgs.locale, "homeNothingInProgress", nil)
+}
+
+// Close says "Close"
+// in the language the app shows.
+//
+// The label of a sheet's or panel's close button.
+func Close() string { return In(i18n.Locale()).Close() }
+
+// Close says "Close"
+// in the language of msgs.
+//
+// The label of a sheet's or panel's close button.
+func (msgs Messages) Close() string {
+	return Catalog.Format(msgs.locale, "close", nil)
+}
+
 // SidebarHome says "Home"
 // in the language the app shows.
 //

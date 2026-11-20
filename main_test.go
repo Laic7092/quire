@@ -323,14 +323,17 @@ func TestClosingABookForgetsItsPlaces(t *testing.T) {
 	}
 }
 
-// A damaged state file is backed up rather than silently replaced, and the home
-// screen says where the old copy went.
+// A damaged state file is backed up rather than silently replaced, and the
+// window says where the old copy went: the message is a toast, not a line the
+// home page keeps for the rest of its life.
 func TestHomeShowsARecoveredStateNotice(t *testing.T) {
 	notice := locales.StateRecovered("/tmp/state.json.bak")
-	a := &app{opts: reader.DefaultOptions(), instant: true, notice: notice}
+	a := &app{opts: reader.DefaultOptions(), instant: true}
+	a.notify(notice)
 	tt := ui.NewTester(a.view, 900, 700)
+	tt.Frame()
 	if !tt.HasText(notice) {
-		t.Errorf("home screen does not show %q: %q", notice, tt.Texts())
+		t.Errorf("the window does not show %q: %q", notice, tt.Texts())
 	}
 }
 

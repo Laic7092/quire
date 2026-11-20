@@ -22,6 +22,19 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 	if !a.aaOpen {
 		return
 	}
+	if a.compact(c) {
+		// A phone shows the same settings as a sheet from the bottom edge: a
+		// popover anchored to a control in the bar is a pointer's shape, and a
+		// thumb cannot reach the top of the screen to dismiss it.
+		a.mobileSheet(c, &a.aaOpen, locales.ThemesSettings(), []float32{0.6, 0.9}, func() {
+			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Padding(10, 16, 19, 16).Children(func() {
+					a.settingsControls(c)
+				})
+			})
+		})
+		return
+	}
 	pal := a.chrome
 	ui.PopoverBase(c, anchor, &a.aaOpen, func(panel ui.Element) {
 		// The panel hangs under the Aa, 9 DIPs below the bar, at its centre:
@@ -38,15 +51,7 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 				})
 				a.settingsDivider(c)
 				ui.Box(c).Height(9)
-				a.sizeRow(c)
-				ui.Box(c).Height(10)
-				a.themeGrid(c)
-				ui.Box(c).Height(12)
-				a.customRow(c)
-				if a.aaMore {
-					ui.Box(c).Height(10)
-					a.settingsDetail(c)
-				}
+				a.settingsControls(c)
 			})
 		// The pointer under the Aa, drawn over the bar so the panel and its
 		// anchor read as one control, as Books' own popover does.
@@ -59,6 +64,20 @@ func (a *app) settingsPanel(c *ui.Context, anchor ui.Element) {
 			})
 		}
 	})
+}
+
+// settingsControls is what the panel holds, from the size row down, whether it
+// is the desktop's popover or the phone's sheet.
+func (a *app) settingsControls(c *ui.Context) {
+	a.sizeRow(c)
+	ui.Box(c).Height(10)
+	a.themeGrid(c)
+	ui.Box(c).Height(12)
+	a.customRow(c)
+	if a.aaMore {
+		ui.Box(c).Height(10)
+		a.settingsDetail(c)
+	}
 }
 
 // settingsMuted is the caption colour on the panel, which sits on the popover
@@ -79,7 +98,7 @@ func (a *app) settingsInk() ui.Color {
 func (a *app) sizeRow(c *ui.Context) {
 	pal := a.chrome
 	ui.Row(c).FillWidth().Height(38).Gap(6).Children(func() {
-		group := ui.Row(c).Width(130).Height(38).Radius(19).
+		group := ui.Row(c).Height(38).Radius(19).Grow(1).
 			Background(reader.UIColor(pal.Raised)).AlignItems(ui.Center)
 		group.Children(func() {
 			a.sizeCell(c, 13, locales.SettingsSmallerText(), func() { a.changeFont(-1) })

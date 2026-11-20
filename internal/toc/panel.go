@@ -33,6 +33,11 @@ type Panel struct {
 	// PageOf: only it knows which mode the layout is in.
 	OnJump func(e Entry)
 
+	// Touch gives the rows a finger's height instead of a pointer's: the phone
+	// shows the panel as a sheet, and a row 30 DIPs tall is a miss waiting to
+	// happen.
+	Touch bool
+
 	// List keeps the scroll position. Call ScrollToCurrent after rebuilding
 	// Entries to open the panel at the chapter being read.
 	List ui.ListState
@@ -107,7 +112,11 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	// a remembered page is something to jump to.
 	disabled := !e.HasLoc && e.Page < 0
 
-	row := ui.Row(c).FillWidth().Height(30).AlignItems(ui.Center).Gap(6).Radius(6).
+	height := float32(30)
+	if p.Touch {
+		height = 44
+	}
+	row := ui.Row(c).FillWidth().Height(height).AlignItems(ui.Center).Gap(6).Radius(6).
 		Padding(0, 8, 0, 8+indentOf(e))
 	switch {
 	case e.Current:

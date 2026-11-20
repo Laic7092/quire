@@ -132,6 +132,21 @@ func (a *app) sourceDialog(c *ui.Context, t *ui.Theme) {
 	bg := reader.UIColor(pal.Popover)
 	text := reader.UIColor(pal.Text)
 	muted := reader.UIColor(pal.Muted)
+	if a.compact(c) {
+		// A phone shows the shops' search as a sheet from the bottom edge: the
+		// results are a list the thumb works through, and the way out is the
+		// sheet's own, under it.
+		a.mobileSheet(c, &a.find.shown, locales.SourceSheetTitle(), []float32{0.5, 0.92}, func() {
+			a.sourceSheetSearchRow(c, pal)
+			a.sourceSheetFilter(c, t, text, muted)
+			a.sourceSheetStatus(c, t, muted)
+			a.sourceSheetResults(c, t, text, muted)
+		})
+		if !a.find.shown {
+			a.find.closeSheet()
+		}
+		return
+	}
 	// Modal would wrap the card in its own themed panel, adding a second
 	// border, background and padding around it. DialogBase gives the sheet a
 	// plain backdrop and lets the card below be the only panel on screen.
@@ -168,7 +183,12 @@ func (a *app) sourceSheetHeader(c *ui.Context, t *ui.Theme, text, muted ui.Color
 			ui.Icon(c, icons.Close).Size(16, 16).TextColor(muted)
 		})
 	})
+	a.sourceSheetSearchRow(c, pal)
+}
 
+// sourceSheetSearchRow is the query and its button, under the title on the
+// desktop and under the sheet's own title on a phone.
+func (a *app) sourceSheetSearchRow(c *ui.Context, pal reader.Palette) {
 	ui.Row(c).FillWidth().Height(38).Padding(0, 16, 10, 16).Gap(8).AlignItems(ui.Center).Children(func() {
 		field := ui.SearchField(c, &a.find.query).Placeholder(locales.SourceSheetSearchPlaceholder()).FillWidth().Label(locales.Search())
 		if field.Submitted() {
@@ -553,6 +573,19 @@ func (a *app) sourceSheetSettings(c *ui.Context, t *ui.Theme, text, muted ui.Col
 	pal := a.chrome
 	bg := reader.UIColor(pal.Popover)
 
+	if a.compact(c) {
+		// A phone shows a shop's settings as a sheet too: the form scrolls under
+		// the sheet's own title, and drag or back closes it.
+		a.mobileSheet(c, &a.find.settingsOpen, name, []float32{0.9}, func() {
+			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Padding(12, 16, 16, 16).Gap(10).Children(func() {
+					a.sourceSettingsForm(c, t, text, muted)
+				})
+			})
+		})
+		return
+	}
+
 	ui.DialogBase(c, &a.find.settingsOpen, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.4))
 		w, h := c.Size()
@@ -677,11 +710,11 @@ func (a *app) saveSourceSettings(id source.ID) {
 			values[f.key] = f.value
 		}
 		if err := cfg.Configure(values); err != nil {
-			a.notice = locales.SourceSheetSourceError(sourceName(a, id), err.Error())
+			a.notifyError(locales.SourceSheetSourceError(sourceName(a, id), err.Error()))
 			return
 		}
 		if err := a.srcConf.Set(string(id), values); err != nil {
-			a.notice = locales.SourceSheetSourceError(sourceName(a, id), err.Error())
+			a.notifyError(locales.SourceSheetSourceError(sourceName(a, id), err.Error()))
 			return
 		}
 	}
@@ -706,7 +739,7 @@ func (a *app) importSourceDefinitions(id source.ID) {
 		if err != nil {
 			win.Update(func() {
 				defer a.refresh(win)
-				a.notice = locales.SourceSheetImportFailed(err.Error())
+				a.notifyError(locales.SourceSheetImportFailed(err.Error()))
 			})
 			return
 		}
@@ -718,14 +751,14 @@ func (a *app) importSourceDefinitions(id source.ID) {
 		win.Update(func() {
 			defer a.refresh(win)
 			if err != nil {
-				a.notice = locales.SourceSheetImportFailed(err.Error())
+				a.notifyError(locales.SourceSheetImportFailed(err.Error()))
 				return
 			}
 			if err := a.srcConf.Set(string(id), map[string]string{"definitions": string(data)}); err != nil {
-				a.notice = locales.SourceSheetSourceError(sourceName(a, id), err.Error())
+				a.notifyError(locales.SourceSheetSourceError(sourceName(a, id), err.Error()))
 				return
 			}
-			a.notice = locales.SourceSheetImported(added)
+			a.notify(locales.SourceSheetImported(added))
 		})
 	}()
 }
@@ -744,7 +777,7 @@ func (a *app) exportSourceDefinitions(id source.ID) {
 		if err != nil {
 			win.Update(func() {
 				defer a.refresh(win)
-				a.notice = locales.SourceSheetSourceError(sourceName(a, id), err.Error())
+				a.notifyError(locales.SourceSheetSourceError(sourceName(a, id), err.Error()))
 			})
 			return
 		}
@@ -759,7 +792,7 @@ func (a *app) exportSourceDefinitions(id source.ID) {
 		if err := os.WriteFile(paths, data, 0o600); err != nil {
 			win.Update(func() {
 				defer a.refresh(win)
-				a.notice = locales.SourceSheetSourceError(sourceName(a, id), err.Error())
+				a.notifyError(locales.SourceSheetSourceError(sourceName(a, id), err.Error()))
 			})
 		}
 	}()

@@ -62,6 +62,10 @@ type Panel struct {
 	// List keeps the panel's scroll position and its rows' identity. Keying it
 	// by note ID follows a row when notes above it are removed.
 	List ui.ListState
+
+	// Touch gives the rows a finger's padding: the phone shows the panel as a
+	// sheet, where a row built for a pointer is a row a thumb misses.
+	Touch bool
 }
 
 // SelectedID returns the ID of the selected row, or "" when none is selected.
@@ -160,6 +164,9 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	e := p.Entries[i]
 	chosen := i == p.Selected
 	row := ui.Row(c).FillWidth().AlignItems(ui.Start).Radius(6).Padding(3, 4)
+	if p.Touch {
+		row.Padding(6, 4)
+	}
 	switch {
 	case e.Current:
 		row.Background(t.Accent.Alpha(0.14))

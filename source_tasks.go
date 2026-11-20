@@ -134,10 +134,10 @@ func (f *sourceSheet) finishDownload(a *app, saved acquire.Saved, err error) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		a.notice = locales.SourceSheetDownloadFailed(err.Error())
+		a.notifyError(locales.SourceSheetDownloadFailed(err.Error()))
 		return
 	}
-	a.notice = locales.SourceSheetDownloaded(saved.Title)
+	a.notify(locales.SourceSheetDownloaded(saved.Title))
 	if saved.Path != "" {
 		if a.pan != nil {
 			a.pan.ImportDir(filepath.Dir(saved.Path))

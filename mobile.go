@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -46,12 +47,18 @@ const (
 	// The reading bars take a finger's sizes: the bar at the head, the tools
 	// at the foot, and one target in either.
 	mobileHeaderHeight = 44
-	mobileFooterHeight = 66
+	// mobileFooterHeight is the tools' band and the progress pill under them.
+	// The folio's page label floats over the page above it, so the band does
+	// not keep a row for it.
+	mobileFooterHeight = 48
 	mobileCell         = 44
 	mobileToolHeight   = 40
 	mobileLabelHeight  = 18
 	mobileScrubHeight  = 8
 	mobileTabHeight    = 50
+	// mobileSheetTitleHeight is the sheet's own bar: the title in the middle
+	// and the close control at the right, under the grabber.
+	mobileSheetTitleHeight = 52
 
 	// A bottom inset taller than this is the keyboard rather than the system's
 	// bar, and the tab bar goes under it as the system's does.
@@ -124,13 +131,13 @@ func (a *app) mobileLibrary(c *ui.Context, t *ui.Theme) {
 	m := phoneMetricsFor(widthOf(c))
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		a.mobileTopBar(c, t)
-		if a.libTab != mobileTabSources {
-			a.mobileSearch(c, t)
-		}
-		if a.libTab == mobileTabSources {
+		switch a.libTab {
+		case mobileTabSources:
 			a.mobileSources(c, t)
-		} else {
-			a.mobileHome(c, t, m)
+		case mobileTabSearch:
+			a.mobileSearchScreen(c, t, m)
+		default:
+			a.mobileShelf(c, t, m)
 		}
 		a.mobileTabs(c, t)
 	})
@@ -142,75 +149,135 @@ func widthOf(c *ui.Context) float32 {
 	return w
 }
 
-// mobileTopBar is the large title of a phone's library, with the search at its
-// trailing end. It is the system's shape drawn by the app, so a desktop build
-// with the phone layout sees the same thing.
-func (a *app) mobileTopBar(c *ui.Context, t *ui.Theme) {
-	title := a.homeTitle()
-	if a.libTab == mobileTabSources {
-		title = locales.SidebarSources()
+// mobileTabTitle is the name of a destination, as the large title says it. The
+// library is the whole shelf, and home is what is being read and the year's
+// goals, so the two do not carry the same title.
+func (a *app) mobileTabTitle(tab int) string {
+	switch tab {
+	case mobileTabLibrary:
+		return locales.SidebarLibraryHeading()
+	case mobileTabSources:
+		return locales.SidebarSources()
+	case mobileTabSearch:
+		return locales.Search()
 	}
-	o := uimobile.TopBarOptions{Title: title, Large: true}
-	if a.libTab != mobileTabSources {
-		o.Trailing = func() {
-			a.mobileTopButton(c, icons.Search, locales.Search(), func() {
-				a.libSearch = !a.libSearch
-				if !a.libSearch {
-					a.libQuery = ""
-				}
-			})
-		}
-	}
-	uimobile.TopBar(c, o)
+	return locales.SidebarHome()
 }
 
-// mobileSearch is the library's search field under the title, while the
-// magnifier in the bar is on.
-func (a *app) mobileSearch(c *ui.Context, t *ui.Theme) {
-	if !a.libSearch {
-		return
-	}
+// mobileTopBar is the large title of a phone's library. It is the system's
+// shape drawn by the app, so a desktop build with the phone layout sees the
+// same thing. Search is a destination of its own in the tab bar, so the bar
+// has no trailing button.
+func (a *app) mobileTopBar(c *ui.Context, t *ui.Theme) {
+	uimobile.TopBar(c, uimobile.TopBarOptions{Title: a.mobileTabTitle(a.libTab), Large: true})
+}
+
+// mobileSearchScreen is the search destination: the shelf's own field at the
+// head and the books it matches under it. Only the shelf is searched: the
+// shops are another destination and need the network.
+func (a *app) mobileSearchScreen(c *ui.Context, t *ui.Theme, m homeMetrics) {
 	ui.Row(c).FillWidth().Padding(0, mobilePadding, 10, mobilePadding).Children(func() {
 		field := ui.SearchField(c, &a.libQuery).Label(locales.LibrarySearchLabel()).
 			Placeholder(locales.LibrarySearchPlaceholder()).FillWidth()
-		if field.Submitted() {
+		if a.searchFocus {
+			// The tab was just chosen: the field takes the keys and the keyboard
+			// comes up, once, so a tap on the field later still puts it away.
+			a.searchFocus = false
 			field.Focus()
 		}
 	})
+	query := strings.TrimSpace(a.libQuery)
+	if query == "" {
+		ui.Column(c).Grow(1).Center().Padding(32).Children(func() {
+			ui.Text(c, locales.LibrarySearchHint()).FontSize(13).
+				TextColor(t.TextMuted).TextAlign(ui.Center).MaxWidth(280)
+		})
+		return
+	}
+	entries := a.filteredShelf(3, a.libQuery)
+	ui.Scroll(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
+		ui.Column(c).FillWidth().Padding(0, 0, 28, 0).Children(func() {
+			a.mobileShelfGrid(c, t, m, "", locales.LibraryCount(len(entries)), entries, 0)
+		})
+	})
 }
 
-// mobileHome is the shelf in the middle of the phone: what is being read, then
-// the books in a grid, then how the reading year is going.
-func (a *app) mobileHome(c *ui.Context, t *ui.Theme, m homeMetrics) {
-	entries := a.shelf()
+// mobileShelf is the middle of the phone: home, which is what is being read
+// and the year's goals, or the library, which is the whole shelf with its
+// filters. A filter is not a destination of its own: it narrows the library.
+func (a *app) mobileShelf(c *ui.Context, t *ui.Theme, m homeMetrics) {
+	home := a.libTab == mobileTabHome
+	filter := a.libFilter
+	if home {
+		filter = 0
+	}
+	entries := a.filteredShelf(filter, "")
 	ui.Scroll(c).Grow(1).MinWidth(0).FillHeight().Background(t.Background).Children(func() {
 		ui.Column(c).FillWidth().Padding(0, 0, 28, 0).Children(func() {
-			if a.notice != "" || (a.status != "" && a.failed) {
+			if a.status != "" && a.failed {
 				ui.Column(c).FillWidth().Padding(4, m.padding, 0, m.padding).Children(func() {
-					if a.notice != "" {
-						ui.Text(c, a.notice).FontSize(12).TextColor(t.TextMuted)
-					}
-					if a.status != "" && a.failed {
-						ui.Text(c, a.status).FontSize(12).TextColor(t.Danger)
-					}
+					ui.Text(c, a.status).FontSize(12).TextColor(t.Danger)
 				})
 			}
-			if a.pan == nil || a.pan.Library == nil || len(entries) == 0 {
+			if a.pan == nil || a.pan.Library == nil || len(a.pan.Library.Entries) == 0 {
 				a.homeEmpty(c, t, m)
 				return
 			}
-			if a.libFilter == 0 {
-				top := m.firstGap
+			if home {
 				if recent := a.byLastRead(a.inProgress(entries)); len(recent) > 0 {
 					a.shelfBand(c, t, m, 0, m.firstGap, locales.ContinueReading(),
 						locales.BooksInProgress(len(recent)), recent)
-					top = m.bandGap
+				} else {
+					ui.Column(c).FillWidth().Padding(m.firstGap, m.padding, 0, m.padding).Children(func() {
+						ui.Text(c, locales.HomeNothingInProgress()).FontSize(13).
+							TextColor(t.TextMuted)
+					})
 				}
-				a.mobileShelfGrid(c, t, m, locales.AllBooks(), a.libraryLine(), entries, top)
 				a.goalsSection(c, t, m)
 				return
 			}
-			a.mobileShelfGrid(c, t, m, a.homeTitle(), a.libraryLine(), entries, m.firstGap)
+			a.mobileFilterRow(c, t, m)
+			a.mobileShelfGrid(c, t, m, "", locales.LibraryCount(len(entries)), entries, 0)
+		})
+	})
+}
+
+// mobileFilterRow is the library's own row: which books to show, and the order
+// to show them in. Both are always on screen, as a finger has no hover to bring
+// them out with.
+func (a *app) mobileFilterRow(c *ui.Context, t *ui.Theme, m homeMetrics) {
+	pal := a.chrome
+	ui.Row(c).FillWidth().Padding(6, m.padding, 0, m.padding).Gap(8).
+		AlignItems(ui.Center).Children(func() {
+		for _, f := range []struct {
+			filter int
+			label  string
+		}{{3, locales.SidebarAll()}, {1, locales.SidebarReading()}, {2, locales.SidebarFinished()}} {
+			f := f
+			chosen := a.libFilter == f.filter
+			chip := ui.Box(c).Height(32).Padding(0, 14).Radius(16).Center().
+				Cursor(ui.CursorPointer).Label(f.label)
+			ink := t.TextMuted
+			if chosen {
+				chip.Background(reader.UIColor(pal.Accent))
+				ink = reader.UIColor(pal.OnAccent)
+			} else {
+				chip.Background(t.SurfaceHover)
+			}
+			chip.OnClick(func() { a.libFilter = f.filter })
+			chip.Children(func() {
+				ui.Text(c, f.label).FontSize(13).FontWeight(600).TextColor(ink)
+			})
+		}
+		ui.Spacer(c)
+		sort := ui.Box(c).Size(36, 36).Radius(10).Center().
+			Cursor(ui.CursorPointer).Label(locales.Sort()).Tooltip(locales.SortTip())
+		if sort.Hovered() {
+			sort.Background(t.SurfaceHover)
+		}
+		sort.OnClick(func() { a.sortByTitle = !a.sortByTitle })
+		sort.Children(func() {
+			ui.Icon(c, icons.Sort).Size(18, 18).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -220,7 +287,9 @@ func (a *app) mobileHome(c *ui.Context, t *ui.Theme, m homeMetrics) {
 // row.
 func (a *app) mobileShelfGrid(c *ui.Context, t *ui.Theme, m homeMetrics, title, caption string, entries []library.Entry, top float32) {
 	ui.Column(c).FillWidth().Padding(top, m.padding, 0, m.padding).Children(func() {
-		ui.Text(c, title).FontSize(20).FontWeight(700).TextColor(t.Text)
+		if title != "" {
+			ui.Text(c, title).FontSize(20).FontWeight(700).TextColor(t.Text)
+		}
 		if caption != "" {
 			ui.Text(c, caption).FontSize(12).TextColor(t.TextMuted).SingleLine().
 				Padding(2, 0, 0, 0)
@@ -279,28 +348,14 @@ func (a *app) mobileRow(c *ui.Context, t *ui.Theme, icon *ui.SVG, label string, 
 	}
 }
 
-// mobileTopButton is one target in the library's title bar: 44 DIPs of a
-// finger's room around a 22 DIP glyph.
-func (a *app) mobileTopButton(c *ui.Context, icon *ui.SVG, label string, onClick func()) ui.Element {
-	t := c.Theme()
-	b := ui.Box(c).Size(mobileCell, mobileCell).Radius(mobileCell / 2).Center().
-		Cursor(ui.CursorPointer).Label(label).KeepFocus().OnClick(onClick)
-	if b.Hovered() {
-		b.Background(t.SurfaceHover)
-	}
-	b.Children(func() {
-		ui.Icon(c, icon).Size(22, 22).TextColor(t.Text)
-	})
-	return b
-}
-
-// The library's destinations on a phone. They are the source list's filters and
-// its way into the shops, as the system's own library has a bar at its foot.
+// The library's destinations on a phone: what to read next, the whole shelf,
+// the shops, and the shelf's search. The library's filters narrow the shelf
+// instead of taking a destination each.
 const (
 	mobileTabHome = iota
-	mobileTabAll
-	mobileTabReading
+	mobileTabLibrary
 	mobileTabSources
+	mobileTabSearch
 )
 
 // mobileTab is the name and glyph of one destination.
@@ -312,9 +367,9 @@ type mobileTab struct {
 func mobileTabItems() []mobileTab {
 	return []mobileTab{
 		{locales.SidebarHome(), icons.House},
-		{locales.SidebarAll(), icons.Grid},
-		{locales.SidebarReading(), icons.Half},
+		{locales.SidebarLibraryHeading(), icons.Grid},
 		{locales.SidebarSources(), icons.Globe},
+		{locales.Search(), icons.Search},
 	}
 }
 
@@ -356,10 +411,13 @@ func (a *app) mobileTab(c *ui.Context, t *ui.Theme, i int, tab mobileTab) {
 		switch i {
 		case mobileTabHome:
 			a.libFilter = 0
-		case mobileTabAll:
-			a.libFilter = 3
-		case mobileTabReading:
-			a.libFilter = 1
+		case mobileTabLibrary:
+			if a.libFilter == 0 {
+				a.libFilter = 3
+			}
+		case mobileTabSearch:
+			// The tab is a search screen: the field takes the keyboard as it opens.
+			a.searchFocus = true
 		}
 		a.goalsOpen = false
 	})
@@ -381,13 +439,22 @@ func (a *app) mobileHeader(c *ui.Context, t *ui.Theme) {
 	row.Children(func() {
 		a.mobilePaperButton(c, icons.ChevronLeft, locales.BackToLibrary(), a.leaveBook)
 		ui.Spacer(c)
-		name := ui.Box(c).Absolute().Left(mobileCell).Right(2*mobileCell + 4).Top(0).Bottom(0).
+		name := ui.Box(c).Absolute().Left(mobileCell).Right(mobileCell + 4).Top(0).Bottom(0).
 			Center().PassThrough()
 		name.Children(func() {
-			if a.book != nil {
+			if a.book == nil {
+				return
+			}
+			// The name and what is left of the chapter: the second line is the
+			// figure the desk keeps at the foot, and the bar is where a phone has
+			// room for it without covering the page.
+			ui.Column(c).Gap(0).Center().Children(func() {
 				ui.Text(c, a.book.Title).FontSize(15).FontWeight(600).
 					TextColor(t.Text).SingleLine().Ellipsis("…")
-			}
+				if left := a.chapterPagesLeft(); left != "" {
+					ui.Text(c, left).FontSize(10).TextColor(t.TextMuted).SingleLine()
+				}
+			})
 		})
 		var aa ui.Element
 		aa = a.mobilePaperTextButton(c, "Aa", locales.ThemesSettings(), func() {
@@ -395,39 +462,20 @@ func (a *app) mobileHeader(c *ui.Context, t *ui.Theme) {
 			a.syncSettingsFields()
 		})
 		a.settingsPanel(c, aa)
-		on := a.bookmarkedAt()
-		label, tip := locales.AddBookmark(), locales.AddBookmarkTip()
-		if on {
-			label, tip = locales.RemoveBookmark(), locales.RemoveBookmarkTip()
-		}
-		a.mobilePaperButtonColored(c, icons.Bookmark, label, tip, func() { a.toggleBookmark() }, on)
 	})
 }
 
 // mobilePaperButton is one target on the paper's bar: 44 DIPs, with the wash a
 // pressed control takes.
 func (a *app) mobilePaperButton(c *ui.Context, icon *ui.SVG, label string, onClick func()) ui.Element {
-	return a.mobilePaperButtonColored(c, icon, label, "", onClick, false)
-}
-
-// mobilePaperButtonColored is mobilePaperButton, its glyph in the accent when
-// the control is on, as the ribbon is while the page is bookmarked.
-func (a *app) mobilePaperButtonColored(c *ui.Context, icon *ui.SVG, label, tip string, onClick func(), on bool) ui.Element {
 	pal := a.chrome
 	b := ui.Box(c).Size(mobileCell, mobileCell).Radius(mobileCell / 2).Center().
 		Cursor(ui.CursorPointer).Label(label).KeepFocus().OnClick(onClick)
-	if tip != "" {
-		b.Tooltip(tip)
-	}
 	if b.Hovered() {
 		b.Background(reader.UIColor(pal.Hover))
 	}
-	ink := reader.UIColor(pal.OnToolbar)
-	if on {
-		ink = reader.UIColor(pal.Accent)
-	}
 	b.Children(func() {
-		ui.Icon(c, icon).Size(22, 22).TextColor(ink)
+		ui.Icon(c, icon).Size(22, 22).TextColor(reader.UIColor(pal.OnToolbar))
 	})
 	return b
 }
@@ -446,9 +494,10 @@ func (a *app) mobilePaperTextButton(c *ui.Context, text, label string, onClick f
 	return b
 }
 
-// mobileFolio is the foot of a phone's page: the place and the chapter in small
-// type, then the tools a thumb reaches — contents, search, the ribbon and the
-// notes — and the book's progress under them.
+// mobileFolio is the foot of a phone's page: the tools a thumb reaches —
+// contents, search, the ribbon and the notes — and the book's progress under
+// them. The page and what is left of the chapter are not a band of it: they
+// float over the paper above the tools (see mobilePageLabels).
 func (a *app) mobileFolio(c *ui.Context, t *ui.Theme) {
 	pal := a.chrome
 	w, _ := c.Size()
@@ -456,22 +505,6 @@ func (a *app) mobileFolio(c *ui.Context, t *ui.Theme) {
 		Background(a.paperColor())
 	bar.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
 	bar.Children(func() {
-		ui.Row(c).FillWidth().Height(mobileLabelHeight).Padding(0, mobilePadding).
-			AlignItems(ui.Center).Children(func() {
-			a.folioNav(c, t)
-			ui.Spacer(c)
-			label := a.pageLabel()
-			if hint := a.selectionHint(); hint != "" && !a.showCover {
-				label = hint
-			} else if msg := a.transientStatus(); msg != "" {
-				label = msg
-			}
-			ui.Text(c, label).FontSize(11).TextColor(reader.UIColor(pal.Muted)).SingleLine()
-			ui.Spacer(c)
-			if left := a.chapterPagesLeft(); left != "" && a.layout != nil {
-				ui.Text(c, left).FontSize(11).TextColor(reader.UIColor(pal.Muted)).SingleLine()
-			}
-		})
 		ui.Row(c).FillWidth().Height(mobileToolHeight).Children(func() {
 			a.mobileTool(c, icons.ListBullet, locales.PanelContents(), func() {
 				a.togglePanel(appstate.SidebarToc)
@@ -513,6 +546,141 @@ func (a *app) mobileTool(c *ui.Context, icon *ui.SVG, label string, onClick func
 	b.Children(func() {
 		ui.Icon(c, icon).Size(22, 22).TextColor(ink)
 	})
+}
+
+// mobilePageLabels floats the folio's page over the paper, above the tools at
+// the foot: it takes no band of the sheet, so the text keeps its measure. What
+// is left of the chapter is the bar's second line under the book's name (see
+// mobileHeader), which is where a phone has room for it without covering the
+// page.
+func (a *app) mobilePageLabels(c *ui.Context, t *ui.Theme) {
+	if a.book == nil || a.layout == nil || a.showCover {
+		return
+	}
+	muted := reader.UIColor(a.chrome.Muted)
+	label := a.pageLabel()
+	if hint := a.selectionHint(); hint != "" {
+		label = hint
+	} else if msg := a.transientStatus(); msg != "" {
+		label = msg
+	}
+	bottom := ui.Box(c).Absolute().Left(0).Right(0).Bottom(mobileFooterHeight + 2).
+		Height(mobileLabelHeight).Center().PassThrough()
+	bottom.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
+	bottom.Children(func() {
+		ui.Text(c, label).FontSize(11).TextColor(muted).SingleLine()
+	})
+	if a.nav.canBack() || a.nav.canForward() {
+		// The jumps stay at the foot's start, where a thumb that scrolls the page
+		// is not: they are a way back through the places the reader visited.
+		nav := ui.Row(c).Absolute().Left(0).Bottom(mobileFooterHeight+2).
+			Height(mobileLabelHeight).Padding(0, 8).AlignItems(ui.Center)
+		nav.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
+		nav.Children(func() { a.folioNav(c, t) })
+	}
+}
+
+// mobileSheet is the phone's shape of a panel: a sheet that comes up from the
+// bottom edge, as wide as the screen, with the grabber its system draws, the
+// panel's name in the middle and a close control at the right.
+//
+// detents are the heights it rests at, as shares of the screen. Dragging it
+// down, a tap outside it, or back closes it, which sets *open to false: the
+// caller keeps its own state in step with that.
+func (a *app) mobileSheet(c *ui.Context, open *bool, title string, detents []float32, content func()) {
+	t := c.Theme()
+	bg := t.Background
+	uimobile.Sheet(c, open, uimobile.SheetOptions{
+		Detents:    detents,
+		Background: &bg,
+		Label:      title,
+	}, func() {
+		a.mobileSheetTitle(c, t, title, open)
+		content()
+	})
+}
+
+// mobileSheetTitle is the bar at the head of a sheet: the name in the middle,
+// the close control at the right, and a hairline under them.
+func (a *app) mobileSheetTitle(c *ui.Context, t *ui.Theme, title string, open *bool) {
+	ui.Row(c).FillWidth().Height(mobileSheetTitleHeight).Padding(0, 8).
+		AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(mobileCell)
+		ui.Text(c, title).FontSize(15).FontWeight(600).TextColor(t.Text).
+			Grow(1).Basis(0).TextAlign(ui.Center).SingleLine()
+		close := ui.Box(c).Size(mobileCell, mobileCell).Radius(mobileCell / 2).Center().
+			Cursor(ui.CursorPointer).Label(locales.Close())
+		if close.Hovered() {
+			close.Background(t.SurfaceHover)
+		}
+		close.OnClick(func() { *open = false })
+		close.Children(func() {
+			ui.Icon(c, icons.Close).Size(18, 18).TextColor(t.TextMuted)
+		})
+	})
+	ui.Box(c).FillWidth().Height(1).Background(t.Border)
+}
+
+// phoneToasts builds the window's notifications where a phone can see them:
+// above the bar at the foot of the screen — the tab bar, or the tools under a
+// page — and above an open sheet, which covers that place. The desk keeps the
+// theme's own viewport, which already sits at the foot.
+func (a *app) phoneToasts(c *ui.Context) {
+	if !a.compact(c) {
+		return
+	}
+	t := c.Theme()
+	fill, ink := t.Inverse, t.InverseText
+	if fill.A == 0 {
+		fill, ink = t.Text, t.Background
+	}
+	_, top, _, bottom := c.SafeArea()
+	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
+		viewport.Padding(0, mobilePadding).Gap(8).AlignItems(ui.Center)
+		switch {
+		case a.sheetShowing():
+			// A sheet covers the foot of the screen, so its messages stand above
+			// it, clear of the status bar.
+			viewport.Justify(ui.Start).Padding(top+8, mobilePadding, 0, mobilePadding)
+		case a.book != nil:
+			// Above the page's own figure, so the two answers do not sit on top of
+			// one another.
+			viewport.Bottom(a.footerRoom(c) + mobileLabelHeight + 6)
+		default:
+			viewport.Bottom(mobileTabHeight + bottom + 10)
+		}
+		for _, ts := range toasts {
+			toast := ui.ToastBase(c, ts)
+			box := toast.Root.Row().AlignItems(ui.Center).Gap(8).
+				Padding(10, 16).Radius(10).MaxWidth(max(widthOf(c)-2*mobilePadding, 200)).
+				Background(fill).TextColor(ink)
+			box.Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.25))
+			box.Children(func() {
+				if ts.Description == "" {
+					ui.Text(c, ts.Title).FontSize(13).TextColor(ink)
+					return
+				}
+				ui.Column(c).Shrink(1).Gap(2).Children(func() {
+					ui.Text(c, ts.Title).FontSize(13).FontWeight(600).TextColor(ink)
+					ui.Text(c, ts.Description).FontSize(12).TextColor(ink.Alpha(0.75))
+				})
+			})
+			if left := toast.Left(); left > 0 {
+				// The next frame closes it: the engine only takes an expired toast
+				// out while building, so ask for the build that does.
+				c.After(left)
+			}
+		}
+	})
+}
+
+// sheetShowing reports whether a sheet or a dialog is over the window, which is
+// where a phone's messages would be hidden.
+func (a *app) sheetShowing() bool {
+	if a.panSheet || a.aaOpen || a.goalsOpen || a.removeOpen {
+		return true
+	}
+	return a.find != nil && (a.find.shown || a.find.settingsOpen)
 }
 
 // phoneMetricsFor measures the library for a W-wide phone: a margin of 16, and
