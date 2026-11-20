@@ -1,0 +1,36 @@
+name: iOS IPA
+
+# 只做一件事：吐出一个未签名的 device .ipa（unsigned），拿去用 Sideloadly /
+# AltStore 免费 Apple ID 重签后插线安装，或者越狱设备 / TrollStore 直接装。
+#
+# 运行：push 到 main，或 Actions 页面手动 Run workflow。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Unsigned IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Report Xcode
+        run: xcodebuild -version
+
+      - name: Build the unsigned IPA
+        run: bash .github/scripts/build-unsigned-ipa.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-unsigned-ipa
+          path: build/ios-arm64/*-unsigned.ipa
+          if-no-files-found: error
