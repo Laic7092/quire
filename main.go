@@ -103,9 +103,10 @@ type app struct {
 	themeSys bool
 	status   string
 	statusAt time.Time
-	// notice is a non-fatal message the home screen shows, such as a recovered
-	// state file. Unlike status it is not an error and stays in normal ink.
-	notice    string
+	// notices are the short-lived messages waiting for the next frame, which is
+	// the only place a toast can be added: a task that finishes off the UI
+	// thread, or a launch that has not built a window yet, queues here.
+	notices   []toastNotice
 	file      string
 	startPath string
 
@@ -351,9 +352,19 @@ type app struct {
 	libQuery    string
 	libSideOff  bool
 	sortByTitle bool
-	// libTab is the phone library's bottom bar: Home, All, Reading or Sources.
-	// It chooses the filter the shelf is listed under, so the two never disagree.
+	// libTab is the phone library's bottom bar: home, the shelf, the shops or the
+	// shelf's search. It chooses which screen shows; the library's own filter
+	// narrows the shelf and is not a destination of its own.
 	libTab int
+	// searchFocus asks the search screen's field to take the keys on the frame
+	// after its tab was chosen, once, so the keyboard comes up as it opens.
+	searchFocus bool
+	// panSheet is the phone's reading panel, opened as a sheet: mobile.Sheet
+	// closes it by clearing this, and the panel follows (see panels). panSheetSide
+	// is the panel the sheet was opened for, so a rebuild does not reopen what
+	// the reader just closed.
+	panSheet     bool
+	panSheetSide string
 
 	// goalBooks and goalDays are the reading goals the home screen measures
 	// against: books a year, days a week. goalsOpen is the small panel that
@@ -771,6 +782,48 @@ func (a *app) transientStatus() string {
 		return ""
 	}
 	return a.status
+}
+
+// toastNotice is a message waiting for the next build, which is the only pass
+// that can add it: a toast belongs to a window's frame.
+type toastNotice struct {
+	text, kind string
+}
+
+// notify queues the outcome of what the reader just did — a book removed from
+// the shelf, a download that finished — to show as the toolkit's own toast at
+// the foot of the window. It replaces the lines the home page used to keep for
+// good: an answer to an action is not part of the library.
+func (a *app) notify(text string) { a.notifyKind(text, "success") }
+
+// notifyError queues a message that something failed: it shows in the danger
+// colour and for a little longer than an answer.
+func (a *app) notifyError(text string) { a.notifyKind(text, "error") }
+
+func (a *app) notifyKind(text, kind string) {
+	if text == "" {
+		return
+	}
+	a.notices = append(a.notices, toastNotice{text: text, kind: kind})
+	a.services.Invalidate()
+}
+
+// drainNotices hands the queued messages to the window's toasts. It runs at the
+// top of a build, before the view: the toasts' viewport is built after it, so a
+// message queued by the last frame's click shows in this one.
+func (a *app) drainNotices(c *ui.Context) {
+	if len(a.notices) == 0 {
+		return
+	}
+	pending := a.notices
+	a.notices = nil
+	for _, n := range pending {
+		timeout := 4 * time.Second
+		if n.kind == "error" {
+			timeout = 6 * time.Second
+		}
+		c.AddToast(ui.Toast{Title: n.text, Type: n.kind, Timeout: timeout})
+	}
 }
 
 // savePrefs writes the reading settings to the store.
@@ -1644,7 +1697,7 @@ func main() {
 	d.library = first
 	first.startPath = flag.Arg(0)
 	if recovered != "" {
-		first.notice = locales.StateRecovered(recovered)
+		first.notify(locales.StateRecovered(recovered))
 		log.Printf("store: damaged state backed up to %s", recovered)
 	}
 	if fontErr != nil {

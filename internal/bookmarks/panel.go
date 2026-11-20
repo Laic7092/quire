@@ -13,6 +13,7 @@ package bookmarks
 
 import (
 	"github.com/egoist/mygo/ui"
+	uimobile "github.com/egoist/mygo/ui/mobile"
 	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/internal/icons"
 	"github.com/laix/quire/internal/widgets"
@@ -57,6 +58,11 @@ type Panel struct {
 	// List keeps the panel's scroll position and its rows' identity. Keying it
 	// by bookmark ID follows a row when bookmarks above it are removed.
 	List ui.ListState
+
+	// Touch gives the rows a finger's height and makes the delete control a
+	// swipe rather than a pointer's hover: a phone has no pointer to rest on a
+	// row, and its long press marks text rather than opening a menu.
+	Touch bool
 }
 
 // SelectedID returns the ID of the selected row, or "" when none is selected.
@@ -136,14 +142,35 @@ func (p *Panel) current() bool {
 	return false
 }
 
-// row draws row i: the ribbon, the title and the place, and a delete control
-// that appears while the pointer rests on the row or the row is chosen. A
-// click on the row itself jumps; the delete control sits beside it, so one
+// row draws row i: the ribbon, the title and the place. A phone swipes the row
+// aside to reveal its delete action; a pointer rests on it and gets the same
+// control beside the row. Either way a click on the row itself jumps, so one
 // gesture never does both.
 func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 	e := p.Entries[i]
+	build := func() { p.rowContent(c, t, i) }
+	if p.Touch && p.OnRemove != nil {
+		uimobile.SwipeRow(c, nil, uimobile.SwipeOptions{
+			Trailing: []uimobile.SwipeAction{{
+				Label:       locales.DeleteBookmark(),
+				Destructive: true,
+				OnTap:       func() { p.OnRemove(e) },
+			}},
+		}, build)
+		return
+	}
+	build()
+}
+
+// rowContent is the row itself, in the row builder the swipe wraps.
+func (p *Panel) rowContent(c *ui.Context, t *ui.Theme, i int) {
+	e := p.Entries[i]
 	chosen := i == p.Selected
-	row := ui.Row(c).FillWidth().Height(46).AlignItems(ui.Center).Gap(2).
+	height := float32(46)
+	if p.Touch {
+		height = 56
+	}
+	row := ui.Row(c).FillWidth().Height(height).AlignItems(ui.Center).Gap(2).
 		Radius(6).Padding(0, 4)
 	switch {
 	case e.Current:
@@ -190,7 +217,7 @@ func (p *Panel) row(c *ui.Context, t *ui.Theme, i int) {
 			})
 		})
 
-		if p.OnRemove != nil && (row.Hovered() || chosen) {
+		if p.OnRemove != nil && !p.Touch && (row.Hovered() || chosen) {
 			// OnClick, not Clicked: the delete runs after the build, so the row
 			// it takes out of Entries is not one the list is still building.
 			widgets.IconButton(c, icons.Trash, locales.DeleteBookmark(), locales.DeleteBookmark()).

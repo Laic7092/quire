@@ -29,6 +29,10 @@ type Panel struct {
 	// pages (a scroll layout), rows show no page.
 	PageOf func(h Hit) (int, bool)
 
+	// Touch gives the rows a finger's padding: the phone shows the panel as a
+	// sheet, where a row built for a pointer is a row a thumb misses.
+	Touch bool
+
 	list ui.ListState
 	// shownQuery is the query the list was last positioned for. A new one
 	// starts the list at the top again: the rows are a different set, so the
@@ -143,6 +147,9 @@ func (p *Panel) row(c *ui.Context, i int) {
 
 	chosen := i == p.Selected
 	row := ui.Column(c).FillWidth().Gap(2).Padding(6, 8).Radius(6)
+	if p.Touch {
+		row.Padding(10, 8)
+	}
 	row.Background(widgets.RowBackground(c, row.Hovered(), chosen))
 	row.OnClick(func() {
 		p.Selected = i

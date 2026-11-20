@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laix/quire/internal/appstate"
 	"github.com/laix/quire/locales"
 )
 
@@ -59,8 +60,9 @@ func TestPhoneFingerDragsTheScrollingColumn(t *testing.T) {
 	}
 }
 
-// The phone's library is the tabbed one: the destinations at the foot choose
-// the filter, and the Mac source list is not built beside it.
+// The phone's library is the tabbed one: home, the shelf, the shops and the
+// shelf's search at the foot, and the Mac source list is not built beside it.
+// The shelf's filters are a row of the shelf, not destinations of their own.
 func TestPhoneLibraryUsesTheTabBar(t *testing.T) {
 	a := newWindow(t)
 	a.phone = true
@@ -75,11 +77,20 @@ func TestPhoneLibraryUsesTheTabBar(t *testing.T) {
 	if a.libTab != mobileTabHome || a.libFilter != 0 {
 		t.Fatalf("the library opens on tab %d, filter %d", a.libTab, a.libFilter)
 	}
-	if err := tt.Click(locales.SidebarAll()); err != nil {
-		t.Fatalf("the All destination is not in the bar: %v", err)
+	if err := tt.Click(locales.SidebarLibraryHeading()); err != nil {
+		t.Fatalf("the shelf destination is not in the bar: %v", err)
 	}
-	if a.libTab != mobileTabAll || a.libFilter != 3 {
-		t.Errorf("the All destination chose tab %d, filter %d", a.libTab, a.libFilter)
+	if a.libTab != mobileTabLibrary || a.libFilter != 3 {
+		t.Errorf("the shelf destination chose tab %d, filter %d", a.libTab, a.libFilter)
+	}
+	tt.Frame()
+	// The filters are chips of the shelf's own screen, and they narrow it
+	// without changing the destination.
+	if err := tt.Click(locales.SidebarReading()); err != nil {
+		t.Fatalf("the reading filter is not on the shelf: %v", err)
+	}
+	if a.libTab != mobileTabLibrary || a.libFilter != 1 {
+		t.Errorf("the reading filter chose tab %d, filter %d", a.libTab, a.libFilter)
 	}
 	// The shops the Mac source list holds are a screen of their own, and its
 	// rows are built without a Mac sidebar behind them.
@@ -92,6 +103,17 @@ func TestPhoneLibraryUsesTheTabBar(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(locales.MenuOpen()) {
 		t.Error("the Sources screen does not offer the way to open a book")
+	}
+	// Search is its own destination, and it searches the shelf, not the shops.
+	if err := tt.Click(locales.Search()); err != nil {
+		t.Fatalf("the search destination is not in the bar: %v", err)
+	}
+	if a.libTab != mobileTabSearch {
+		t.Errorf("the search destination chose tab %d", a.libTab)
+	}
+	tt.Frame()
+	if !tt.HasText(locales.LibrarySearchHint()) {
+		t.Errorf("the search screen has no hint: %q", tt.Texts())
 	}
 }
 
@@ -629,5 +651,152 @@ func TestWheelAskDropsTheFlick(t *testing.T) {
 	}
 	if want := float32(800); math.Abs(float64(a.scrollY-want)) > 2 {
 		t.Errorf("the column stands at %.0f, want %.0f", a.scrollY, want)
+	}
+}
+
+// advanceFrames lets the window's animations run for d, as the toolkit's own
+// tests do: a sheet comes up from below the window over a moment, not in one
+// frame.
+func advanceFrames(tt *ui.Tester, d time.Duration) {
+	for range int(d / (16 * time.Millisecond)) {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+	}
+}
+
+// countNamed counts the elements a screen reader sees under name.
+func countNamed(tt *ui.Tester, name string) int {
+	n := 0
+	for _, info := range tt.AccessAll() {
+		if info.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// A phone has no pointer to rest on a cover, so the removal control the pointer
+// brings is not built: the way in is a finger held on the book, which asks the
+// question as the system's action sheet.
+func TestPhoneCoverRemovesByLongPress(t *testing.T) {
+	a := newWindow(t)
+	a.phone = true
+	a.book, a.doc, a.layout = nil, nil, nil
+	a.bookWindow = false
+	// The covers are the library's screen, not home's.
+	a.libTab, a.libFilter = mobileTabLibrary, 3
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+	tt.Frame()
+
+	if tt.HasText(locales.ShelfRemove()) {
+		t.Fatalf("a phone's covers carry the pointer's remove control: %q", tt.Texts())
+	}
+	if len(a.pan.Library.Entries) == 0 {
+		t.Fatal("the sample library is empty")
+	}
+	title := a.pan.Library.Entries[0].Title
+	at, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("no cover for %q: %q", title, tt.Texts())
+	}
+	x, y := at.X+at.W/2, at.Y+at.H/2
+	tt.FingerDown(x, y)
+	tt.Advance(600 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText(locales.ShelfRemoveTitle(title)) {
+		t.Fatalf("a long press on a cover asked nothing: %q", tt.Texts())
+	}
+	tt.FingerUp(x, y)
+	tt.Frame()
+	if a.book != nil {
+		t.Fatal("the long press opened the book")
+	}
+}
+
+// The reading page keeps one ribbon, in the tools at its foot. The bar at the
+// head is the way back, the name and the display settings, as a page has no
+// room for the same control twice.
+func TestPhoneReadingPageHasOneRibbon(t *testing.T) {
+	a := newWindow(t)
+	a.phone = true
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+	tt.Frame()
+
+	name := locales.AddBookmark()
+	if !a.bookmarkedAt() {
+		if got := countNamed(tt, name); got != 1 {
+			t.Errorf("the page shows %d %q controls, want the one in the tools", got, name)
+		}
+		return
+	}
+	name = locales.RemoveBookmark()
+	if got := countNamed(tt, name); got != 1 {
+		t.Errorf("the page shows %d %q controls, want the one in the tools", got, name)
+	}
+}
+
+// A reading panel is a sheet on a phone: full width from the bottom edge, with
+// its name and a close control above the list, and closing it closes the panel
+// too, rather than leaving the app with a panel open and no sheet.
+func TestPhonePanelOpensAsSheet(t *testing.T) {
+	a := newWindow(t)
+	a.phone = true
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+	tt.Frame()
+
+	a.togglePanel(appstate.SidebarToc)
+	// The sheet comes up from below the window over a moment, not at once.
+	tt.Frame()
+	advanceFrames(tt, 2*time.Second)
+	if !a.pan.Showing() {
+		t.Fatal("the panel did not open")
+	}
+	if !a.panSheet {
+		t.Fatal("the phone opened the panel as anything but a sheet")
+	}
+	if !tt.HasText(locales.PanelContents()) || !tt.HasText(locales.Close()) {
+		t.Fatalf("the sheet has no name or no close control: %q", tt.Texts())
+	}
+	if err := tt.Click(locales.Close()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	tt.Frame()
+	if a.pan.Showing() {
+		t.Error("closing the sheet left the panel open")
+	}
+	if a.panSheet {
+		t.Error("closing the sheet left its state open")
+	}
+}
+
+// The display settings are a sheet on a phone too: the Aa opens a panel a thumb
+// can dismiss, not a popover under a control at the top of the screen.
+func TestPhoneDisplaySettingsOpenAsSheet(t *testing.T) {
+	a := newWindow(t)
+	a.phone = true
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+	tt.Frame()
+
+	if err := tt.Click(locales.ThemesSettings()); err != nil {
+		t.Fatalf("the Aa is not in the bar: %v (%q)", err, tt.Texts())
+	}
+	tt.Frame()
+	advanceFrames(tt, 2*time.Second)
+	if !a.aaOpen {
+		t.Fatal("the Aa opened no settings")
+	}
+	if !tt.HasText(locales.Close()) {
+		t.Fatalf("the settings have no way to close as a sheet: %q", tt.Texts())
+	}
+	if err := tt.Click(locales.Close()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	tt.Frame()
+	if a.aaOpen {
+		t.Error("closing the sheet left the settings open")
 	}
 }

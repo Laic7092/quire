@@ -132,12 +132,18 @@ func (a *app) view(c *ui.Context) {
 	// Menu commands run outside the build and still need the clipboard and a
 	// way to ask for a frame.
 	a.services = c.Services()
+	// Messages queued since the last frame (a book removed, a download done)
+	// become the window's toasts, which the toolkit builds after this view.
+	a.drainNotices(c)
 	// The draw callback of this frame is the one the box built here keeps: it
 	// must not step the column a second time (see drawSheet).
 	a.frameBuilt = true
 	a.syncMenu()
 	a.keys(c)
 	t := a.applyTheme(c)
+	// The toasts stand on the window's own colours: the library's desk or the
+	// paper of the book being read (see phoneToasts).
+	a.phoneToasts(c)
 	a.settle(c)
 	a.settleSheet(c)
 	if a.turning != nil {
@@ -181,6 +187,11 @@ func (a *app) view(c *ui.Context) {
 		// opening a panel never reflows the book.
 		a.reader(c, t)
 		a.header(c, t)
+		if a.compact(c) {
+			// The phone's folio floats its figures over the paper instead of
+			// keeping a band for them (see mobilePageLabels).
+			a.mobilePageLabels(c, t)
+		}
 		a.panels(c)
 	})
 	// The question that comes before a book leaves the shelf lies over whatever
@@ -508,23 +519,52 @@ func (a *app) titleRoom(c *ui.Context) titlePlace {
 // every DIP of its measure while the panel is open: opening one never reflows
 // the book.
 func (a *app) panels(c *ui.Context) {
-	if a.pan == nil || !a.pan.Showing() {
+	if a.pan == nil {
+		return
+	}
+	if a.phone {
+		// A finger needs a bigger row than a pointer does, whether the panel is
+		// the desk's card or the phone's sheet.
+		a.pan.Toc.Touch = true
+		a.pan.Bookmarks.Touch = true
+		a.pan.Notes.Touch = true
+		a.pan.Search.Touch = true
+	}
+	if !a.pan.Showing() {
+		// The sheet's state is the panel's: a panel closed from the toolbar (or
+		// by a jump) puts the next opening back at the bottom edge.
+		a.panSheet, a.panSheetSide = false, ""
+		return
+	}
+	if a.compact(c) {
+		// A phone floats the panel as a sheet from the bottom edge, full width
+		// and as tall as a thumb can drag it, with its name and a way to close it
+		// above the list (see mobileSheet). The page keeps its measure either way.
+		//
+		// The sheet is opened by choosing a panel, not by rebuilding it: a sheet
+		// the reader closed clears panSheet, and setting it back here on the next
+		// frame would open what they just put away.
+		if a.panSheetSide != a.pan.Sidebar {
+			a.panSheetSide = a.pan.Sidebar
+			a.panSheet = true
+		}
+		a.mobileSheet(c, &a.panSheet, a.pan.Title(), []float32{0.55, 0.9}, func() {
+			a.pan.View(c)
+		})
+		if !a.panSheet {
+			a.pan.Show(appstate.SidebarNone)
+			a.panSheetSide = ""
+		}
 		return
 	}
 	pal := a.chrome
-	// On a phone the panel is a card over the page still, but it keeps clear of
-	// the bar at the head and the bar of tools at the foot, and takes all the
-	// width the margins leave it rather than a Mac panel's 300 DIPs.
-	top, bottom, width := a.barRoom(c)+panelTop, float32(panelMargin), float32(panelWidth)
-	if a.compact(c) {
-		bottom = a.footerRoom(c) + panelTop
-		if w, _ := c.Size(); w > 0 {
-			width = min(width, w-2*panelMargin)
-		}
-	}
+	// The desk floats the panel over the page in a card at the left, clear of
+	// the bar at the head and inset from the window's edges: opening one never
+	// reflows the book.
+	top := a.barRoom(c) + panelTop
 	card := ui.Box(c).Absolute().Left(panelMargin).Top(top).
-		Bottom(bottom).
-		Width(width).Radius(14).Background(reader.UIColor(pal.Popover)).
+		Bottom(panelMargin).
+		Width(panelWidth).Radius(14).Background(reader.UIColor(pal.Popover)).
 		Border(1, reader.UIColor(pal.Line)).Clip().
 		Shadow(0, 12, 32, 0, ui.RGBA(0, 0, 0, 0.24)).Label(a.pan.Title())
 	card.Children(func() {
@@ -738,10 +778,6 @@ func (a *app) home(c *ui.Context, t *ui.Theme, m homeMetrics) {
 			ui.Column(c).FillWidth().Padding(6, m.padding, 0, m.padding).Children(func() {
 				ui.Text(c, a.homeTitle()).Font(serifHead).FontSize(26).FontWeight(700).
 					TextColor(t.Text)
-				if a.notice != "" {
-					ui.Text(c, a.notice).FontSize(12).TextColor(t.TextMuted).
-						MaxWidth(600).Padding(6, 0, 0, 0)
-				}
 				if a.book == nil && a.status != "" && a.failed {
 					ui.Text(c, a.status).FontSize(12).TextColor(t.Danger).MaxWidth(600).
 						Padding(6, 0, 0, 0)
@@ -851,9 +887,11 @@ func (a *app) shelfBand(c *ui.Context, t *ui.Theme, m homeMetrics, row int, top 
 					ui.Icon(c, icons.ChevronRight).Size(12, 12).TextColor(t.TextMuted)
 				})
 				ui.Spacer(c)
-				// The order is a small control that appears with the pointer,
-				// so the band keeps Books' clean line otherwise.
-				if head.Hovered() {
+				// The order is a small control that appears with the pointer, so
+				// the band keeps Books' clean line otherwise. A phone has no
+				// pointer to rest on it: the library's own row carries the order
+				// there.
+				if !a.compact(c) && head.Hovered() {
 					if widgets.GlyphButton(c, icons.Sort, locales.Sort(), locales.SortTip()).Clicked() {
 						a.sortByTitle = !a.sortByTitle
 					}
@@ -905,8 +943,9 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 		})
 	}
 	// The control that takes the book off the shelf shows with the pointer, as a
-	// list row's does: removing a book is not what a click on a cover is for.
-	if board.Hovered() {
+	// list row's does: removing a book is not what a click on a cover is for. A
+	// phone has no pointer, so there the way in is a long press.
+	if !a.compact(c) && board.Hovered() {
 		board.Children(func() {
 			ui.Box(c).Absolute().Top(4).Right(4).Radius(6).
 				Background(t.Background.Alpha(0.9)).Children(func() {
@@ -916,6 +955,12 @@ func (a *app) bookCover(c *ui.Context, t *ui.Theme, m homeMetrics, e library.Ent
 				}
 			})
 		})
+	}
+	if a.phone && board.LongPressed() {
+		// A finger held on a cover asks the same question the pointer's control
+		// does, as a sheet from the bottom edge rather than a menu: there is one
+		// answer to give.
+		a.askRemoveBook(e)
 	}
 	if read := a.readProgress(e); read > 0 && read < 1 {
 		board.Children(func() {
@@ -940,7 +985,7 @@ func (a *app) removeBook(path, title string) {
 	if a.pan == nil || !a.pan.RemoveBook(path) {
 		return
 	}
-	a.notice = locales.ShelfRemoved(title)
+	a.notify(locales.ShelfRemoved(title))
 	if a.desk != nil {
 		// The book leaves every shelf, not just the one it was removed from.
 		a.desk.refreshShelves(a)
@@ -954,7 +999,39 @@ func (a *app) removeDialog(c *ui.Context, t *ui.Theme) {
 	if !a.removeOpen {
 		return
 	}
-	title := a.removeTitle
+	title, path := a.removeTitle, a.removePath
+	if a.compact(c) {
+		// A phone asks from the bottom edge, as the system asks: what leaves with
+		// the book, one destructive answer and a way back, all a thumb's size.
+		a.mobileSheet(c, &a.removeOpen, locales.ShelfRemove(), []float32{0.5}, func() {
+			ui.Column(c).FillWidth().Padding(4, 16, 16, 16).Gap(10).Children(func() {
+				ui.Text(c, locales.ShelfRemoveTitle(title)).FontSize(15).
+					FontWeight(600).TextColor(t.Text)
+				ui.Text(c, locales.ShelfRemoveHint()).FontSize(12).
+					TextColor(t.TextMuted)
+				ui.Box(c).FillWidth().Height(48).Radius(12).Center().
+					Background(t.Danger.Alpha(0.14)).Cursor(ui.CursorPointer).
+					Label(locales.ShelfRemoveConfirm()).
+					OnClick(func() {
+						a.removeOpen = false
+						a.removeBook(path, title)
+					}).Children(func() {
+					ui.Text(c, locales.ShelfRemoveConfirm()).FontSize(15).
+						FontWeight(600).TextColor(t.Danger)
+				})
+				ui.Box(c).FillWidth().Height(48).Radius(12).Center().
+					Background(t.SurfaceHover).Cursor(ui.CursorPointer).
+					Label(locales.Cancel()).
+					OnClick(func() { a.removeOpen = false }).Children(func() {
+					ui.Text(c, locales.Cancel()).FontSize(15).TextColor(t.Text)
+				})
+			})
+		})
+		if !a.removeOpen {
+			a.removePath, a.removeTitle = "", ""
+		}
+		return
+	}
 	ui.Modal(c, &a.removeOpen, func() {
 		ui.Column(c).Gap(8).MaxWidth(360).Children(func() {
 			ui.Text(c, locales.ShelfRemoveTitle(title)).FontSize(14).
@@ -1052,6 +1129,17 @@ func (a *app) goalsPanel(c *ui.Context, anchor ui.Element) {
 	if !a.goalsOpen {
 		return
 	}
+	if a.compact(c) {
+		a.mobileSheet(c, &a.goalsOpen, locales.GoalsTitle(), []float32{0.45}, func() {
+			ui.Column(c).FillWidth().Padding(10, 16, 16, 16).Gap(12).Children(func() {
+				a.goalChoices(c, locales.GoalBooksLabel(), locales.GoalBooksCell, []int{6, 12, 24, 52}, a.goalBooks,
+					func(n int) { a.setGoals(n, a.goalDays) })
+				a.goalChoices(c, locales.GoalDaysLabel(), locales.GoalDaysCell, []int{3, 5, 7}, a.goalDays,
+					func(n int) { a.setGoals(a.goalBooks, n) })
+			})
+		})
+		return
+	}
 	pal := a.chrome
 	ui.PopoverBase(c, anchor, &a.goalsOpen, func(panel ui.Element) {
 		panel.Width(212).Padding(10).Radius(12).Gap(8).
@@ -1124,14 +1212,21 @@ func (a *app) libraryLine() string {
 
 // shelf is the whole library as the current filter and query leave it.
 func (a *app) shelf() []library.Entry {
+	return a.filteredShelf(a.libFilter, a.libQuery)
+}
+
+// filteredShelf is the shelf narrowed by filter and query: 0 and 3 show every
+// book, 1 the ones being read, 2 the ones finished. The phone's search asks for
+// every book, whatever the library's own filter says.
+func (a *app) filteredShelf(filter int, query string) []library.Entry {
 	if a.pan == nil || a.pan.Library == nil {
 		return nil
 	}
-	entries := a.pan.Library.Filter(strings.TrimSpace(a.libQuery))
+	entries := a.pan.Library.Filter(strings.TrimSpace(query))
 	out := entries[:0:0]
 	for _, e := range entries {
 		read := a.readProgress(e)
-		switch a.libFilter {
+		switch filter {
 		case 1:
 			if read <= 0 || read >= 1 {
 				continue

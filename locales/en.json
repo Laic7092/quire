@@ -330,6 +330,18 @@
   "@librarySearchPlaceholder": {
     "description": "The placeholder of the library's search field."
   },
+  "librarySearchHint": "Type a title or an author to find a book on the shelf",
+  "@librarySearchHint": {
+    "description": "The hint on the library's search screen while no query is typed."
+  },
+  "homeNothingInProgress": "Nothing in progress — pick a book in your library",
+  "@homeNothingInProgress": {
+    "description": "What the phone's home screen says when no book has been started."
+  },
+  "close": "Close",
+  "@close": {
+    "description": "The label of a sheet's or panel's close button."
+  },
   "sidebarHome": "Home",
   "@sidebarHome": {
     "description": "The source list row and the title of the library's home page."
