@@ -61,7 +61,19 @@ quire 是 layx 的宿主探针：它把每一条"宿主不得不自己写"的代
 12. **MyGo 的几处控件契约。** `ui.Split` 没有最小宽度（页面被挤到小于三个页边距时
     `Layout` 直接失败）；`ui.Segmented` 的外观无法接管；`ui.Switch` 的绑定值点击后不
     变化；菜单快捷键先于视图 `Shortcut`（所以 `⌘C` 不能进菜单）；`Tester.Click(文字)`
-    点的是文字节点，整行可点必须把 `OnClick` 挂在带 `Label` 的祖先上。
+    点的是文字节点，整行可点必须把 `OnClick` 挂在带 `Label` 的祖先上；**手指在惯性
+    滑行中落下时，整个手势被吞掉**（见下条）。
+13. **触摸：惯性滑行中的第一下手指被吞，滚动要摸两次。** `ui/touch.go` 的
+    `platform.PointerDown` 里 `if rt.flinging.on { rt.flinging.on = false; t.swallow = true;
+    return true }`——这一下只用来刹住惯性，既不算点、也不开始拖动。而惯性按
+    `flingDecay = 0.998`/ms 衰减、到 `flingStop = 20` DIP/s 才停，一次 2000 DIP/s 的
+    快甩要**约 2.3 s**，这段时间里怎么摸都「滚不了第二次」。目录/搜索/笔记的 `ui.List`、
+    书库的 `ui.Scroll` 与书源结果都在这条上。
+    v0.10.0 与 main 都是这样，升级依赖无解。建议上游：按下停掉 fling 后照常进入
+    press/pan（拖动从惯性停下的位置接着走），只有「没移动就抬手」才不算点击（否则会
+    误触列表行）。阅读页已在宿主侧绕过（`mobile.go` 的 `takesFinger`：调一次
+    `PointerPosition()` 让书页成为 `flagTrackPointer`，引擎就不 pan 它，`PointerMove`
+    直接进 `handlePageInput`，于是既没有引擎 fling，也能按速度自己做惯性）。
 
 ## 宿主侧已经踩过的坑
 

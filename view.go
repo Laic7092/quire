@@ -1217,10 +1217,16 @@ func (a *app) readProgress(e library.Entry) float64 {
 //
 // The paper covers the whole window, the bars included; the text keeps the band
 // they leave it, so the measure the book is laid out at is the same whether the
-// bars are showing or away.
+// bars are showing or away. A phone's scrolling column is the exception: the
+// bars are a layer over it rather than a band it keeps clear of, so the column
+// takes the whole screen and slides under them (see phoneBars).
 func (a *app) reader(c *ui.Context, t *ui.Theme) {
+	top, bottom := a.barRoom(c), a.footerRoom(c)
+	if a.compact(c) && a.opts.Scroll {
+		top, bottom = 0, 0
+	}
 	ui.Column(c).Fill().MinWidth(0).Background(a.paperColor()).
-		Padding(a.barRoom(c), 0, a.footerRoom(c), 0).Bind(&a.surface).Children(func() {
+		Padding(top, 0, bottom, 0).Bind(&a.surface).Children(func() {
 		area := ui.Column(c).Grow(1).MinWidth(0).FillWidth().AlignItems(ui.Center).
 			Padding(0, pagePadding).Bind(&a.area).Children(func() {
 			wide := pageMaxWidth * float32(a.pagesOnSheet())
@@ -1229,16 +1235,25 @@ func (a *app) reader(c *ui.Context, t *ui.Theme) {
 				Cursor(a.linkCursor()).
 				HandleInput(a.handlePageInput).
 				Draw(a.drawSheet)
+			// A phone's page takes the finger's moves itself (see takesFinger).
+			a.takesFinger(box)
 			// Built after the page so it lies over the paper's edge: the strip
 			// takes the pointer for its whole width, not only where the page
 			// leaves it clear. The paper's own margin is under it, never text.
 			a.backEdge(c, t)
-			// Only a page has a selection to act on; the cover has none.
-			if a.layout != nil && !a.showCover {
+			// Only a page has a selection to act on; the cover has none. A
+			// desktop opens these on the secondary button, the menu key or
+			// Shift+F10. A phone has none of those, and its long press has to
+			// mark text rather than pop a menu over an empty page: there the
+			// finished selection asks for the card (see selectionMenu).
+			if a.layout != nil && !a.showCover && !a.phone {
 				box.ContextMenu(func(m *ui.Menu) { a.pageMenu(c, m) })
 			}
 			box.Children(func() {
 				if a.layout != nil {
+					if a.phone && a.selMenu {
+						a.selectionMenu(c)
+					}
 					return
 				}
 				message := a.status

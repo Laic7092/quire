@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/egoist/mygo"
@@ -25,7 +26,14 @@ import (
 // onPhone reports that the app runs on a phone's system. The layout asks the
 // window's width as well, so an iPad keeps the desk-like library and a desktop
 // build with a narrow window does not turn into a phone.
+//
+// QUIRE_MOBILE=1 makes a desktop build take the phone's shape too, so the
+// phone layout can be looked at without a simulator or a device: the window
+// comes up at 390×844 and the bars, gestures and covers follow the screen.
 var onPhone = func() bool {
+	if os.Getenv("QUIRE_MOBILE") != "" {
+		return true
+	}
 	return runtime.GOOS == "ios" || runtime.GOOS == "android"
 }
 
@@ -267,7 +275,6 @@ func (a *app) mobileRow(c *ui.Context, t *ui.Theme, icon *ui.SVG, label string, 
 		Disclosure: true,
 	})
 	if row.Clicked() {
-		mygo.Haptics.Selection()
 		onClick()
 	}
 }
@@ -355,7 +362,6 @@ func (a *app) mobileTab(c *ui.Context, t *ui.Theme, i int, tab mobileTab) {
 			a.libFilter = 1
 		}
 		a.goalsOpen = false
-		mygo.Haptics.Selection()
 	})
 	item.Children(func() {
 		ui.Icon(c, tab.icon).Size(23, 23).TextColor(ink)
@@ -367,8 +373,10 @@ func (a *app) mobileTab(c *ui.Context, t *ui.Theme, i int, tab mobileTab) {
 // name in the middle, and the display settings and the ribbon at the end. The
 // panels and search moved to the foot, where a thumb reaches them.
 func (a *app) mobileHeader(c *ui.Context, t *ui.Theme) {
+	// The paper is under it: the column slides beneath this bar, so it is a
+	// layer of its own and not a band the text keeps clear of.
 	row := ui.Row(c).Absolute().Left(0).Right(0).Top(0).Height(mobileHeaderHeight).
-		Padding(0, 4).AlignItems(ui.Center)
+		Padding(0, 4).AlignItems(ui.Center).Background(a.paperColor())
 	row.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
 	row.Children(func() {
 		a.mobilePaperButton(c, icons.ChevronLeft, locales.BackToLibrary(), a.leaveBook)
@@ -444,7 +452,8 @@ func (a *app) mobilePaperTextButton(c *ui.Context, text, label string, onClick f
 func (a *app) mobileFolio(c *ui.Context, t *ui.Theme) {
 	pal := a.chrome
 	w, _ := c.Size()
-	bar := ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Height(mobileFooterHeight)
+	bar := ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Height(mobileFooterHeight).
+		Background(a.paperColor())
 	bar.AnimatePose(chromePose(a.chromeTarget()), ui.Animation{Duration: chromeFade})
 	bar.Children(func() {
 		ui.Row(c).FillWidth().Height(mobileLabelHeight).Padding(0, mobilePadding).
@@ -538,4 +547,19 @@ func (a *app) phoneStartColor() string {
 		pal = reader.ForTheme(a.paperTheme(dark))
 	}
 	return fmt.Sprintf("#%02x%02x%02x", pal.Desk.R, pal.Desk.G, pal.Desk.B)
+}
+
+// takesFinger gives the page the finger's own moves on a phone, rather than
+// letting the toolkit pan the window: a page paints its own text, so dragging
+// the scrolling column and dragging out a selection are its gestures, not the
+// window's. Without it the toolkit pans, and its fling swallows the touch that
+// comes to stop it — a second drag right after the first would do nothing, and
+// a long press would pan instead of mark text.
+func (a *app) takesFinger(box ui.Element) {
+	if !a.phone {
+		return
+	}
+	// Asking where the pointer is is what marks the element as one that follows
+	// it (ui's flagTrackPointer); the position itself is of no use here.
+	box.PointerPosition()
 }

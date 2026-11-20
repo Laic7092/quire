@@ -74,6 +74,8 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 		a.pressAt = a.clock()
 		a.selMoved = false
 		a.selDragging = true
+		a.hapticPlayed = false
+		a.selMenu = false
 		a.swipePage = false
 		a.dragScroll = false
 		return true
@@ -116,6 +118,9 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			}
 		}
 		if dx > clickSlop || dx < -clickSlop || dy > clickSlop || dy < -clickSlop {
+			if !a.selMoved {
+				a.longPressHaptic()
+			}
 			a.selMoved = true
 		}
 		loc, ok := a.pageLocation(ev.X, ev.Y)
@@ -139,7 +144,6 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 				delta = -1
 			}
 			a.turn(delta)
-			mygo.Haptics.Light()
 			return true
 		}
 		if !a.selDragging {
@@ -163,13 +167,20 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 					a.toggleChrome()
 				case !a.scrolling():
 					a.turn(zone)
-					mygo.Haptics.Light()
 				}
 				return true
 			}
 			if !a.scrolling() {
 				a.turn(a.turnAt(a.pressX))
 			}
+		}
+		if a.phone && a.selMoved && len(a.selQuads) > 0 {
+			// The selection is made, so now its commands come: the card opens
+			// at the finger that finished it. Nothing opens it before that —
+			// a long press on the page selects, it does not pop a menu over
+			// an empty page.
+			a.pressX, a.pressY = ev.X, ev.Y
+			a.selMenu = true
 		}
 		return true
 	}
@@ -178,8 +189,10 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 
 // touchHold is how long a finger may stay still on the sheet before its drag is
 // taken as selecting text rather than as scrolling the column or turning the
-// page. It is about the system's own long-press.
-const touchHold = 350 * time.Millisecond
+// page. It is the system's own long press, half a second: any shorter and a
+// reader who lands a thumb and thinks for a moment before dragging gets a
+// selection where they meant to scroll.
+const touchHold = 500 * time.Millisecond
 
 // swipePageMin is how far a finger must go sideways before a paged book reads
 // it as a swipe rather than as a tap.
@@ -210,14 +223,16 @@ func (a *app) dragScrollTo(ev ui.InputEvent) {
 	a.scrollNow(a.dragFrom - (ev.Y - a.pressY))
 }
 
-// endScrollDrag lets the column keep the finger's speed for a moment, as a
-// fling, and then settle.
+// endScrollDrag carries the column on with the speed the finger lifted with: a
+// flick, whose motion the frames spend as it decays (see startFling).
 func (a *app) endScrollDrag() {
 	a.dragScroll = false
 	a.selDragging = false
-	if absf(a.dragV) > 120 {
-		a.scrollBy(a.dragV * 0.12)
+	if a.clock().Sub(a.dragAt) > flingIdle {
+		// The finger rested before it let go: it stopped, and a stop is no flick.
+		a.dragV = 0
 	}
+	a.startFling(a.dragV)
 	a.dragV = 0
 }
 
@@ -226,7 +241,27 @@ func (a *app) endScrollDrag() {
 // for the room.
 func (a *app) toggleChrome() {
 	a.chromeAway = !a.chromeAway
-	mygo.Haptics.Light()
+}
+
+// playHaptic is the app's only road to the phone's motor. It is a variable so a
+// test can count what a gesture asks for without a device in the hand.
+var playHaptic = func() { mygo.Haptics.Selection() }
+
+// longPressHaptic is the one gesture that earns a haptic: a finger that stays
+// still on the page until the hold is a selection starts, and then moves. It
+// ticks once per press, however far the finger then drags.
+//
+// Everything else is silent on purpose. Turning a page, swiping, a tap, a tab
+// or a chrome toggle are things a reader does dozens of times a minute; a motor
+// under the thumb for each of them is noise, not feedback. So no other call
+// site plays a haptic, and this gate is where a new one would have to argue for
+// itself.
+func (a *app) longPressHaptic() {
+	if !a.phone || a.hapticPlayed || a.clock().Sub(a.pressAt) < touchHold {
+		return
+	}
+	a.hapticPlayed = true
+	playHaptic()
 }
 
 // tapZone maps a tap at x to what it does on a phone: the left side turns back,
@@ -296,6 +331,7 @@ func (a *app) clearSelection() {
 	a.selDragging = false
 	a.selMoved = false
 	a.selCopied = 0
+	a.selMenu = false
 }
 
 // copySelection puts the selected text on the clipboard, read from the document
@@ -474,6 +510,55 @@ func (a *app) pageMenu(c *ui.Context, m *ui.Menu) {
 	}
 	m.Separator()
 	if m.Item(locales.MenuClearSelection()).Disabled(len(a.selQuads) == 0).Chosen() {
+		a.clearSelection()
+	}
+}
+
+// selectionMenu is the phone's card over a finished selection: the commands of
+// the page's context menu, on a finger's rows, opening at the point the finger
+// lifted. It is built only while a selection is on the page, so nothing pops
+// over an empty page.
+func (a *app) selectionMenu(c *ui.Context) {
+	anchor := ui.Box(c).Absolute().Left(a.pressX).Top(a.pressY).Size(0, 0)
+	m := ui.ContextMenuBase(c, anchor, &a.selMenu)
+	m.Popup(func(panel ui.Element) {
+		t := c.Theme()
+		panel.Background(t.Surface).Radius(14).Padding(6).Width(212)
+		a.selectionMenuItems(c, m)
+	})
+}
+
+// selectionMenuItems fills the card with what the page menu offers, as rows.
+func (a *app) selectionMenuItems(c *ui.Context, m ui.MenuParts) {
+	t := c.Theme()
+	text := a.selectedText()
+	row := func(label string, enabled bool) ui.Element {
+		it := m.Item().Padding(12, 14).Radius(10)
+		it.Disabled(!enabled)
+		if enabled && it.Hovered() {
+			it.Background(t.SurfaceHover)
+		}
+		it.Children(func() {
+			ui.Text(c, label).FontSize(15).TextColor(t.Text)
+		})
+		return it
+	}
+	if it := row(locales.MenuCopy(), text != ""); it.Clicked() {
+		a.copySelection(c)
+	}
+	if it := row(locales.AddNote(), a.pan != nil && text != ""); it.Clicked() {
+		a.addNoteFromSelection()
+	}
+	if label := searchLabel(text); label != "" {
+		canSearch := a.pan != nil && a.pan.CanSearch()
+		if it := row(label, canSearch); it.Clicked() {
+			a.searchSelection(text)
+		}
+	}
+	if it := row(locales.MenuSelectPage(), !a.showCover && a.layout != nil); it.Clicked() {
+		a.selectPage()
+	}
+	if it := row(locales.MenuClearSelection(), len(a.selQuads) > 0); it.Clicked() {
 		a.clearSelection()
 	}
 }

@@ -69,6 +69,24 @@ const scrollLand = 2
 // resuming a crawl nobody was watching.
 const scrollStarved = 100 * time.Millisecond
 
+// A flick keeps going after the finger lifts: the speed the lift left decays
+// over flingTau, so the column travels about flingTau of that speed — a third of
+// a screen for a gentle flick, two or three for a hard one — and it stops when
+// what is left would not move it a pixel in a frame. flingStart is the slowest
+// lift that is a flick at all, and flingMax a ceiling no hand reaches, which
+// only keeps a jumpy event's speed from sending the column to the end of the
+// book.
+const (
+	flingTau   = 400 * time.Millisecond
+	flingStart = 120 // DIPs a second
+	flingMin   = 60  // DIPs a second
+	flingMax   = 6000
+	// flingIdle is how long the finger has to have rested before it lifted for
+	// the lift to be no flick: the speed it had belongs to the moves, not to the
+	// pause it took to let go.
+	flingIdle = 100 * time.Millisecond
+)
+
 // platformScrollLine is how many DIPs the toolkit gives one of the platform's
 // scroll lines: a notch of a wheel arrives as its line count times this, which
 // is three lines by default and nine on some machines.
@@ -197,6 +215,7 @@ func (a *app) scrollNow(y float32) {
 	a.scrollAt = time.Time{}
 	a.scrollPlan = false
 	a.scrollRate = false
+	a.flingV = 0
 	a.scrollGoal, a.scrollY = y, y
 	a.scrollVel = 0
 	a.scrollAhead()
@@ -219,6 +238,9 @@ func (a *app) scrollBy(dy float32) {
 	if a.layout == nil || dy == 0 {
 		return
 	}
+	// An ask takes the column from the reader: a flick still running is dropped
+	// rather than raced, since the wheel or the key is the place it wants.
+	a.flingV = 0
 	// The bars follow the reader down the column and come back when the reader
 	// does: the chrome is the window's, not the page's.
 	a.chromeFollow(dy)
@@ -366,12 +388,62 @@ func bellSlope(u float32) float32 {
 	return 30 * u * u * (1 - u) * (1 - u)
 }
 
-// gliding reports whether the column is on its way to a place it was sent to.
-func (a *app) gliding() bool { return !a.scrollAt.IsZero() }
+// gliding reports whether the column is moving: on its way to a place it was
+// sent to, or carried by a flick.
+func (a *app) gliding() bool { return !a.scrollAt.IsZero() || a.flingV != 0 }
+
+// startFling sends the column on after the finger lifted, with the speed the
+// hand had: the frames spend it as it decays (see stepFling). A lift slower than
+// flingStart is no flick, and starts nothing.
+func (a *app) startFling(v float32) {
+	if a.layout == nil || a.instant || absf(v) < flingStart {
+		return
+	}
+	v = clampf(v, -flingMax, flingMax)
+	a.scrollAt = time.Time{}
+	a.scrollPlan = false
+	a.scrollRate = false
+	a.scrollGoal = a.scrollY
+	a.scrollVel = 0
+	a.flingV, a.flingAt = v, a.clock()
+	a.scrollAhead()
+}
+
+// stepFling moves the column on a flick: the speed the lift left decays over
+// flingTau, and a frame covers the integral of it over the time it took — so
+// the motion is smooth whatever the frames were, and a flick travels as far as
+// the flick was hard, rather than a fixed share of it.
+func (a *app) stepFling() bool {
+	now := a.clock()
+	dt := now.Sub(a.flingAt)
+	a.flingAt = now
+	if dt <= 0 {
+		return true
+	}
+	if dt > scrollStarved {
+		// The app was away, or the window hidden: a flick does not resume after
+		// a pause. The column stands where it was drawn.
+		a.flingV = 0
+		return true
+	}
+	tau := float32(flingTau.Seconds())
+	e := float32(math.Exp(float64(-float32(dt.Seconds()) / tau)))
+	a.chromeFollow(a.flingV * tau * (1 - e))
+	a.scrollY = clampf(a.scrollY+a.flingV*tau*(1-e), 0, a.maxScroll())
+	a.scrollGoal = a.scrollY
+	a.flingV *= e
+	if y, end := a.scrollY, a.maxScroll(); y <= 0 || y >= end || absf(a.flingV) < flingMin {
+		a.flingV = 0
+	}
+	a.scrollAhead()
+	return true
+}
 
 // stopScroll lands the column where it is drawn, as a press on the text does:
-// the lines must not slide under a pointer that is selecting them.
+// the lines must not slide under a pointer that is selecting them. A flick is
+// dropped with it: the touch that stops one takes no motion of its own.
 func (a *app) stopScroll() {
+	a.flingV = 0
 	if a.gliding() {
 		a.scrollAt = time.Time{}
 		a.scrollPlan = false
@@ -416,6 +488,9 @@ func (a *app) stepScroll() {
 // place publishes — the panels' chapter, the store's reading position — is
 // afterScroll's, and stays in the build pass.
 func (a *app) stepColumn() bool {
+	if a.flingV != 0 {
+		return a.stepFling()
+	}
 	if a.scrollAt.IsZero() {
 		return false
 	}

@@ -263,6 +263,11 @@ type app struct {
 	// frames between the two cover the distance at one rate, whatever asked.
 	scrollGoal float32
 	scrollAt   time.Time
+	// flingV is the speed a lifted finger left the column with, in DIPs a
+	// second, and flingAt when the frames last took it: the flick's own motion,
+	// decaying over flingTau (see (*app).stepFling). Zero while none is running.
+	flingV  float32
+	flingAt time.Time
 	// frameBuilt tells the draw callback that this frame's build pass ran, and so
 	// that it already stepped the column and named the frame for the log. The
 	// frames of a glide and of a page turn build nothing: the draw callback steps
@@ -314,6 +319,12 @@ type app struct {
 	dragAt     time.Time
 	dragY      float32
 	dragV      float32
+	// hapticPlayed is whether this press already played the long-press tick, so
+	// one press plays at most one.
+	hapticPlayed bool
+	// selMenu is the phone's card of commands over a finished selection. A
+	// phone has no secondary button, so the selection itself asks for it.
+	selMenu bool
 	// winBG and sysBar are what the native window was last told: the colour that
 	// fills the safe-area edges and the style of the system's bar icons.
 	winBG  string

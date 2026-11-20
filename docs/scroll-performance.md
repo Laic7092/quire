@@ -134,6 +134,11 @@ FreeType 5.0 µs、3.3–3.6 ms、0.122/255。差别来自精确面积积分比�
    次数上升）；瓦片尺寸是否与核心的 `TileHeight` 解耦（浏览器是 256–512 固定、与视口无关）。
 3. 未定：纯 Go 后端在 macOS 上与 CoreText 的画质差能否接受；不能就补平台后端，不必改 mygo。
 4. 适配层（policy 的 A/D/E 三块，我们 app 里已验证过的逻辑）搬进 `layx-raster`，仍未开始。
+5. **列表的触摸不是这条链路上的，是 mygo 的 `ui.Scroll`/`ui.List` 自己的 pan + 惯性**：
+   `flingDecay = 0.998`/ms，一次 2000 DIP/s 的快甩要滑约 2.3 s 才降到 `flingStop`；
+   而滑行中的第一下手指被引擎吞掉（只停惯性，不开始拖动），所以目录/搜索/笔记/书库
+   都要摸两次才能接着滚。阅读页绕过了它（`takesFinger`，见 `mobile.go`），列表没有。
+   上游修法与实测见 [`integration-notes.md`](integration-notes.md) 第 13 条。
 
 ## 复现
 
