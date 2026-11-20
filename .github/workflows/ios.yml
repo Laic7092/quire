@@ -17,12 +17,23 @@ jobs:
   ipa:
     name: Unsigned IPA
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: quire
     steps:
+      # quire 的 go.mod 用 replace 指向同级的 ../layx（排版引擎），
+      # 所以两个仓库并排检出：workspace/quire 和 workspace/layx。
       - uses: actions/checkout@v7
+        with:
+          path: quire
+      - uses: actions/checkout@v7
+        with:
+          repository: Laic7092/layx
+          path: layx
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: quire/go.mod
 
       - name: Report Xcode
         run: xcodebuild -version
