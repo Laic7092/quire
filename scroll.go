@@ -833,9 +833,22 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// Whether this frame moved the column, which is what a tile's ratio is
 	// chosen by: a tile drawn while the text moves is rastered smaller and
 	// sharpened in the frames after it stops (see tileMovingScale).
-	if a.tileTopSet {
-		a.tileMoving = top != a.tileTop
+	//
+	// A glide's tail moves the column less than a pixel a frame, so the edge it
+	// is drawn from changes on some frames and not others: the column is taken
+	// as moving while it glides, and still only after it has been still for a
+	// while. Sharpening on the frame the motion stops, and off again on the
+	// next, is the stutter at the end of every scroll.
+	now := a.clock()
+	gliding := a.gliding()
+	if !a.tileTopSet {
+		// The first frame of a window shows what it was opened at, and pays
+		// for it once.
+		a.tileStill = now.Add(-tileStillDelay)
+	} else if top != a.tileTop || gliding {
+		a.tileStill = now
 	}
+	a.tileMoving = gliding || now.Sub(a.tileStill) < tileStillDelay
 	a.tileTop, a.tileTopSet = top, true
 	// Where the column is drawn, and at what ratio, is what says whether a glide
 	// has anything left to show (see landed). The viewport itself does not move,

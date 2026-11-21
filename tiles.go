@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"os"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laic7092/layx/render"
@@ -66,6 +67,11 @@ type tileImage struct {
 // while the text moves: the frames after the column stops draw the tiles it
 // shows again at the screen's own ratio (see sharpenTiles).
 const tileMovingScale = 2
+
+// tileStillDelay is how long the column has to stand still before the tiles it
+// shows are drawn again at the screen's ratio: a scroll that goes on, or one
+// that starts again, pays nothing for it.
+const tileStillDelay = 300 * time.Millisecond
 
 // tileBudget is how much of the tiles' pixels are kept, in bytes: enough for
 // the visible tiles and the ones beside them at a phone's ratio, and no more.

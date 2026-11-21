@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -48,5 +49,45 @@ func TestTilesAreSmallerWhileTheColumnMoves(t *testing.T) {
 	a.sharpenTiles(0, a.layout.TileCount()-1, 3)
 	if len(a.tiles.entry) != n-1 {
 		t.Fatal("a moving column sharpened a tile")
+	}
+}
+
+// The tail of a glide moves the column less than a pixel a frame: the column is
+// taken as moving while it glides, and still only after it has been still for
+// tileStillDelay.
+func TestAGlidesTailIsStillMoving(t *testing.T) {
+	a := benchScrollApp(t)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 390, 844)
+	tt.SetScale(3)
+
+	at := time.Unix(1000, 0)
+	a.now = func() time.Time { return at }
+	tt.Frame()
+
+	// A glide, on a frame that moved the column by less than a device pixel —
+	// which is what the tail does.
+	a.scrollTo(a.scrollY + 40)
+	a.scrollY += 0.2
+	tt.Frame()
+	if !a.tileMoving {
+		t.Fatal("a gliding column counts as still")
+	}
+
+	// The glide lands, and the frames in between are the ones that used to
+	// sharpen.
+	a.scrollAt = time.Time{}
+	a.flingV = 0
+	for i := 0; i < 10; i++ {
+		at = at.Add(16 * time.Millisecond)
+		tt.Frame()
+		if !a.tileMoving {
+			t.Fatalf("the column was taken as still %d frames after it stopped", i+1)
+		}
+	}
+	// And once it has stood still, the tiles are drawn again at its ratio.
+	at = at.Add(tileStillDelay)
+	tt.Frame()
+	if a.tileMoving {
+		t.Fatal("a column still for longer than tileStillDelay still counts as moving")
 	}
 }

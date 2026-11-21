@@ -247,6 +247,11 @@ type app struct {
 	// moves and again at the screen's ratio once it stops (see tileCanvas).
 	tileTop    float32
 	tileTopSet bool
+	// tileStill is when the column last moved: a tile is rastered smaller
+	// until the column has been still for tileStillDelay, so the tail of a
+	// glide, which moves less than a pixel a frame, does not turn sharpening
+	// on and off between frames.
+	tileStill  time.Time
 	tileMoving bool
 	// hud is the performance monitor at the window's right edge, off unless the
 	// reader asked for it (see perfhud.go).
