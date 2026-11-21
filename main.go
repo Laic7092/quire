@@ -242,16 +242,6 @@ type app struct {
 	// tiles holds the scrolling column's tiles as canvases, drawn once for the
 	// layout, paper and screen scale and composited after that (see tileCache).
 	tiles tileCache
-	// work is the window's work off the frame thread, in the two lanes a window
-	// has: the CPU's and the I/O's (see work.go).
-	work workroom
-	// ahead is the tile range the CPU lane was last asked for, so a frame asks
-	// only when the column has travelled into another tile (see warmTiles).
-	ahead struct {
-		lay  *render.Layout
-		lo   int
-		hi   int
-	}
 	// hud is the performance monitor at the window's right edge, off unless the
 	// reader asked for it (see perfhud.go).
 	hud hud

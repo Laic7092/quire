@@ -500,17 +500,12 @@ func (a *app) newWindow() {
 	}
 	win := mygo.NewWindow(opts)
 	a.win = win
-	// What a lane makes comes back through the window, which is the one door
-	// onto the UI thread a background task has (see work.go).
-	a.work.cpu.post = win.Update
-	a.work.io.post = win.Update
 	a.winShared.Store(win)
 	a.ready = true
 	win.OnClose(func(*mygo.CloseEvent) {
 		// Nothing this window started may land in the next one. Cancel it
 		// before the window and its shared pointer go away.
 		a.closeTasks()
-		a.closeWork()
 		// Flush the debounced writing on the way out, and let the next window
 		// carry the app.
 		if a.st != nil {
