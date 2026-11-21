@@ -830,6 +830,13 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// the edge they hang from does.
 	y = clampf(y, 0, max(column.ContentHeight()-view.H, 0))
 	top := snapDevices(view.Y-y, p.Scale())
+	// Whether this frame moved the column, which is what a tile's ratio is
+	// chosen by: a tile drawn while the text moves is rastered smaller and
+	// sharpened in the frames after it stops (see tileMovingScale).
+	if a.tileTopSet {
+		a.tileMoving = top != a.tileTop
+	}
+	a.tileTop, a.tileTopSet = top, true
 	// Where the column is drawn, and at what ratio, is what says whether a glide
 	// has anything left to show (see landed). The viewport itself does not move,
 	// so this is a property of the window and of the screen.
@@ -862,7 +869,8 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			}
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
 			if cv := a.tileCanvas(p, column, i, tile, p.Scale()); cv != nil {
-				drawTileCanvas(p, cv, box, p.Scale(), a.tiles.entry[i].above)
+				e := a.tiles.entry[i]
+				drawTileCanvas(p, cv, box, e.ratio, e.above)
 				continue
 			}
 			// The performance log keeps how long each tile took: a tile built on the
@@ -879,6 +887,7 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 		}
 		a.prefetchTile(p, column, next, p.Scale())
 		a.trimTiles(func(i int) bool { return i >= first && i <= last })
+		a.sharpenTiles(first, last, p.Scale())
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.

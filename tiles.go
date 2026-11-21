@@ -52,7 +52,20 @@ type tileImage struct {
 	bytes  int
 	at     int64
 	above  float32
+	// ratio is the device ratio the canvas was rastered at, which is the
+	// screen's unless the column was moving (see tileMovingScale).
+	ratio float32
 }
+
+// tileMovingScale caps the ratio a tile is rastered at while the column moves.
+// A tile is a screenful drawn between two refreshes: at a phone's 3x that is a
+// 8.5 MB canvas, one frame per tile, and the frame it lands in misses its
+// refresh — which is what makes the display drop the rate it draws at. Two
+// thirds of the pixels cost a third of the time (measured: 36.8 ms against 362
+// ms for a tile of the sample book at 2x and 3x), and the softness shows only
+// while the text moves: the frames after the column stops draw the tiles it
+// shows again at the screen's own ratio (see sharpenTiles).
+const tileMovingScale = 2
 
 // tileBudget is how much of the tiles' pixels are kept, in bytes: enough for
 // the visible tiles and the ones beside them at a phone's ratio, and no more.
@@ -89,8 +102,12 @@ func (a *app) tileCanvas(p *ui.Painter, column *render.Layout, i int, tile *rend
 	// first or last line.
 	strip := a.opts.FontSize * (a.opts.LineHeight + 1)
 	w, h := tile.Size().Width, tile.Height()
-	cw := int(math.Ceil(float64(w) * float64(scale)))
-	ch := int(math.Ceil(float64(h+2*strip) * float64(scale)))
+	ratio := scale
+	if a.tileMoving && ratio > tileMovingScale {
+		ratio = tileMovingScale
+	}
+	cw := int(math.Ceil(float64(w) * float64(ratio)))
+	ch := int(math.Ceil(float64(h+2*strip) * float64(ratio)))
 	if cw <= 0 || ch <= 0 {
 		return nil
 	}
@@ -98,9 +115,9 @@ func (a *app) tileCanvas(p *ui.Painter, column *render.Layout, i int, tile *rend
 	box := ui.Rect{X: 0, Y: strip, W: w, H: h}
 	view := ui.Rect{X: 0, Y: 0, W: w, H: h + 2*strip}
 	cv.Draw(p, func(cp *ui.Painter) {
-		a.paint.DrawTileZoom(cp, tile, box, view, scale)
+		a.paint.DrawTileZoom(cp, tile, box, view, ratio)
 	})
-	e := &tileImage{canvas: cv, bytes: cw * ch * 4, at: now, above: strip}
+	e := &tileImage{canvas: cv, bytes: cw * ch * 4, at: now, above: strip, ratio: ratio}
 	a.tiles.entry[i] = e
 	a.tiles.total += e.bytes
 	// The canvas is drawn into this frame's scene, and the glyphs it took from
@@ -113,8 +130,11 @@ func (a *app) tileCanvas(p *ui.Painter, column *render.Layout, i int, tile *rend
 // with the screen's, wherever the column has carried it. The position is snapped
 // to the device grid for the same reason the column is: a canvas drawn between
 // two pixels would be resampled, and every glyph in it blurred by the motion.
-func drawTileCanvas(p *ui.Painter, cv *ui.Canvas, box ui.Rect, scale, above float32) {
-	if p == nil || cv == nil || !(scale > 0) {
+// ratio is the one the canvas was rastered at, which the composite takes its
+// DIPs back from; a tile rastered smaller while the column moved is stretched
+// to the size it covers, which is what sharpens it in the frames after it stops.
+func drawTileCanvas(p *ui.Painter, cv *ui.Canvas, box ui.Rect, ratio, above float32) {
+	if p == nil || cv == nil || !(ratio > 0) {
 		return
 	}
 	bmp := cv.Bitmap()
@@ -123,12 +143,31 @@ func drawTileCanvas(p *ui.Painter, cv *ui.Canvas, box ui.Rect, scale, above floa
 		return
 	}
 	dst := ui.Rect{
-		X: roundDevices(box.X, scale),
-		Y: roundDevices(box.Y-above, scale),
-		W: float32(w) / scale,
-		H: float32(h) / scale,
+		X: roundDevices(box.X, ratio),
+		Y: roundDevices(box.Y-above, ratio),
+		W: float32(w) / ratio,
+		H: float32(h) / ratio,
 	}
 	p.Image(bmp, dst, ui.FillBox)
+}
+
+// sharpenTiles draws one tile the column shows again at the screen's own ratio,
+// after a moving column rastered it smaller. One a frame: a tile is a screenful
+// of glyphs drawn in the frame that asks for it, and asking for every tile at
+// once would put the cost of a moving frame back into a frame that is not.
+func (a *app) sharpenTiles(first, last int, scale float32) {
+	if !tileBitmaps || a.tileMoving || scale <= tileMovingScale || a.tiles.entry == nil {
+		return
+	}
+	for i := first; i <= last; i++ {
+		e := a.tiles.entry[i]
+		if e == nil || e.ratio >= scale {
+			continue
+		}
+		a.tiles.total -= e.bytes
+		delete(a.tiles.entry, i)
+		return
+	}
 }
 
 // prefetchTile draws one tile beside the viewport, so the frame that first
