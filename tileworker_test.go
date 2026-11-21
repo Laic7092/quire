@@ -118,3 +118,33 @@ func TestTileDrawSettingSwitchesEveryWindow(t *testing.T) {
 		t.Fatal("a tile drawn the other way is still there")
 	}
 }
+
+// The GPU path never starts the worker: a tile drawn into a canvas is drawn
+// once, and the worker's software raster of it would be a screenful of
+// allocations the frame has to collect later.
+func TestTheGPUpathStartsNoWorker(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	// The window was drawn before the setting existed, as a window that opened
+	// before one was picked is: whatever it started goes, and the frames after
+	// it are the ones the test is about.
+	if a.tileWork != nil {
+		a.tileWork.close()
+		a.tileWork = nil
+	}
+	a.desk = &desk{tileDraw: tileDrawGPU}
+	a.instant = true
+	a.dropTiles()
+	tt.Frame()
+	a.scrollTo(a.tileH * 2)
+	tt.Frame()
+	tt.Frame()
+	if a.tileWork != nil {
+		t.Fatal("the worker was started while the renderer draws the tiles")
+	}
+	if len(a.tiles.entry) != 0 {
+		t.Fatalf("%d tiles were rastered by a worker that is not the way in use", len(a.tiles.entry))
+	}
+	if len(a.gpu.entry) == 0 {
+		t.Fatal("no tile was drawn in a canvas")
+	}
+}

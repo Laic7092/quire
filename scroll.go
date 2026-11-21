@@ -889,7 +889,7 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	})
 	// The tile the column is heading for is rastered now, so the frame that
 	// first shows it is a composite too, rather than the frame that stalls.
-	if a.tiles.entry != nil {
+	if a.tiles.entry != nil && !a.tileGPU() {
 		next := last + 1
 		if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
 			next = first - 1

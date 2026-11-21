@@ -121,8 +121,10 @@ func (a *app) pumpTiles() {
 }
 
 // askTile hands one tile to the worker, unless it is already here or on its way.
+// The renderer's canvases are not the worker's: it draws only when the worker is
+// the way the tiles are rastered.
 func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
-	if !tileBitmaps || tile == nil || !(scale > 0) || key != a.tiles.key {
+	if !tileBitmaps || a.tileGPU() || tile == nil || !(scale > 0) || key != a.tiles.key {
 		return
 	}
 	w := a.tileWorkerOf()
@@ -249,7 +251,7 @@ func (a *app) drawTileCanvas(p *ui.Painter, key tileKey, i int, tile *render.Til
 // trimGPU keeps the canvases of the tiles near the viewport: one the column has
 // scrolled away from goes back to the pool, its texture to be drawn into anew.
 func (a *app) trimGPU(visible func(int) bool) {
-	const keep = 8
+	const keep = 6
 	for len(a.gpu.entry) > keep {
 		oldest, index := int64(math.MaxInt64), -1
 		for i, e := range a.gpu.entry {
