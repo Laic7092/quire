@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laic7092/layx/render"
+	"github.com/laic7092/layx/render/paint"
 	"github.com/laix/quire/internal/reader"
 )
 
@@ -32,6 +33,16 @@ type tileWorker struct {
 	// done holds the tiles drawn, for the frame to take.
 	done   chan tileDone
 	closed chan struct{}
+	// imgs carries the book's images to this painter: they are decoded on the
+	// frame's thread and drawn here, and a tile cannot show one it was not
+	// given.
+	imgs chan tileImg
+}
+
+// tileImg is one image of the book, for the worker's own painter.
+type tileImg struct {
+	id   paint.ImageID
+	data []byte
 }
 
 // tileJob is one tile to draw.
@@ -67,6 +78,7 @@ func newTileWorker(fonts *reader.Fonts) *tileWorker {
 		jobs:   make(chan tileJob, 1),
 		done:   make(chan tileDone, 4),
 		closed: make(chan struct{}),
+		imgs:   make(chan tileImg, 64),
 	}
 	go w.run()
 	return w
@@ -111,6 +123,30 @@ func (w *tileWorker) ask(job tileJob) {
 	}
 }
 
+// setImage hands the worker's painter one of the book's images.
+func (w *tileWorker) setImage(id paint.ImageID, data []byte) {
+	if w == nil {
+		return
+	}
+	select {
+	case <-w.closed:
+		return
+	case w.imgs <- tileImg{id: id, data: data}:
+	}
+}
+
+// drainImages gives the painter the images that came since the last tile.
+func (w *tileWorker) drainImages() {
+	for {
+		select {
+		case im := <-w.imgs:
+			w.up.SetImage(im.id, im.data)
+		default:
+			return
+		}
+	}
+}
+
 // take returns the tiles drawn, without waiting for one.
 func (w *tileWorker) take() []tileDone {
 	if w == nil {
@@ -136,6 +172,7 @@ func (w *tileWorker) run() {
 			return
 		case job = <-w.jobs:
 		}
+		w.drainImages()
 		pix := w.draw(job)
 		if pix == nil {
 			continue

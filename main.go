@@ -1094,6 +1094,11 @@ func (a *app) ensureLayout(w, h float32) {
 			if rebuilt && a.paint != nil {
 				for id, data := range images {
 					a.paint.SetImage(id, data)
+					if a.tileWork != nil {
+						a.tileWork.setImage(id, data)
+						// The tiles drawn before the images came have none.
+						a.dropTiles()
+					}
 				}
 			}
 			// The whole book is here: the chapters the preview laid out are part
