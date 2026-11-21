@@ -3,7 +3,6 @@ package main
 import (
 	"math"
 	"os"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laic7092/layx/render"
@@ -15,27 +14,25 @@ import (
 // column's display lists and submits one quad a glyph.
 var tileBitmaps = os.Getenv("QUIRE_TILE_BITMAPS") != "0"
 
-// tileCache holds a scrolling column's tiles as pixels. A tile is drawn once
-// into a canvas of its own and composited from then on, so a frame of a glide
-// submits one quad a visible tile instead of one quad a glyph.
+// tileCache holds a scrolling column's tiles as pixels, drawn by the window's
+// worker (tileworker.go) and composited here: a frame of a glide submits one
+// quad a visible tile instead of one quad a glyph, and none of them are drawn in
+// the frame that shows them.
 //
-// The tile is drawn through the same UIPainter the window's column would be
-// drawn with, at the screen's ratio: the glyphs come from the same atlas, the
-// bold is the atlas's own, the tone is the same table. There is no second
-// rasterizer and so nothing for the two paths to disagree about; the canvas's
-// pixels are the device pixels a frame would have painted.
-//
-// A canvas bakes the paper, the ink, the ratio and the subpixel place it was
-// drawn at, so the cache belongs to one layout, palette and screen scale:
+// A tile's pixels bake the paper, the ink, the ratio and the subpixel place they
+// were drawn at, so the cache belongs to one layout, palette and screen scale:
 // tileKey names that set, and another one means a new cache.
 type tileCache struct {
 	key   tileKey
 	entry map[int]*tileImage
+	// asked is the frame each tile missing was last asked for, so a frame does
+	// not ask again for one the worker has not started.
+	asked map[int]int64
 	total int
 	tick  int64
 }
 
-// tileKey is what the canvases were drawn for.
+// tileKey is what the tiles were drawn for.
 type tileKey struct {
 	layout *render.Layout
 	scale  float32
@@ -45,153 +42,128 @@ type tileKey struct {
 	paper  paint.Color
 }
 
-// tileImage is one tile's canvas and what it costs to keep it. above is the
-// strip the canvas holds above the tile's own top edge, which the composite
+// tileImage is one tile kept as pixels, and what it costs to keep them. above is
+// the strip the bitmap holds over the tile's own top edge, which the composite
 // takes back off its position.
 type tileImage struct {
-	canvas *ui.Canvas
-	bytes  int
-	at     int64
-	above  float32
-	// ratio is the device ratio the canvas was rastered at, which is the
-	// screen's unless the column was moving (see tileMovingScale).
-	ratio float32
+	bmp   *ui.Bitmap
+	above float32
+	bytes int
+	at    int64
 }
 
-// tileMovingScale caps the ratio a tile is rastered at while the column moves.
-// A tile is a screenful drawn between two refreshes: at a phone's 3x that is a
-// 8.5 MB canvas, one frame per tile, and the frame it lands in misses its
-// refresh — which is what makes the display drop the rate it draws at. Two
-// thirds of the pixels cost a third of the time (measured: 36.8 ms against 362
-// ms for a tile of the sample book at 2x and 3x), and the softness shows only
-// while the text moves: the frames after the column stops draw the tiles it
-// shows again at the screen's own ratio (see sharpenTiles).
-const tileMovingScale = 2
+// tileBudget is how much of the tiles' pixels are kept, in bytes: the visible
+// tiles, the ones beside them, and no more. A phone's are 3 MB a tile at a
+// phone's ratio, and the renderer holds a texture of each it shows.
+const tileBudget = 24 << 20
 
-// tileStillDelay is how long the column has to stand still before the tiles it
-// shows are drawn again at the screen's ratio: a scroll that goes on, or one
-// that starts again, pays nothing for it.
-const tileStillDelay = 300 * time.Millisecond
+// tileStrip is how much of the column a tile's bitmap holds above and below the
+// tile itself: a line belongs to the tile that holds its top edge, its ink
+// reaches past that edge both ways, and a tight leading lets it reach further
+// than its line box. Both strips are transparent, since an opaque paper one
+// would cover the neighbouring tile's first or last line.
+func (a *app) tileStrip() float32 {
+	return a.opts.FontSize * (a.opts.LineHeight + 1)
+}
 
-// tileBudget is how much of the tiles' pixels are kept, in bytes: enough for
-// the visible tiles and the ones beside them at a phone's ratio, and no more.
-// They are memory in the window's own texture, which is the price of drawing a
-// tile once instead of a glyph a frame.
-const tileBudget = 48 << 20
-
-// tileCanvas returns the tile at i as a canvas, drawing it the first time. It
-// returns nil when the tile cannot be drawn, and the caller then replays the
-// display list for that tile this frame.
-func (a *app) tileCanvas(p *ui.Painter, column *render.Layout, i int, tile *render.Tile, scale float32) *ui.Canvas {
-	if a.paint == nil || p == nil || column == nil || tile == nil || !(scale > 0) || !tileBitmaps {
-		return nil
-	}
+// tileKeyNow is what this frame's tiles are drawn for.
+func (a *app) tileKeyNow(column *render.Layout, scale float32) tileKey {
 	pal := a.palette()
-	key := tileKey{
-		layout: column, scale: scale, width: a.boxW, height: a.tileH,
-		fade: a.paint.Fade(), paper: pal.Paper,
-	}
-	if key != a.tiles.key || a.tiles.entry == nil {
+	return tileKey{layout: column, scale: scale, width: a.boxW, height: a.tileH, fade: a.paint.Fade(), paper: pal.Paper}
+}
+
+// syncTiles forgets every tile when what they were drawn for changed.
+func (a *app) syncTiles(key tileKey) {
+	if a.tiles.entry == nil || key != a.tiles.key || !tileBitmaps {
 		a.tiles = tileCache{key: key, entry: make(map[int]*tileImage)}
 	}
 	a.tiles.tick++
-	now := a.tiles.tick
-	if e := a.tiles.entry[i]; e != nil {
-		e.at = now
-		return e.canvas
-	}
-	// A line belongs to the tile that holds its top edge, but its ink reaches
-	// past that edge both ways, and a tight leading lets it reach further than
-	// its line box: the canvas keeps a line's height — plus an em — on either
-	// side, so nothing of a line is cut at a boundary. Both strips are
-	// transparent: an opaque paper one would cover the neighbouring tile's
-	// first or last line.
-	strip := a.opts.FontSize * (a.opts.LineHeight + 1)
-	w, h := tile.Size().Width, tile.Height()
-	ratio := scale
-	if a.tileMoving && ratio > tileMovingScale {
-		ratio = tileMovingScale
-	}
-	cw := int(math.Ceil(float64(w) * float64(ratio)))
-	ch := int(math.Ceil(float64(h+2*strip) * float64(ratio)))
-	if cw <= 0 || ch <= 0 {
-		return nil
-	}
-	cv := ui.NewCanvas(cw, ch)
-	box := ui.Rect{X: 0, Y: strip, W: w, H: h}
-	view := ui.Rect{X: 0, Y: 0, W: w, H: h + 2*strip}
-	cv.Draw(p, func(cp *ui.Painter) {
-		a.paint.DrawTileZoom(cp, tile, box, view, ratio)
-	})
-	e := &tileImage{canvas: cv, bytes: cw * ch * 4, at: now, above: strip, ratio: ratio}
-	a.tiles.entry[i] = e
-	a.tiles.total += e.bytes
-	// The canvas is drawn into this frame's scene, and the glyphs it took from
-	// the atlas are uploaded after this frame: one more frame shows both.
-	p.AnimationFrame()
-	return cv
 }
 
-// drawTileCanvas puts one tile's canvas on the screen, its pixels one to one
-// with the screen's, wherever the column has carried it. The position is snapped
-// to the device grid for the same reason the column is: a canvas drawn between
-// two pixels would be resampled, and every glyph in it blurred by the motion.
-// ratio is the one the canvas was rastered at, which the composite takes its
-// DIPs back from; a tile rastered smaller while the column moved is stretched
-// to the size it covers, which is what sharpens it in the frames after it stops.
-func drawTileCanvas(p *ui.Painter, cv *ui.Canvas, box ui.Rect, ratio, above float32) {
-	if p == nil || cv == nil || !(ratio > 0) {
-		return
+// tileWorkerOf starts the window's worker the first time a tile is wanted: a
+// window that never scrolls never starts one.
+func (a *app) tileWorkerOf() *tileWorker {
+	if a.tileWork == nil && tileBitmaps {
+		a.tileWork = newTileWorker(a.fonts)
 	}
-	bmp := cv.Bitmap()
-	w, h := cv.Size()
-	if bmp == nil || w <= 0 || h <= 0 {
-		return
-	}
-	dst := ui.Rect{
-		X: roundDevices(box.X, ratio),
-		Y: roundDevices(box.Y-above, ratio),
-		W: float32(w) / ratio,
-		H: float32(h) / ratio,
-	}
-	p.Image(bmp, dst, ui.FillBox)
+	return a.tileWork
 }
 
-// sharpenTiles draws one tile the column shows again at the screen's own ratio,
-// after a moving column rastered it smaller. One a frame: a tile is a screenful
-// of glyphs drawn in the frame that asks for it, and asking for every tile at
-// once would put the cost of a moving frame back into a frame that is not.
-func (a *app) sharpenTiles(first, last int, scale float32) {
-	if !tileBitmaps || a.tileMoving || scale <= tileMovingScale || a.tiles.entry == nil {
+// pumpTiles takes what the worker finished since the last frame, and shows it in
+// this one. It never waits: a tile that is not there yet is replayed instead.
+func (a *app) pumpTiles() {
+	if a.tiles.entry == nil || a.tileWork == nil {
 		return
 	}
-	for i := first; i <= last; i++ {
-		e := a.tiles.entry[i]
-		if e == nil || e.ratio >= scale {
+	got := a.tileWork.take()
+	if len(got) == 0 {
+		return
+	}
+	for _, d := range got {
+		if d.key != a.tiles.key || d.pix == nil {
 			continue
 		}
-		a.tiles.total -= e.bytes
-		delete(a.tiles.entry, i)
-		return
+		if _, ok := a.tiles.entry[d.index]; ok {
+			continue
+		}
+		w, h := d.pix.Bounds().Dx(), d.pix.Bounds().Dy()
+		e := &tileImage{bmp: ui.NewBitmap(d.pix), above: a.tileStrip(), bytes: w * h * 4, at: a.tiles.tick}
+		a.tiles.entry[d.index] = e
+		a.tiles.total += e.bytes
 	}
+	// What came back is a frame to draw.
+	a.services.Invalidate()
 }
 
-// prefetchTile draws one tile beside the viewport, so the frame that first
-// shows it is a composite too. One a frame is enough: a tile is a screenful,
-// and it takes more than a frame of a glide to reach the next one.
-func (a *app) prefetchTile(p *ui.Painter, column *render.Layout, i int, scale float32) {
-	if !tileBitmaps || column == nil || p == nil || i < 0 || i >= column.TileCount() {
+// askTile hands one tile to the worker, unless it is already here or on its way.
+func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
+	if !tileBitmaps || tile == nil || !(scale > 0) || key != a.tiles.key {
+		return
+	}
+	w := a.tileWorkerOf()
+	if w == nil {
 		return
 	}
 	if _, ok := a.tiles.entry[i]; ok {
 		return
 	}
-	if tile := column.Tile(i); tile != nil {
-		a.tileCanvas(p, column, i, tile, scale)
+	if a.tiles.asked != nil && a.tiles.asked[i] == a.tiles.tick {
+		return
 	}
+	if a.tiles.asked == nil {
+		a.tiles.asked = make(map[int]int64)
+	}
+	a.tiles.asked[i] = a.tiles.tick
+	w.ask(tileJob{
+		key: key, index: i, tile: tile,
+		w: tile.Size().Width, h: tile.Height(), strip: a.tileStrip(),
+		ratio: scale, fade: a.paint.Fade(), pal: a.palette(),
+	})
 }
 
-// trimTiles drops the least recently drawn tiles beyond tileBudget, never one
+// drawTileBitmap puts one tile's pixels on the screen, one to one with the
+// device pixels, wherever the column has carried it. The position is snapped to
+// the device grid for the same reason the column is: a bitmap drawn between two
+// pixels would be resampled, and every glyph in it blurred by the motion.
+func drawTileBitmap(p *ui.Painter, e *tileImage, box ui.Rect, scale float32) bool {
+	if p == nil || e == nil || e.bmp == nil || !(scale > 0) {
+		return false
+	}
+	w, h := e.bmp.Size()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	dst := ui.Rect{
+		X: roundDevices(box.X, scale),
+		Y: roundDevices(box.Y-e.above, scale),
+		W: float32(w) / scale,
+		H: float32(h) / scale,
+	}
+	p.Image(e.bmp, dst, ui.FillBox)
+	return true
+}
+
+// trimTiles drops the least recently shown tiles beyond tileBudget, never one
 // the frame is showing. Everything else is a tile the reader is about to come
 // back to, or one a glide left behind.
 func (a *app) trimTiles(visible func(int) bool) {
@@ -210,10 +182,11 @@ func (a *app) trimTiles(visible func(int) bool) {
 		}
 		a.tiles.total -= a.tiles.entry[index].bytes
 		delete(a.tiles.entry, index)
+		delete(a.tiles.asked, index)
 	}
 }
 
-// dropTiles forgets every tile's canvas, as another layout, paper or book does.
+// dropTiles forgets every tile, as another layout, paper or book does.
 func (a *app) dropTiles() {
 	a.tiles = tileCache{}
 }

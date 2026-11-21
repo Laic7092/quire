@@ -506,6 +506,7 @@ func (a *app) newWindow() {
 		// Nothing this window started may land in the next one. Cancel it
 		// before the window and its shared pointer go away.
 		a.closeTasks()
+		a.tileWork.close()
 		// Flush the debounced writing on the way out, and let the next window
 		// carry the app.
 		if a.st != nil {

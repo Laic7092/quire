@@ -242,6 +242,9 @@ type app struct {
 	// tiles holds the scrolling column's tiles as canvases, drawn once for the
 	// layout, paper and screen scale and composited after that (see tileCache).
 	tiles tileCache
+	// tileWork draws the column's tiles off the frame's thread: the one thing a
+	// scrolling frame cannot afford (see tileworker.go).
+	tileWork *tileWorker
 	// tileTop and tileMoving are the column's snapped top edge on the last
 	// frame and whether this one moved it: a tile is rastered smaller while it
 	// moves and again at the screen's ratio once it stops (see tileCanvas).

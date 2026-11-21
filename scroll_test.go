@@ -32,6 +32,11 @@ func newScrollWindowView(t *testing.T, wrap func(*ui.Context, func(*ui.Context))
 		view = func(c *ui.Context) { wrap(c, a.view) }
 	}
 	tt := ui.NewTester(view, 1000, 760)
+	t.Cleanup(func() {
+		if a.tileWork != nil {
+			a.tileWork.close()
+		}
+	})
 	tt.Frame()
 
 	// A scrolling book has one column, so the sheet is one maximum page wide
@@ -134,29 +139,40 @@ func TestScrollModeScrollsTheColumn(t *testing.T) {
 
 // A scrolling frame composites the column's tiles from bitmaps: the glyphs are
 // rastered once into a tile and the frames after that submit one quad a tile,
-// not one a glyph. Without it every frame re-submits the whole viewport's
-// glyphs, which is what made a phone drop to 30 frames.
+// not one a glyph. The tiles are drawn off the frame's thread, so the frames in
+// between replay the display lists, and the frames after the pixels come back
+// draw the column from them alone.
 func TestScrollFramesCompositeTiles(t *testing.T) {
 	a, tt := newScrollWindow(t)
 	tt.Frame()
-	tt.Frame()
-	if len(a.tiles.entry) == 0 {
-		t.Fatal("no tile was rastered for the scrolling column")
-	}
-
-	// The next frame draws the book through the bitmaps and asks the glyph
-	// painter for nothing at all.
-	a.paint.ResetGlyphStats()
-	tt.Frame()
-	if s := a.paint.GlyphStats(); s.Glyphs != 0 || s.Runs != 0 {
-		t.Errorf("a composited frame drew %d glyphs in %d runs", s.Glyphs, s.Runs)
-	}
+	drawUntilTiled(t, a, tt)
 	if len(a.tiles.entry) == 0 {
 		t.Error("compositing dropped the tile bitmaps")
 	}
 }
 
-// The tile beside the viewport is rastered ahead of it, so scrolling into it
+// drawUntilTiled asks for frames until the column is drawn from its tiles alone,
+// the worker having drawn them off the frame's thread.
+func drawUntilTiled(t *testing.T, a *app, tt *ui.Tester) {
+	t.Helper()
+	reader.CountGlyphs(true)
+	t.Cleanup(func() { reader.CountGlyphs(false) })
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		// Something has to change for a frame to build the view again.
+		a.scrollY += 1
+		a.scrollGoal = a.scrollY
+		a.paint.ResetGlyphStats()
+		tt.Frame()
+		if a.paint.GlyphStats().Glyphs == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the column never came to be drawn from tiles: %d glyphs", a.paint.GlyphStats().Glyphs)
+}
+
+// The tile beside the viewport is drawn ahead of it, so scrolling into it
 // composites that frame instead of stalling on its display list.
 func TestScrollPrefetchesTheNextTile(t *testing.T) {
 	a, tt := newScrollWindow(t)
@@ -164,13 +180,9 @@ func TestScrollPrefetchesTheNextTile(t *testing.T) {
 	tt.Frame()
 	a.scrollTo(a.tileH * 2)
 	tt.Frame()
-
-	// The frame that landed rastered the tile below it; the next frame
-	// composites everything on screen.
-	a.paint.ResetGlyphStats()
-	tt.Frame()
-	if s := a.paint.GlyphStats(); s.Glyphs != 0 {
-		t.Errorf("a frame after a jump drew %d glyphs; the tiles on screen were not cached", s.Glyphs)
+	drawUntilTiled(t, a, tt)
+	if len(a.tiles.entry) == 0 {
+		t.Fatal("nothing was drawn ahead of the column")
 	}
 }
 

@@ -830,26 +830,6 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// the edge they hang from does.
 	y = clampf(y, 0, max(column.ContentHeight()-view.H, 0))
 	top := snapDevices(view.Y-y, p.Scale())
-	// Whether this frame moved the column, which is what a tile's ratio is
-	// chosen by: a tile drawn while the text moves is rastered smaller and
-	// sharpened in the frames after it stops (see tileMovingScale).
-	//
-	// A glide's tail moves the column less than a pixel a frame, so the edge it
-	// is drawn from changes on some frames and not others: the column is taken
-	// as moving while it glides, and still only after it has been still for a
-	// while. Sharpening on the frame the motion stops, and off again on the
-	// next, is the stutter at the end of every scroll.
-	now := a.clock()
-	gliding := a.gliding()
-	if !a.tileTopSet {
-		// The first frame of a window shows what it was opened at, and pays
-		// for it once.
-		a.tileStill = now.Add(-tileStillDelay)
-	} else if top != a.tileTop || gliding {
-		a.tileStill = now
-	}
-	a.tileMoving = gliding || now.Sub(a.tileStill) < tileStillDelay
-	a.tileTop, a.tileTopSet = top, true
 	// Where the column is drawn, and at what ratio, is what says whether a glide
 	// has anything left to show (see landed). The viewport itself does not move,
 	// so this is a property of the window and of the screen.
@@ -874,6 +854,11 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// yet — the first frame of a new place, or one the budget dropped — is
 	// replayed from its display list this once, and rastered after the frame
 	// (see prefetchTile).
+	// What this frame's tiles are drawn for, and what the worker finished since
+	// the frame before it.
+	key := a.tileKeyNow(column, p.Scale())
+	a.syncTiles(key)
+	a.pumpTiles()
 	p.Clip(view, 0, func() {
 		for i := last; i >= first; i-- {
 			tile := column.Tile(i)
@@ -881,14 +866,14 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 				continue
 			}
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
-			if cv := a.tileCanvas(p, column, i, tile, p.Scale()); cv != nil {
-				e := a.tiles.entry[i]
-				drawTileCanvas(p, cv, box, e.ratio, e.above)
+			if drawTileBitmap(p, a.tiles.entry[i], box, p.Scale()) {
 				continue
 			}
-			// The performance log keeps how long each tile took: a tile built on the
-			// frame it is shown is what a scroll stutter looks like.
+			// Not drawn yet: the frame replays this tile's display list, which
+			// costs it a millisecond, and the worker draws it for the frames
+			// after this one (see tileworker.go).
 			perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
+			a.askTile(key, i, tile, p.Scale())
 		}
 	})
 	// The tile the column is heading for is rastered now, so the frame that
@@ -898,9 +883,10 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 		if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
 			next = first - 1
 		}
-		a.prefetchTile(p, column, next, p.Scale())
+		if tile := column.Tile(next); tile != nil {
+			a.askTile(key, next, tile, p.Scale())
+		}
 		a.trimTiles(func(i int) bool { return i >= first && i <= last })
-		a.sharpenTiles(first, last, p.Scale())
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.

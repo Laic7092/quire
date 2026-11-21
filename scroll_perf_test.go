@@ -69,6 +69,11 @@ func benchScrollApp(b testing.TB) *app {
 		covers: map[coverKey]*ui.Bitmap{},
 	}
 	a.syncSettingsFields()
+	b.Cleanup(func() {
+		if a.tileWork != nil {
+			a.tileWork.close()
+		}
+	})
 	pan.Jump = a.gotoLoc
 	pan.Open = func(string) {}
 	pan.Cover = a.coverBitmap
