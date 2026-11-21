@@ -245,6 +245,9 @@ type app struct {
 	// tileWork draws the column's tiles off the frame's thread: the one thing a
 	// scrolling frame cannot afford (see tileworker.go).
 	tileWork *tileWorker
+	// tileImgs are the book's images, kept for the worker's painter: it is made
+	// when the column first scrolls, after the book was opened.
+	tileImgs map[render.ImageID][]byte
 	// tileTop and tileMoving are the column's snapped top edge on the last
 	// frame and whether this one moved it: a tile is rastered smaller while it
 	// moves and again at the screen's ratio once it stops (see tileCanvas).
@@ -1092,14 +1095,21 @@ func (a *app) ensureLayout(w, h float32) {
 			}
 			// Decoding belongs on the UI thread and happens once per build.
 			if rebuilt && a.paint != nil {
+				if a.tileImgs == nil {
+					a.tileImgs = make(map[render.ImageID][]byte)
+				}
 				for id, data := range images {
 					a.paint.SetImage(id, data)
+					// The worker's painter draws the tiles, and is made when the
+					// column first scrolls: one that is there already takes them
+					// now, and one made later takes them as it starts.
+					a.tileImgs[id] = data
 					if a.tileWork != nil {
 						a.tileWork.setImage(id, data)
-						// The tiles drawn before the images came have none.
-						a.dropTiles()
 					}
 				}
+				// The tiles drawn before the images came have none.
+				a.dropTiles()
 			}
 			// The whole book is here: the chapters the preview laid out are part
 			// of it now, at the size every page is numbered for.

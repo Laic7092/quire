@@ -85,6 +85,11 @@ func (a *app) syncTiles(key tileKey) {
 func (a *app) tileWorkerOf() *tileWorker {
 	if a.tileWork == nil && tileBitmaps {
 		a.tileWork = newTileWorker(a.fonts)
+		// The book was opened before this worker existed: its painter draws the
+		// tiles, and a tile with an image in it draws nothing for it.
+		for id, data := range a.tileImgs {
+			a.tileWork.setImage(id, data)
+		}
 	}
 	return a.tileWork
 }
