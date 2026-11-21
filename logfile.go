@@ -39,9 +39,29 @@ func logToFile(path string) func() {
 }
 
 // nextToState is the log's path for a state file: beside it, named after it.
+// On a phone it is in the app's Documents instead: that is the one directory
+// the system will show (with UIFileSharingEnabled), and the state's own
+// directory — under Library — is one nothing can open.
 func nextToState(statePath string) string {
+	if dir := documents(); dir != "" {
+		return filepath.Join(dir, "quire.log")
+	}
 	if statePath == "" {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(statePath), "quire.log")
+}
+
+// documents is the app's Documents directory, when the process is one whose
+// sandbox has it.
+func documents() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	dir := filepath.Join(home, "Documents")
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return dir
 }
