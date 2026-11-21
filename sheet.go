@@ -345,13 +345,16 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 		return
 	}
 	if a.scrolling() {
-		if !built && !a.posedAt.Equal(p.Now()) {
+		if !built {
 			// The column moves on this frame's clock, as it does in the build pass
 			// of a frame that builds; both share the glide's state, so a gesture
 			// that mixes the two does not change its motion. What the frame leaves
 			// to the build is the publishing of the place (stepColumn).
+			//
+			// A frame the engine paints again for its own reasons — the atlas
+			// making room — steps again, and stepColumn's own account of the time
+			// since the last step is what keeps that from moving the column twice.
 			a.stepColumn()
-			a.posedAt = p.Now()
 		}
 		if a.gliding() {
 			p.AnimationFrame()

@@ -281,12 +281,8 @@ type app struct {
 	// and asks for the next one itself, which is the whole of what a moving frame
 	// costs once the view is out of the way.
 	frameBuilt bool
-	// posedAt is the frame whose time the column was last moved for: the engine
-	// paints a frame again when its glyph atlas had to make room, and a step
-	// taken twice would move the column twice. folioAt is when a glide last asked
-	// for the build that keeps the folio on the place the column reached (see
-	// folioEvery).
-	posedAt time.Time
+	// folioAt is when a glide last asked for the build that keeps the folio on
+	// the place the column reached (see folioEvery).
 	folioAt time.Time
 	// jumpLoc is a place to return to after a change of mode: switching between
 	// pages and scrolling keeps the reader where it was, and only the way the
