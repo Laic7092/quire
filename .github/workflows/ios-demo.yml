@@ -1,0 +1,34 @@
+name: Scroll experiment
+
+# 只做一件事：把 demo/ios-scroll 编译成一个未签名的 .ipa，用来在手机上量原生文字
+# 滚动到底有多顺。跟 App 本身没有关系，所以只在它自己变了的时候跑。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "demo/ios-scroll/**"
+      - ".github/workflows/ios-demo.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Unsigned demo IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Report Xcode
+        run: xcodebuild -version
+
+      - name: Build
+        run: bash demo/ios-scroll/build.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scroll-demo-ipa
+          path: demo/ios-scroll/build/*.ipa
+          if-no-files-found: error
