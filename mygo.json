@@ -30,5 +30,11 @@
     "infoPlist": {
       "LSApplicationCategoryType": "public.app-category.books"
     }
+  },
+  "ios": {
+    "infoPlist": {
+      "UIFileSharingEnabled": true,
+      "LSSupportsOpeningDocumentsInPlace": true
+    }
   }
 }

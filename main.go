@@ -1632,6 +1632,12 @@ func main() {
 	}
 	flag.Parse()
 
+	// MyGo writes down the frames that take longer than a refresh when this is
+	// set; it reads it when it makes a window, which is after this. It is on
+	// always: a phone has no console and no way to pass a variable, and the
+	// log it writes is a file that can be taken off the device (logfile.go).
+	_ = os.Setenv("MYGO_FRAME_STATS", "8")
+
 	// A second launch — a file double-clicked in the Finder while the reader
 	// runs — hands its files to the instance that is already up.
 	if !mygo.App.RequestSingleInstanceLock() {
