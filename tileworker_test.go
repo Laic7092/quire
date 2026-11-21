@@ -52,3 +52,27 @@ func TestTilesComeFromTheWorker(t *testing.T) {
 		}
 	}
 }
+
+// Each tile comes back with pixels of its own: the offscreen window hands out
+// its buffer, which the next tile drawn over it rewrites.
+func TestTilesComeBackWithPixelsOfTheirOwn(t *testing.T) {
+	a := benchScrollApp(t)
+	w := newTileWorker(a.fonts)
+	if w == nil {
+		t.Skip("no faces to draw with")
+	}
+	defer w.close()
+	tile := a.layout.Tile(0)
+	if tile == nil {
+		t.Skip("no tile")
+	}
+	job := tileJob{index: 0, tile: tile, w: tile.Size().Width, h: tile.Height(), strip: a.tileStrip(), ratio: 1, fade: 1, pal: a.palette()}
+	first := w.draw(job)
+	second := w.draw(job)
+	if first == nil || second == nil {
+		t.Fatal("no pixels")
+	}
+	if &first.Pix[0] == &second.Pix[0] {
+		t.Fatal("both tiles came back in the same buffer")
+	}
+}

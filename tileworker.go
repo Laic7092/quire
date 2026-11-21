@@ -33,6 +33,13 @@ type tileWorker struct {
 	// done holds the tiles drawn, for the frame to take.
 	done   chan tileDone
 	closed chan struct{}
+	// tt is the offscreen window the tiles are drawn in, made once and reused:
+	// a runtime of its own costs the font and layout state of one, which is not
+	// something to build a screenful of times.
+	tt  *ui.Tester
+	tw  int
+	th  int
+	job tileJob
 	// imgs carries the book's images to this painter: they are decoded on the
 	// frame's thread and drawn here, and a tile cannot show one it was not
 	// given.
@@ -198,7 +205,7 @@ func (w *tileWorker) run() {
 	}
 }
 
-// draw renders one tile into pixels of its own: an offscreen runtime the size of
+// draw renders one tile into pixels of its own: the offscreen window, sized for
 // the tile's bitmap, and the column's display list drawn into it at the ratio
 // the screen shows.
 func (w *tileWorker) draw(job tileJob) *image.RGBA {
@@ -210,19 +217,43 @@ func (w *tileWorker) draw(job tileJob) *image.RGBA {
 	if cw <= 0 || ch <= 0 {
 		return nil
 	}
+	if w.tt == nil || w.tw != cw || w.th != ch {
+		w.tw, w.th = cw, ch
+		w.tt = ui.NewTester(w.frame, cw, ch)
+	}
 	w.up.SetPalette(job.pal)
 	w.up.SetFade(job.fade)
-	tt := ui.NewTester(func(c *ui.Context) {
-		// The strips above and below the tile's own rows are transparent, and
-		// must come back transparent: an opaque sheet there would cover the
-		// neighbouring tile's first or last line, which hangs into them.
-		c.Root().Background(ui.Transparent)
-		ui.Box(c).Size(float32(cw), float32(ch)).Draw(func(p *ui.Painter, r ui.Rect) {
-			box := ui.Rect{X: 0, Y: job.strip, W: job.w, H: job.h}
-			view := ui.Rect{X: 0, Y: 0, W: job.w, H: job.h + 2*job.strip}
-			w.up.DrawTileZoom(p, job.tile, box, view, job.ratio)
-		})
-	}, cw, ch)
-	tt.Frame()
-	return tt.Image()
+	w.job = job
+	w.tt.Frame()
+	return copyOf(w.tt.Image())
+}
+
+// frame draws the tile of the job at hand in the offscreen window.
+func (w *tileWorker) frame(c *ui.Context) {
+	job := w.job
+	// The strips above and below the tile's own rows are transparent, and must
+	// come back transparent: an opaque sheet there would cover the neighbouring
+	// tile's first or last line, which hangs into them.
+	c.Root().Background(ui.Transparent)
+	ui.Box(c).Size(float32(w.tw), float32(w.th)).Draw(func(p *ui.Painter, r ui.Rect) {
+		box := ui.Rect{X: 0, Y: job.strip, W: job.w, H: job.h}
+		view := ui.Rect{X: 0, Y: 0, W: job.w, H: job.h + 2*job.strip}
+		w.up.DrawTileZoom(p, job.tile, box, view, job.ratio)
+	})
+}
+
+// copyOf is pixels of their own: the offscreen window hands out its own buffer,
+// which the next tile drawn over it, or the window's rendering of it, rewrites
+// under whoever kept the last one.
+func copyOf(src *image.RGBA) *image.RGBA {
+	if src == nil {
+		return nil
+	}
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := 0; y < b.Dy(); y++ {
+		from := y * src.Stride
+		copy(dst.Pix[y*dst.Stride:(y+1)*dst.Stride], src.Pix[from:from+b.Dx()*4])
+	}
+	return dst
 }
