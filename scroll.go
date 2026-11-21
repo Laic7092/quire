@@ -858,6 +858,12 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// the frame before it.
 	key := a.tileKeyNow(column, p.Scale())
 	a.syncTiles(key)
+	a.syncGPU(key)
+	// The panel says which way the tiles it counts were drawn.
+	a.hud.tileWay = "cpu"
+	if a.tileGPU() {
+		a.hud.tileWay = "gpu"
+	}
 	a.pumpTiles()
 	p.Clip(view, 0, func() {
 		for i := last; i >= first; i-- {
@@ -866,6 +872,11 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 				continue
 			}
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
+			// The renderer draws the tile in a canvas of its own, and the frame
+			// shows it at once: the GPU path, when the setting asks for it.
+			if a.drawTileCanvas(p, key, i, tile, box, view, p.Scale()) {
+				continue
+			}
 			if drawTileBitmap(p, a.tiles.entry[i], box, p.Scale()) {
 				continue
 			}
@@ -887,6 +898,7 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			a.askTile(key, next, tile, p.Scale())
 		}
 		a.trimTiles(func(i int) bool { return i >= first && i <= last })
+		a.trimGPU(func(i int) bool { return i >= first && i <= last })
 	}
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.

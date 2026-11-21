@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"math"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/laic7092/layx/render"
@@ -180,10 +181,14 @@ func (w *tileWorker) run() {
 		case job = <-w.jobs:
 		}
 		w.drainImages()
+		start := time.Now()
 		pix := w.draw(job)
 		if pix == nil {
 			continue
 		}
+		// What the software rasterer costs this machine, for the log: it never
+		// shows in a frame's own numbers, and it is what the GPU path is for.
+		perf.event("a tile was drawn in %s off the frame", perfSpan(time.Since(start)))
 		select {
 		case <-w.closed:
 			return

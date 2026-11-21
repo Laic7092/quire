@@ -270,6 +270,20 @@ func (a *app) settingsDetail(c *ui.Context) {
 		o.Scroll = on
 		a.setOptions(o)
 	})
+	// Where the column's tiles are rastered: the window's worker in software, or
+	// a canvas the renderer draws on the GPU. A tile holds what it was drawn
+	// with, so the ones on screen are dropped and drawn again by the other way.
+	draw := 0
+	if a.tileGPU() {
+		draw = 1
+	}
+	a.choose(c, locales.SettingsTiles(), draw, func(choice int) {
+		way := tileDrawWorker
+		if choice == 1 {
+			way = tileDrawGPU
+		}
+		a.setTileDraw(way)
+	}, locales.SettingsTilesWorker(), locales.SettingsTilesGPU())
 	if ui.Button(c, locales.SettingsReset()).Clicked() {
 		a.setOptions(reader.DefaultOptions())
 		a.syncSettingsFields()

@@ -146,25 +146,157 @@ func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
 	})
 }
 
+// tileGPU says whether the tiles are rastered by the renderer, in canvases of
+// the GPU's, instead of by the window's worker.
+func (a *app) tileGPU() bool {
+	if !tileBitmaps || a.desk == nil {
+		return false
+	}
+	return a.desk.tileDraw == tileDrawGPU
+}
+
+// tileDrawGPU and tileDrawWorker name the two ways a tile is rastered, as the
+// setting and the state file spell them.
+const (
+	tileDrawGPU    = "gpu"
+	tileDrawWorker = "worker"
+)
+
+// gpuTile is one tile drawn in a canvas of the renderer's: the display list was
+// submitted into it once, and the frame shows it as one quad from then on.
+type gpuTile struct {
+	cv    *ui.Canvas
+	above float32
+	at    int64
+}
+
+// gpuTiles holds the tiles the renderer drew, and the canvases they are in. A
+// canvas is drawn anew by Canvas.Draw, which keeps its texture: the pool is
+// canvases whose tile was dropped, never a canvas the cache still shows.
+type gpuTiles struct {
+	key   tileKey
+	entry map[int]*gpuTile
+	pool  []*ui.Canvas
+	w, h  int
+	tick  int64
+}
+
+// syncGPU forgets every canvas when what the tiles were drawn for changed.
+func (a *app) syncGPU(key tileKey) {
+	if !a.tileGPU() {
+		return
+	}
+	if a.gpu.entry == nil || key != a.gpu.key {
+		a.dropGPU()
+		a.gpu = gpuTiles{key: key, entry: make(map[int]*gpuTile)}
+	}
+	a.gpu.tick++
+}
+
+// dropGPU returns every tile's canvas to the pool, for a new key to draw into.
+func (a *app) dropGPU() {
+	for _, e := range a.gpu.entry {
+		if e != nil && e.cv != nil {
+			a.gpu.pool = append(a.gpu.pool, e.cv)
+		}
+	}
+	a.gpu.entry = nil
+}
+
+// canvasOf returns a canvas of w×h pixels to draw a tile into: one the pool
+// keeps of that size, or a new one. A canvas of another size is not resized:
+// its texture is a tile's, and the next tile of this column has the same size.
+func (a *app) canvasOf(w, h int) *ui.Canvas {
+	if a.gpu.w == w && a.gpu.h == h && len(a.gpu.pool) > 0 {
+		cv := a.gpu.pool[len(a.gpu.pool)-1]
+		a.gpu.pool = a.gpu.pool[:len(a.gpu.pool)-1]
+		return cv
+	}
+	a.gpu.w, a.gpu.h = w, h
+	return ui.NewCanvas(w, h)
+}
+
+// drawTileCanvas draws one tile with the renderer and shows it in the same
+// frame: a canvas drawn in a frame is rendered before that frame, so what
+// Canvas.Draw submits is on screen now rather than next frame, and the pixels
+// never come back to the CPU. False when the GPU path is not the one in use.
+func (a *app) drawTileCanvas(p *ui.Painter, key tileKey, i int, tile *render.Tile, box, view ui.Rect, scale float32) bool {
+	if !a.tileGPU() || p == nil || tile == nil || !(scale > 0) || key != a.gpu.key {
+		return false
+	}
+	if e := a.gpu.entry[i]; e != nil {
+		return drawTilePixels(p, e.cv.Bitmap(), e.above, box, scale)
+	}
+	strip := a.tileStrip()
+	tw, th := tile.Size().Width, tile.Height()
+	w := int(math.Ceil(float64(tw) * float64(scale)))
+	h := int(math.Ceil(float64(th+2*strip) * float64(scale)))
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	cv := a.canvasOf(w, h)
+	// The canvas is the tile and its two strips, in its own pixels: the tile
+	// sits below the strip above it, as the worker's offscreen frame does.
+	in := ui.Rect{X: 0, Y: strip, W: tw, H: th}
+	of := ui.Rect{W: tw, H: th + 2*strip}
+	perf.tileAt(i, func() {
+		cv.Draw(p, func(cp *ui.Painter) { a.paint.DrawTileZoom(cp, tile, in, of, scale) })
+	})
+	a.gpu.entry[i] = &gpuTile{cv: cv, above: strip, at: a.gpu.tick}
+	return drawTilePixels(p, cv.Bitmap(), strip, box, scale)
+}
+
+// trimGPU keeps the canvases of the tiles near the viewport: one the column has
+// scrolled away from goes back to the pool, its texture to be drawn into anew.
+func (a *app) trimGPU(visible func(int) bool) {
+	const keep = 8
+	for len(a.gpu.entry) > keep {
+		oldest, index := int64(math.MaxInt64), -1
+		for i, e := range a.gpu.entry {
+			if visible != nil && visible(i) {
+				continue
+			}
+			if e.at < oldest {
+				oldest, index = e.at, i
+			}
+		}
+		if index < 0 {
+			return
+		}
+		if cv := a.gpu.entry[index].cv; cv != nil {
+			a.gpu.pool = append(a.gpu.pool, cv)
+		}
+		delete(a.gpu.entry, index)
+	}
+}
+
 // drawTileBitmap puts one tile's pixels on the screen, one to one with the
 // device pixels, wherever the column has carried it. The position is snapped to
 // the device grid for the same reason the column is: a bitmap drawn between two
 // pixels would be resampled, and every glyph in it blurred by the motion.
 func drawTileBitmap(p *ui.Painter, e *tileImage, box ui.Rect, scale float32) bool {
-	if p == nil || e == nil || e.bmp == nil || !(scale > 0) {
+	if e == nil {
 		return false
 	}
-	w, h := e.bmp.Size()
+	return drawTilePixels(p, e.bmp, e.above, box, scale)
+}
+
+// drawTilePixels is a tile's bitmap on the screen, snapped to the device grid.
+func drawTilePixels(p *ui.Painter, bmp *ui.Bitmap, above float32, box ui.Rect, scale float32) bool {
+	if p == nil || bmp == nil || !(scale > 0) {
+		return false
+	}
+	w, h := bmp.Size()
 	if w <= 0 || h <= 0 {
 		return false
 	}
 	dst := ui.Rect{
 		X: roundDevices(box.X, scale),
-		Y: roundDevices(box.Y-e.above, scale),
+		Y: roundDevices(box.Y-above, scale),
 		W: float32(w) / scale,
 		H: float32(h) / scale,
 	}
-	p.Image(e.bmp, dst, ui.FillBox)
+	p.Image(bmp, dst, ui.FillBox)
 	return true
 }
 
@@ -194,4 +326,5 @@ func (a *app) trimTiles(visible func(int) bool) {
 // dropTiles forgets every tile, as another layout, paper or book does.
 func (a *app) dropTiles() {
 	a.tiles = tileCache{}
+	a.dropGPU()
 }

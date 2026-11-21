@@ -291,6 +291,18 @@
   "@settingsTurnFade": {
     "description": "One page dissolves into the next without moving."
   },
+  "settingsTiles": "Tile Drawing",
+  "@settingsTiles": {
+    "description": "The detailed display settings: where the scrolling column's tiles are rastered."
+  },
+  "settingsTilesWorker": "Worker",
+  "@settingsTilesWorker": {
+    "description": "The window's own thread draws the tiles offscreen, in software."
+  },
+  "settingsTilesGPU": "GPU",
+  "@settingsTilesGPU": {
+    "description": "The renderer draws the tiles into a canvas of its own, on the GPU."
+  },
   "settingsReset": "Reset to Defaults",
   "@settingsReset": {
     "description": "The detailed display settings: the button that restores every choice."

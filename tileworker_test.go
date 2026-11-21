@@ -76,3 +76,45 @@ func TestTilesComeBackWithPixelsOfTheirOwn(t *testing.T) {
 		t.Fatal("both tiles came back in the same buffer")
 	}
 }
+
+// The GPU path draws each tile into a canvas of the renderer's, and the frame
+// after it shows them without replaying a glyph.
+func TestScrollCompositesTilesFromCanvases(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.desk = &desk{tileDraw: tileDrawGPU}
+	a.instant = true
+	if !a.tileGPU() {
+		t.Fatal("the GPU path is not the one in use")
+	}
+	reader.CountGlyphs(true)
+	t.Cleanup(func() { reader.CountGlyphs(false) })
+	tt.Frame()
+	if len(a.gpu.entry) == 0 {
+		t.Fatal("no tile was drawn in a canvas")
+	}
+	a.paint.ResetGlyphStats()
+	tt.Frame()
+	if got := a.paint.GlyphStats().Glyphs; got != 0 {
+		t.Fatalf("the frame replayed %d glyphs over tiles it had", got)
+	}
+}
+
+// The setting switches the way every window draws its tiles, and the tiles
+// drawn the other way go.
+func TestTileDrawSettingSwitchesEveryWindow(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.desk = &desk{tileDraw: tileDrawWorker}
+	a.desk.add(a)
+	a.instant = true
+	tt.Frame()
+	if a.tileGPU() {
+		t.Fatal("the GPU path is on before the setting says so")
+	}
+	a.setTileDraw(tileDrawGPU)
+	if !a.tileGPU() {
+		t.Fatal("the setting did not reach the window")
+	}
+	if a.tiles.entry != nil || a.gpu.entry != nil {
+		t.Fatal("a tile drawn the other way is still there")
+	}
+}

@@ -245,6 +245,9 @@ type app struct {
 	// tileWork draws the column's tiles off the frame's thread: the one thing a
 	// scrolling frame cannot afford (see tileworker.go).
 	tileWork *tileWorker
+	// gpu is the tiles drawn in canvases of the renderer's, used instead of the
+	// worker when the setting says so (see tiles.go).
+	gpu gpuTiles
 	// tileImgs are the book's images, kept for the worker's painter: it is made
 	// when the column first scrolls, after the book was opened.
 	tileImgs map[render.ImageID][]byte
@@ -836,6 +839,25 @@ func (a *app) drainNotices(c *ui.Context) {
 	}
 }
 
+// setTileDraw changes where the scrolling column's tiles are rastered, for every
+// window: the app's setting, as the paper is. What is on screen was drawn the
+// other way, so it goes.
+func (a *app) setTileDraw(way string) {
+	if a.desk == nil || a.desk.tileDraw == way {
+		return
+	}
+	a.desk.tileDraw = way
+	for _, w := range a.desk.wins {
+		w.dropTiles()
+		if w.tileWork != nil {
+			w.tileWork.close()
+			w.tileWork = nil
+		}
+		w.services.Invalidate()
+	}
+	a.savePrefs()
+}
+
 // savePrefs writes the reading settings to the store.
 func (a *app) savePrefs() {
 	if a.st == nil {
@@ -852,6 +874,9 @@ func (a *app) savePrefs() {
 		s.Prefs.Scroll = o.Scroll
 		s.Prefs.Turn = string(o.Turn)
 		s.Prefs.Theme = string(theme)
+		if a.desk != nil {
+			s.Prefs.TileDraw = a.desk.tileDraw
+		}
 	})
 	a.st.SaveSoon(0)
 }
@@ -1730,6 +1755,7 @@ func main() {
 			d.theme = reader.ParseTheme(prefs.Theme)
 			d.themeSys = false
 		}
+		d.tileDraw = prefs.TileDraw
 	}
 	// The reading faces are named here, not read: a parsed system CJK face costs
 	// tens of megabytes, and the shelf alone is set in the window's own Inter.

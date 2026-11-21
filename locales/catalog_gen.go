@@ -858,6 +858,50 @@ func (msgs Messages) SettingsTurnFade() string {
 	return Catalog.Format(msgs.locale, "settingsTurnFade", nil)
 }
 
+// SettingsTiles says "Tile Drawing"
+// in the language the app shows.
+//
+// The detailed display settings: where the scrolling column's tiles are
+// rastered.
+func SettingsTiles() string { return In(i18n.Locale()).SettingsTiles() }
+
+// SettingsTiles says "Tile Drawing"
+// in the language of msgs.
+//
+// The detailed display settings: where the scrolling column's tiles are
+// rastered.
+func (msgs Messages) SettingsTiles() string {
+	return Catalog.Format(msgs.locale, "settingsTiles", nil)
+}
+
+// SettingsTilesWorker says "Worker"
+// in the language the app shows.
+//
+// The window's own thread draws the tiles offscreen, in software.
+func SettingsTilesWorker() string { return In(i18n.Locale()).SettingsTilesWorker() }
+
+// SettingsTilesWorker says "Worker"
+// in the language of msgs.
+//
+// The window's own thread draws the tiles offscreen, in software.
+func (msgs Messages) SettingsTilesWorker() string {
+	return Catalog.Format(msgs.locale, "settingsTilesWorker", nil)
+}
+
+// SettingsTilesGPU says "GPU"
+// in the language the app shows.
+//
+// The renderer draws the tiles into a canvas of its own, on the GPU.
+func SettingsTilesGPU() string { return In(i18n.Locale()).SettingsTilesGPU() }
+
+// SettingsTilesGPU says "GPU"
+// in the language of msgs.
+//
+// The renderer draws the tiles into a canvas of its own, on the GPU.
+func (msgs Messages) SettingsTilesGPU() string {
+	return Catalog.Format(msgs.locale, "settingsTilesGPU", nil)
+}
+
 // SettingsReset says "Reset to Defaults"
 // in the language the app shows.
 //

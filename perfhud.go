@@ -62,6 +62,9 @@ type hud struct {
 	gap   time.Duration // from that frame to this one: the whole frame
 	paint time.Duration // our draw callback's cost, this frame
 	tiles int           // tile canvases the frame composed
+	// tileWay says where they were rastered: "cpu" by the window's worker, "gpu"
+	// by the renderer (see tiles.go).
+	tileWay string
 	built bool          // this frame built the view
 
 	buildAt  time.Time     // when the build pass under way began
@@ -284,7 +287,7 @@ func (h *hud) figures(out []hudLine) []hudLine {
 		missC = warnC
 	}
 	out = row(3, fmt.Sprintf("built %.0f/s  miss %d/s", h.buildRate, h.missRate), missC)
-	out = row(4, fmt.Sprintf("tiles %d  dpr %.2f  %.0fx%.0f", h.tiles, h.scale, h.winW, h.winH), text)
+	out = row(4, fmt.Sprintf("tiles %d %s  dpr %.2f  %.0fx%.0f", h.tiles, h.tileWay, h.scale, h.winW, h.winH), text)
 	out = row(5, fmt.Sprintf("heap %.0f MB  gc %d", h.heap, h.gcs), muted)
 	// The strip the canvas is about to hold, taken now: it moves with the canvas,
 	// not with the frames it is composited in.

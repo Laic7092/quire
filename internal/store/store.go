@@ -129,6 +129,10 @@ type Prefs struct {
 	// Turn is how a page gives way to the next: "slide" or "fade". Empty, as
 	// state files written before the choice existed, means the slide.
 	Turn string `json:"turn"`
+	// TileDraw is where the scrolling column's tiles are rastered: "worker"
+	// (another thread, software) or "gpu" (a canvas the renderer draws).
+	// Empty means the worker.
+	TileDraw string `json:"tileDraw"`
 	// Theme is the paper: "white", "sepia", "gray" or "night", empty while the
 	// reader follows the system's appearance.
 	Theme string `json:"theme"`

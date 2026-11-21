@@ -56,6 +56,9 @@ type desk struct {
 	opts     reader.Options
 	theme    reader.Theme
 	themeSys bool
+	// tileDraw is where the scrolling column's tiles are rastered: "gpu" for a
+	// canvas the renderer draws, anything else for the window's worker.
+	tileDraw string
 	// systemDark is the desktop's appearance as last seen while MyGo followed
 	// it. A focused book window may force the process-wide appearance so its
 	// title buttons match the paper; the library still draws its own chrome on
