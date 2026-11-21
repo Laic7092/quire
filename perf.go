@@ -468,20 +468,20 @@ func (p *perfLog) paintEnd(gs reader.GlyphStats) {
 // tileAt runs the painting of tile i and notes what it took. The slow-frame
 // line keeps these: a tile built on the frame it is first shown is the shape a
 // scroll stutter has, and the index says which one it was.
-func (p *perfLog) tileAt(i int, fn func()) {
+func (p *perfLog) tileBegin(i int) func() {
 	if p == nil {
-		fn()
-		return
+		return nil
 	}
 	start := time.Now()
-	fn()
-	d := time.Since(start)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.tilesN < len(p.tiles) {
-		p.tiles[p.tilesN], p.tileIdx[p.tilesN] = d, i
+	return func() {
+		d := time.Since(start)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.tilesN < len(p.tiles) {
+			p.tiles[p.tilesN], p.tileIdx[p.tilesN] = d, i
+		}
+		p.tilesN++
 	}
-	p.tilesN++
 }
 
 // record notes the time the frame spent writing the reading position down,

@@ -859,10 +859,13 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	key := a.tileKeyNow(column, p.Scale())
 	a.syncTiles(key)
 	a.syncGPU(key)
-	// The panel says which way the tiles it counts were drawn.
-	a.hud.tileWay = "cpu"
-	if a.tileGPU() {
-		a.hud.tileWay = "gpu"
+	gpu, strip := a.tileGPU(), a.tileStrip()
+	if a.hud.on {
+		// The panel says which way the tiles it counts were drawn.
+		a.hud.tileWay = "cpu"
+		if gpu {
+			a.hud.tileWay = "gpu"
+		}
 	}
 	a.pumpTiles()
 	p.Clip(view, 0, func() {
@@ -874,7 +877,7 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
 			// The renderer draws the tile in a canvas of its own, and the frame
 			// shows it at once: the GPU path, when the setting asks for it.
-			if a.drawTileCanvas(p, key, i, tile, box, view, p.Scale()) {
+			if a.drawTileCanvas(p, gpu, key, i, tile, box, view, p.Scale(), strip) {
 				continue
 			}
 			if drawTileBitmap(p, a.tiles.entry[i], box, p.Scale()) {
@@ -883,8 +886,12 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			// Not drawn yet: the frame replays this tile's display list, which
 			// costs it a millisecond, and the worker draws it for the frames
 			// after this one (see tileworker.go).
-			perf.tileAt(i, func() { a.paint.DrawTile(p, tile, box, view) })
-			a.askTile(key, i, tile, p.Scale())
+			end := perf.tileBegin(i)
+			a.paint.DrawTile(p, tile, box, view)
+			if end != nil {
+				end()
+			}
+			a.askTile(key, gpu, i, tile, p.Scale(), strip)
 		}
 	})
 	// The tile the column is heading for is worked on now, so the frame that
@@ -897,14 +904,14 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	}
 	if tile := column.Tile(next); tile != nil {
 		switch {
-		case a.tileGPU():
-			a.askWarm(key, next, tile, p.Scale())
+		case gpu:
+			a.askWarm(key, next, tile, p.Scale(), strip)
 		case a.tiles.entry != nil:
-			a.askTile(key, next, tile, p.Scale())
+			a.askTile(key, gpu, next, tile, p.Scale(), strip)
 		}
 	}
-	a.trimTiles(func(i int) bool { return i >= first && i <= last })
-	a.trimGPU(func(i int) bool { return i >= first && i <= last })
+	a.trimTiles(first, last)
+	a.trimGPU(first, last)
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.
 	if a.marksOn == column {

@@ -128,8 +128,8 @@ func (a *app) pumpTiles() {
 // askTile hands one tile to the worker, unless it is already here or on its way.
 // The renderer's canvases are not the worker's: it draws only when the worker is
 // the way the tiles are rastered.
-func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
-	if !tileBitmaps || a.tileGPU() || tile == nil || !(scale > 0) || key != a.tiles.key {
+func (a *app) askTile(key tileKey, gpu bool, i int, tile *render.Tile, scale float32, strip float32) {
+	if !tileBitmaps || gpu || tile == nil || !(scale > 0) || key != a.tiles.key {
 		return
 	}
 	w := a.tileWorkerOf()
@@ -148,7 +148,7 @@ func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
 	a.tiles.asked[i] = a.tiles.tick
 	w.ask(tileJob{
 		key: key, index: i, tile: tile,
-		w: tile.Size().Width, h: tile.Height(), strip: a.tileStrip(),
+		w: tile.Size().Width, h: tile.Height(), strip: strip,
 		ratio: scale, fade: a.paint.Fade(), pal: a.palette(),
 	})
 }
@@ -157,7 +157,7 @@ func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
 // now, on the worker's thread, for the frame that will bake it. The renderer
 // bakes a tile in the frame that first shows it, so a tile the frame has not
 // reached yet is the one worth warming (see reader.WarmTile).
-func (a *app) askWarm(key tileKey, i int, tile *render.Tile, scale float32) {
+func (a *app) askWarm(key tileKey, i int, tile *render.Tile, scale float32, strip float32) {
 	if !warmTiles || tile == nil || !(scale > 0) || key != a.gpu.key || a.paint == nil {
 		return
 	}
@@ -175,7 +175,7 @@ func (a *app) askWarm(key tileKey, i int, tile *render.Tile, scale float32) {
 	if w == nil {
 		return
 	}
-	w.ask(tileJob{key: key, index: i, warm: true, tile: tile, strip: a.tileStrip(), ratio: scale})
+	w.ask(tileJob{key: key, index: i, warm: true, tile: tile, strip: strip, ratio: scale})
 }
 
 // tileGPU says whether the tiles are rastered by the renderer, in canvases of
@@ -253,14 +253,13 @@ func (a *app) canvasOf(w, h int) *ui.Canvas {
 // frame: a canvas drawn in a frame is rendered before that frame, so what
 // Canvas.Draw submits is on screen now rather than next frame, and the pixels
 // never come back to the CPU. False when the GPU path is not the one in use.
-func (a *app) drawTileCanvas(p *ui.Painter, key tileKey, i int, tile *render.Tile, box, view ui.Rect, scale float32) bool {
-	if !a.tileGPU() || p == nil || tile == nil || !(scale > 0) || key != a.gpu.key {
+func (a *app) drawTileCanvas(p *ui.Painter, gpu bool, key tileKey, i int, tile *render.Tile, box, view ui.Rect, scale float32, strip float32) bool {
+	if !gpu || p == nil || tile == nil || !(scale > 0) || key != a.gpu.key {
 		return false
 	}
 	if e := a.gpu.entry[i]; e != nil {
 		return drawTilePixels(p, e.cv.Bitmap(), e.above, box, scale)
 	}
-	strip := a.tileStrip()
 	tw, th := tile.Size().Width, tile.Height()
 	w := int(math.Ceil(float64(tw) * float64(scale)))
 	h := int(math.Ceil(float64(th+2*strip) * float64(scale)))
@@ -272,21 +271,23 @@ func (a *app) drawTileCanvas(p *ui.Painter, key tileKey, i int, tile *render.Til
 	// sits below the strip above it, as the worker's offscreen frame does.
 	in := ui.Rect{X: 0, Y: strip, W: tw, H: th}
 	of := ui.Rect{W: tw, H: th + 2*strip}
-	perf.tileAt(i, func() {
-		cv.Draw(p, func(cp *ui.Painter) { a.paint.DrawTileZoom(cp, tile, in, of, scale) })
-	})
+	end := perf.tileBegin(i)
+	cv.Draw(p, func(cp *ui.Painter) { a.paint.DrawTileZoom(cp, tile, in, of, scale) })
+	if end != nil {
+		end()
+	}
 	a.gpu.entry[i] = &gpuTile{cv: cv, above: strip, at: a.gpu.tick}
 	return drawTilePixels(p, cv.Bitmap(), strip, box, scale)
 }
 
 // trimGPU keeps the canvases of the tiles near the viewport: one the column has
 // scrolled away from goes back to the pool, its texture to be drawn into anew.
-func (a *app) trimGPU(visible func(int) bool) {
+func (a *app) trimGPU(first, last int) {
 	const keep = 6
 	for len(a.gpu.entry) > keep {
 		oldest, index := int64(math.MaxInt64), -1
 		for i, e := range a.gpu.entry {
-			if visible != nil && visible(i) {
+			if i >= first && i <= last {
 				continue
 			}
 			if e.at < oldest {
@@ -334,13 +335,13 @@ func drawTilePixels(p *ui.Painter, bmp *ui.Bitmap, above float32, box ui.Rect, s
 }
 
 // trimTiles drops the least recently shown tiles beyond tileBudget, never one
-// the frame is showing. Everything else is a tile the reader is about to come
+// the frame is showing, which are the tiles first to last. Everything else is a tile the reader is about to come
 // back to, or one a glide left behind.
-func (a *app) trimTiles(visible func(int) bool) {
+func (a *app) trimTiles(first, last int) {
 	for len(a.tiles.entry) > 1 && a.tiles.total > tileBudget {
 		oldest, index := int64(math.MaxInt64), -1
 		for i, e := range a.tiles.entry {
-			if visible != nil && visible(i) {
+			if i >= first && i <= last {
 				continue
 			}
 			if e.at < oldest {
