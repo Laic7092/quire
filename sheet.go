@@ -285,14 +285,6 @@ func easeOut(p float32) float32 {
 // frame that lands asks for a build, whose pass writes the place down and draws
 // the folio over it. So the view is built once for a whole gesture instead of
 // once for every frame of it.
-// folioEvery is how long the folio may lag behind the column while a glide
-// runs. The bar under the text is built with the view — the percentage, the
-// chapter, the pill's place — so a glide that only paints would leave it at the
-// place the gesture started from. A build this often keeps it within a blink of
-// the column and still builds one frame in eight, which is what makes a frame of
-// a gesture cost its paint and nothing else.
-const folioEvery = 120 * time.Millisecond
-
 // fitGlyphBudget sizes the glyph atlas for what this window reads in: its type,
 // its ratio and the room a screen of its text takes. A window that never moved
 // nor changed size does the arithmetic once.
@@ -375,20 +367,17 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 			a.stepColumn()
 		}
 		if a.gliding() {
-			// A frame of a scroll costs what a 3x phone's window costs to paint —
-			// around 8 ms of the 8.33 a 120 Hz display gives one — so asking for
-			// the display's rate means slipping a refresh on nearly every frame,
-			// which is read as a stutter. At 60 Hz the same frame has twice the
-			// budget and none of them is late (see scrollFrameRate).
-			p.AnimationFrameRate(scrollFrameRate)
-			if p.Now().Sub(a.folioAt) >= folioEvery {
-				// The folio is part of the view, and the view of a frame that only
-				// paints is the one before it: a build now and then is what keeps the
-				// bar under the text on the place the column has reached, and what
-				// writes the reading position down while the reader is still moving.
-				a.folioAt = p.Now()
-				a.services.Invalidate()
-			}
+			// A frame of a scroll asks for the display's next refresh: what it
+			// draws is a few tiles and no glyph work, so it fits a refresh with
+			// the room a display gives one, and asking for fewer would show the
+			// motion at that rate instead of the display's.
+			//
+			// Nothing is built while the column moves: the folio keeps the place
+			// the gesture started from until it lands, which is the frame below.
+			// A build is the one frame of a gesture that no longer fits — a
+			// screenful of elements laid out again — and one every few frames is
+			// a stutter every few frames.
+			p.AnimationFrame()
 		} else if !built {
 			// The glide landed in a frame that built nothing: ask for the one that
 			// writes the place down, tells the panels where the reader is and draws

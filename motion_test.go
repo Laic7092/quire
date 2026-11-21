@@ -8,16 +8,15 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/laic7092/layx/render"
 	"github.com/laix/quire/internal/reader"
 	"github.com/laix/quire/locales"
-	"github.com/laic7092/layx/render"
 )
 
 // A glide paints the column without building the window: the view is built once
 // for a gesture — on the frame the ask arrived in — and the frames after it only
-// paint, apart from the build every folioEvery that keeps the bar under the text
-// on the place the column has reached. The frame that lands asks for the build
-// that writes the place down and leaves the folio there.
+// paint. The frame that lands asks for the build that writes the place down,
+// tells the panels where the reader is and leaves the folio there.
 func TestGlidePaintsWithoutBuilding(t *testing.T) {
 	builds := 0
 	a, tt := newScrollWindowView(t, func(c *ui.Context, view func(*ui.Context)) {
@@ -25,6 +24,11 @@ func TestGlidePaintsWithoutBuilding(t *testing.T) {
 		view(c)
 	})
 	a.instant = false
+	// The renderer bakes the tiles in the frame that shows them, so nothing of
+	// a glide comes back from a worker to ask for a build: what builds among the
+	// frames of one is the frame that lands in it, and nothing else.
+	a.desk = &desk{tileDraw: tileDrawGPU}
+	a.dropTiles()
 	a.now = tt.Now // the glide is measured on the frames the tester runs
 	tt.Frame()
 	builds = 0
@@ -39,22 +43,15 @@ func TestGlidePaintsWithoutBuilding(t *testing.T) {
 	// it, which starts once the wheel's event has settled.
 
 	// The frames of the glide paint the column and ask for the next one
-	// themselves: what builds among them is the folio's build, one in eight
-	// frames or fewer.
-	frames, after := 0, 0
-	start := time.Now()
+	// themselves: not one of them builds the view.
+	frames, after, lastBuild := 0, 0, -1
 	for i := 0; i < 240 && a.gliding(); i++ {
 		before := builds
 		tt.Advance(17 * time.Millisecond)
 		frames++
 		if builds != before {
 			after += builds - before
-			// Every build of a glide is the folio's, and the folio is built at
-			// most once a folioEvery of the time the glide has run.
-			if limit := int(tt.Now().Sub(start)/folioEvery) + 1; after > limit {
-				t.Fatalf("%d frames of the glide built the window %d times in %s, more than the folio's %d",
-					frames, after, tt.Now().Sub(start), limit)
-			}
+			lastBuild = frames
 		}
 	}
 	if a.gliding() {
@@ -64,8 +61,11 @@ func TestGlidePaintsWithoutBuilding(t *testing.T) {
 	if frames < 3 {
 		t.Errorf("the glide took %d frames", frames)
 	}
-	if after*4 > frames {
-		t.Errorf("%d of %d frames of the glide built the window", after, frames)
+	// The one frame of a glide that builds is the one that lands in it: the
+	// frames that move the column paint and nothing else.
+	if after > 1 || (after == 1 && lastBuild != frames) {
+		t.Errorf("%d of %d frames of the glide built the window, the last at %d, want only the landing",
+			after, frames, lastBuild)
 	}
 	if a.scrollY != a.scrollGoal {
 		t.Errorf("landed at %.2f, want the place it owes, %.2f", a.scrollY, a.scrollGoal)

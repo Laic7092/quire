@@ -797,13 +797,6 @@ func (a *app) scrollProgress() float64 {
 	return float64(clampf(a.scrollY, 0, travel) / travel)
 }
 
-// scrollFrameRate is the rate a moving column asks the display for: 60, because
-// a frame at a phone's device ratio costs about as much as a 120 Hz display
-// gives one, so the display's own rate is a rate the column cannot hold. A
-// steady 60 reads smoother than 90 with a missed refresh in every third frame,
-// and it is one constant to put back.
-const scrollFrameRate = 60
-
 // drawScroll paints the tiles of the scrolling column that the viewport shows.
 // It runs inside the box's Draw callback, so it only replays display lists it
 // already has.
