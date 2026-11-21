@@ -14,6 +14,11 @@ import (
 // column's display lists and submits one quad a glyph.
 var tileBitmaps = os.Getenv("QUIRE_TILE_BITMAPS") != "0"
 
+// warmTiles, cleared by QUIRE_WARM=0, stops the worker from rasterizing the
+// glyphs of the tile the column is heading for (see reader.WarmTile): the frame
+// rasterizes them itself, which is the rollback and the A/B.
+var warmTiles = os.Getenv("QUIRE_WARM") != "0"
+
 // tileCache holds a scrolling column's tiles as pixels, drawn by the window's
 // worker (tileworker.go) and composited here: a frame of a glide submits one
 // quad a visible tile instead of one quad a glyph, and none of them are drawn in
@@ -84,7 +89,7 @@ func (a *app) syncTiles(key tileKey) {
 // window that never scrolls never starts one.
 func (a *app) tileWorkerOf() *tileWorker {
 	if a.tileWork == nil && tileBitmaps {
-		a.tileWork = newTileWorker(a.fonts)
+		a.tileWork = newTileWorker(a.fonts, a.paint)
 		// The book was opened before this worker existed: its painter draws the
 		// tiles, and a tile with an image in it draws nothing for it.
 		for id, data := range a.tileImgs {
@@ -148,6 +153,31 @@ func (a *app) askTile(key tileKey, i int, tile *render.Tile, scale float32) {
 	})
 }
 
+// askWarm hands the worker one tile to warm: the glyphs it draws are rasterized
+// now, on the worker's thread, for the frame that will bake it. The renderer
+// bakes a tile in the frame that first shows it, so a tile the frame has not
+// reached yet is the one worth warming (see reader.WarmTile).
+func (a *app) askWarm(key tileKey, i int, tile *render.Tile, scale float32) {
+	if !warmTiles || tile == nil || !(scale > 0) || key != a.gpu.key || a.paint == nil {
+		return
+	}
+	if a.gpu.entry[i] != nil {
+		return // baked already: its glyphs went through this window's painter
+	}
+	if a.warmAsked == nil {
+		a.warmAsked = make(map[int]int64)
+	}
+	if a.warmAsked[i] == a.gpu.tick {
+		return
+	}
+	a.warmAsked[i] = a.gpu.tick
+	w := a.tileWorkerOf()
+	if w == nil {
+		return
+	}
+	w.ask(tileJob{key: key, index: i, warm: true, tile: tile, strip: a.tileStrip(), ratio: scale})
+}
+
 // tileGPU says whether the tiles are rastered by the renderer, in canvases of
 // the GPU's, instead of by the window's worker.
 func (a *app) tileGPU() bool {
@@ -191,6 +221,7 @@ func (a *app) syncGPU(key tileKey) {
 	if a.gpu.entry == nil || key != a.gpu.key {
 		a.dropGPU()
 		a.gpu = gpuTiles{key: key, entry: make(map[int]*gpuTile)}
+		a.warmAsked = nil
 	}
 	a.gpu.tick++
 }

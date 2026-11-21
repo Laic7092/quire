@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/laix/quire/internal/book"
 	"github.com/laic7092/layx/render"
 	"github.com/laic7092/layx/render/paint"
+	"github.com/laix/quire/internal/book"
 )
 
 // benchScrollColumn builds the sample book as a scrolling column of
@@ -153,9 +153,9 @@ func BenchmarkScrollViewportAtlas(b *testing.B) {
 			}
 			b.Run(name, func(b *testing.B) {
 				l, up, _ := benchScrollColumn(b)
-				old := glyphAtlasMode
-				glyphAtlasMode = mode
-				b.Cleanup(func() { glyphAtlasMode = old })
+				old := glyphAtlasOn.Load()
+				glyphAtlasOn.Store(mode != "0")
+				b.Cleanup(func() { glyphAtlasOn.Store(old) })
 				counter := &countPainter{UIPainter: up}
 				tt := ui.NewTester(func(c *ui.Context) {
 					ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {

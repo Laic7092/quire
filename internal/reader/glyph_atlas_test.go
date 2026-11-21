@@ -64,9 +64,9 @@ func diffFrames(a, b *image.RGBA) glyphDiff {
 // (*UIPainter).atlasWanted).
 func useAtlas(t *testing.T, mode string) {
 	t.Helper()
-	old := glyphAtlasMode
-	glyphAtlasMode = mode
-	t.Cleanup(func() { glyphAtlasMode = old })
+	old := glyphAtlasOn.Load()
+	glyphAtlasOn.Store(mode != "0")
+	t.Cleanup(func() { glyphAtlasOn.Store(old) })
 }
 
 // usePlainCoverage turns off what the atlas does to a glyph's coverage beyond
@@ -100,13 +100,13 @@ func TestGlyphAtlasMatchesOutlines(t *testing.T) {
 	const scrollY float32 = 4000
 	for _, scale := range []float32{1, 2} {
 		for _, fade := range []float32{1, 0.5} {
-			glyphAtlasMode = "0"
+			glyphAtlasOn.Store(false)
 			up.SetFade(fade)
 			want := paintViewport(l, up, scale, scrollY)
-			glyphAtlasMode = "1"
+			glyphAtlasOn.Store(true)
 			got := paintViewport(l, up, scale, scrollY)
 			up.SetFade(1)
-			glyphAtlasMode = ""
+			glyphAtlasOn.Store(true)
 
 			d := diffFrames(want, got)
 			t.Logf("scale=%g fade=%g: max=%d mean=%.3f >8=%.3f%% >32=%.3f%%",
@@ -207,11 +207,11 @@ func TestGlyphAtlasByRenderer(t *testing.T) {
 	if !up.atlasWanted() {
 		t.Error("a frame does not draw from the atlas by default")
 	}
-	glyphAtlasMode = "1"
+	glyphAtlasOn.Store(true)
 	if !up.atlasWanted() {
 		t.Error("LAYX_GLYPH_ATLAS=1 did not turn the atlas on")
 	}
-	glyphAtlasMode = "0"
+	glyphAtlasOn.Store(false)
 	if up.atlasWanted() {
 		t.Error("LAYX_GLYPH_ATLAS=0 did not turn the atlas off")
 	}
@@ -225,8 +225,8 @@ func TestGlyphAtlasByRenderer(t *testing.T) {
 func TestGlyphAtlasScrolling(t *testing.T) {
 	l, up, _ := benchScrollColumn(t)
 	useAtlas(t, "1")
-	glyphStatsOn = true
-	defer func() { glyphStatsOn = false }()
+	glyphStatsOn.Store(true)
+	defer glyphStatsOn.Store(false)
 	const frames = 20
 	for _, scale := range []float32{1, 2} {
 		scrollY := float32(4000)
@@ -329,7 +329,7 @@ func TestGlyphCoverageIgnoresWhatCameBefore(t *testing.T) {
 	paintViewport(l, up, 1, 0)
 
 	var gf *glyphFace
-	for _, f := range up.faces {
+	for _, f := range up.facesOf().all() {
 		gf = f
 		break
 	}
@@ -376,7 +376,7 @@ func TestGlyphCoverageIgnoresWhatCameBefore(t *testing.T) {
 // whose layer is gone is a slot pointing at a bitmap nothing owns any more.
 func TestGlyphAtlasEvictsTheLeastRecentlyUsed(t *testing.T) {
 	perLayer := glyphLayerW * glyphLayerH * 4
-	want := glyphAtlasBudget / perLayer // the layers the budget holds
+	want := GlyphAtlasBudget() / perLayer // the layers the budget holds
 	if want < 2 {
 		t.Fatalf("the budget holds %d layers, too few to evict", want)
 	}

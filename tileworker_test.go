@@ -13,7 +13,7 @@ import (
 // after composite the pixels — neither waits for the other.
 func TestTilesComeFromTheWorker(t *testing.T) {
 	a := benchScrollApp(t)
-	a.tileWork = newTileWorker(a.fonts)
+	a.tileWork = newTileWorker(a.fonts, a.paint)
 	if a.tileWork == nil {
 		t.Skip("no faces to draw with")
 	}
@@ -57,7 +57,7 @@ func TestTilesComeFromTheWorker(t *testing.T) {
 // its buffer, which the next tile drawn over it rewrites.
 func TestTilesComeBackWithPixelsOfTheirOwn(t *testing.T) {
 	a := benchScrollApp(t)
-	w := newTileWorker(a.fonts)
+	w := newTileWorker(a.fonts, a.paint)
 	if w == nil {
 		t.Skip("no faces to draw with")
 	}
@@ -119,10 +119,11 @@ func TestTileDrawSettingSwitchesEveryWindow(t *testing.T) {
 	}
 }
 
-// The GPU path never starts the worker: a tile drawn into a canvas is drawn
-// once, and the worker's software raster of it would be a screenful of
-// allocations the frame has to collect later.
-func TestTheGPUpathStartsNoWorker(t *testing.T) {
+// The GPU path draws a tile into a canvas and warms it: the worker walks the
+// tiles the column is heading for for their glyphs, and never rasterizes one
+// into pixels — a screenful of allocations the frame has to collect later, for
+// a tile the renderer draws once anyway.
+func TestTheGPUpathWarmsAndDrawsNoTile(t *testing.T) {
 	a, tt := newScrollWindow(t)
 	// The window was drawn before the setting existed, as a window that opened
 	// before one was picked is: whatever it started goes, and the frames after
@@ -134,17 +135,22 @@ func TestTheGPUpathStartsNoWorker(t *testing.T) {
 	a.desk = &desk{tileDraw: tileDrawGPU}
 	a.instant = true
 	a.dropTiles()
+	reader.CountGlyphs(true)
+	t.Cleanup(func() { reader.CountGlyphs(false) })
 	tt.Frame()
 	a.scrollTo(a.tileH * 2)
 	tt.Frame()
 	tt.Frame()
-	if a.tileWork != nil {
-		t.Fatal("the worker was started while the renderer draws the tiles")
-	}
 	if len(a.tiles.entry) != 0 {
 		t.Fatalf("%d tiles were rastered by a worker that is not the way in use", len(a.tiles.entry))
 	}
 	if len(a.gpu.entry) == 0 {
 		t.Fatal("no tile was drawn in a canvas")
+	}
+	if a.tileWork == nil || a.tileWork.up == nil {
+		t.Skip("no faces to warm with")
+	}
+	if a.tileWork.up.Covers() == 0 {
+		t.Fatal("the worker warmed no glyph, so the frame still rasterizes them")
 	}
 }

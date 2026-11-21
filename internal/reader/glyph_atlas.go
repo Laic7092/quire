@@ -4,6 +4,7 @@ import (
 	"image"
 	"math"
 	"os"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
 	ot "github.com/go-text/typesetting/font/opentype"
@@ -30,18 +31,28 @@ import (
 //
 // LAYX_GLYPH_ATLAS=0 forces the outlines instead of the atlas, for A/B and
 // rollback; unset or 1, the atlas is used on every path (see
-// (*UIPainter).atlasWanted).
-var glyphAtlasMode = os.Getenv("LAYX_GLYPH_ATLAS")
+// (*UIPainter).atlasWanted). The worker reads it while a test or the app
+// changes it, so it is atomic.
+var glyphAtlasOn = func() *atomic.Bool {
+	on := &atomic.Bool{}
+	on.Store(os.Getenv("LAYX_GLYPH_ATLAS") != "0")
+	return on
+}()
 
 // glyphStatsOn, set by LAYX_GLYPH_STATS=1, counts what the painter does with
 // glyphs, so a test, a benchmark or the app's performance log can say where a
-// frame went.
-var glyphStatsOn = os.Getenv("LAYX_GLYPH_STATS") != ""
+// frame went. It is atomic: the worker counts while the app or a test turns the
+// counters on.
+var glyphStatsOn = func() *atomic.Bool {
+	on := &atomic.Bool{}
+	on.Store(os.Getenv("LAYX_GLYPH_STATS") != "")
+	return on
+}()
 
 // CountGlyphs turns the glyph counters on or off. The performance log turns
 // them on for a session: an upload of an atlas layer is what a real machine
 // notices and a headless benchmark does not.
-func CountGlyphs(on bool) { glyphStatsOn = on }
+func CountGlyphs(on bool) { glyphStatsOn.Store(on) }
 
 const (
 	// glyphLayerW and glyphLayerH size one atlas layer. A layer is a ui.Bitmap
@@ -68,8 +79,13 @@ const (
 
 // glyphAtlasBudget is how much memory the layers may take before the least
 // recently used one goes. It is a screen's worth of the window in front (see
-// SetGlyphAtlasBudget).
-var glyphAtlasBudget = glyphAtlasFloor
+// SetGlyphAtlasBudget). It is atomic because the frame fits it to the window
+// while the worker reads it.
+var glyphAtlasBudget = func() *atomic.Int64 {
+	b := &atomic.Int64{}
+	b.Store(glyphAtlasFloor)
+	return b
+}()
 
 // GlyphBudgetFor is the atlas a window of this size reads in: the glyphs a
 // screen of its text can show, at the size and ratio they are drawn at, times a
@@ -105,18 +121,23 @@ func SetGlyphAtlasBudget(n int) {
 	if n > glyphAtlasCeiling {
 		n = glyphAtlasCeiling
 	}
-	glyphAtlasBudget = n
+	glyphAtlasBudget.Store(int64(n))
 }
 
 // GlyphAtlasBudget is what the layers may hold now, for a reader that measures
 // the room a screen took.
-func GlyphAtlasBudget() int { return glyphAtlasBudget }
+func GlyphAtlasBudget() int { return int(glyphAtlasBudget.Load()) }
 
 // glyphAtlas is the glyphs the painter has rasterized, packed into layers.
-// It belongs to one UIPainter and is used on the UI thread only.
+// It belongs to one UIPainter and is used on the UI thread only; the coverage
+// it packs comes from the cache the window's painters share, which the worker
+// fills on another thread (see glyphcover.go).
 type glyphAtlas struct {
 	layers []*glyphLayer
 	index  map[glyphKey]*glyphSlot
+	// covers is the shared cache of rasterized coverage: this thread's atlas is
+	// a packing of it, cut to the size the glyphs show at this frame's ratio.
+	covers *GlyphCovers
 	bytes  int
 	// raster reuses its path and buffers from one glyph to the next.
 	raster  raster.Coverage
@@ -173,10 +194,11 @@ type glyphLayer struct {
 func (u *UIPainter) atlas() *glyphAtlas {
 	if u.glyphs == nil {
 		u.glyphs = &glyphAtlas{index: make(map[glyphKey]*glyphSlot)}
-		if glyphStatsOn {
+		if glyphStatsOn.Load() {
 			u.glyphs.stats = &u.stats
 		}
 	}
+	u.glyphs.covers = u.coversOf()
 	return u.glyphs
 }
 
@@ -203,7 +225,7 @@ func (u *UIPainter) atlas() *glyphAtlas {
 // LAYX_GLYPH_ATLAS=0 draws the outlines, which is the rollback and the A/B: it
 // is the path the atlas has to keep matching (glyph_atlas_test.go).
 func (u *UIPainter) atlasWanted() bool {
-	return glyphAtlasMode != "0"
+	return glyphAtlasOn.Load()
 }
 
 // GlyphStats is what the painter did with glyphs since the last
@@ -217,8 +239,12 @@ type GlyphStats struct {
 	Rasters      int
 	// Flattens counts the runs turned into a ui.Path, which the atlas path
 	// never does: it is the work the atlas replaced.
-	Flattens  int
-	Slots     int
+	Flattens int
+	Slots    int
+	// CoverHits counts the glyphs the coverage cache the painters share already
+	// held: the worker walked that part of the column first (see WarmTile), and
+	// what the frame did with the glyph was copy it.
+	CoverHits int
 	Layers    int
 	Bytes     int
 	Uploads   int
@@ -309,10 +335,53 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	if a.stats != nil {
 		a.stats.Lookups++
 	}
-	out := gf.outline(gid)
-	if out == nil || len(out.segs) == 0 {
+	cv := a.cover(gf, gid, key, size, dpr, px, py, upem, tone, bold)
+	if cv == nil || cv.w <= 0 {
 		a.index[key] = nil // a blank: no ink to draw, at any phase
 		return nil, ix, iy
+	}
+	layer, x, y := a.room(cv.w, cv.h)
+	if layer == nil {
+		a.index[key] = nil
+		return nil, ix, iy
+	}
+	a.copyCover(layer, x, y, cv)
+	slot := &glyphSlot{layer: layer, x: x, y: y, w: cv.w, h: cv.h, kx: cv.kx, ky: cv.ky}
+	a.index[key] = slot
+	layer.keys = append(layer.keys, key)
+	layer.dirty = true
+	a.touch(layer)
+	a.evict()
+	return slot, ix, iy
+}
+
+// cover returns the rasterized coverage of one glyph: the one the cache the
+// painters share holds, or, when it is not there yet, the one this call
+// rasterizes and keeps there for the other thread (see glyphcover.go). A nil
+// cover means no room was left for the glyph's box.
+func (a *glyphAtlas) cover(gf *glyphFace, gid uint32, key glyphKey, size, dpr float32, px, py int, upem float32, tone *raster.Tone, bold bool) *glyphCover {
+	if a.covers != nil {
+		if cv, ok := a.covers.take(key); ok {
+			if a.stats != nil {
+				a.stats.CoverHits++
+			}
+			return cv
+		}
+	}
+	cv := a.rasterize(gf, gid, size, dpr, px, py, upem, tone, bold)
+	if a.covers != nil {
+		a.covers.put(key, cv)
+	}
+	return cv
+}
+
+// rasterize turns one glyph's outline into coverage at the phase px, py, in a
+// box of its own: the scratch buffer it is drawn in belongs to the glyph after
+// it.
+func (a *glyphAtlas) rasterize(gf *glyphFace, gid uint32, size, dpr float32, px, py int, upem float32, tone *raster.Tone, bold bool) *glyphCover {
+	out := gf.outline(gid)
+	if out == nil || len(out.segs) == 0 {
+		return nil
 	}
 	// The outline in device pixels, from the glyph's origin: y down, as the
 	// screen has it.
@@ -333,37 +402,34 @@ func (a *glyphAtlas) slot(gf *glyphFace, gid uint32, size, dpr float32, gx, gy f
 	bottom := int(math.Ceil(fy+float64(out.maxY)*s+spread)) + 1
 	w, h := right-left, bottom-top
 	if w <= 0 || h <= 0 || w > glyphLayerW || h > glyphLayerH {
-		a.index[key] = nil
-		return nil, ix, iy
+		return nil
 	}
 	// The box above holds the control points' hull, which is wider than the ink
 	// for a curved glyph. Rasterize it, then keep only the pixels the outline
 	// actually reaches: a slot costs its area in the atlas, and every pixel of
 	// it is sampled again every frame it shows.
 	cov := a.renderCoverage(w, h, out, s, fx, fy, left, top, tone, spread)
-	x0, y0, x1, y1, ok := trimCoverage(cov, w, h)
-	if !ok {
-		a.index[key] = nil // nothing of it would show
-		return nil, ix, iy
-	}
-	covW := w
-	w, h = x1-x0, y1-y0
-	layer, x, y := a.room(w, h)
-	if layer == nil {
-		a.index[key] = nil
-		return nil, ix, iy
-	}
-	a.copyCoverage(layer, x, y, cov, covW, x0, y0, w, h)
-	slot := &glyphSlot{layer: layer, x: x, y: y, w: w, h: h, kx: left + x0, ky: top + y0}
-	a.index[key] = slot
-	layer.keys = append(layer.keys, key)
-	layer.dirty = true
-	a.touch(layer)
-	a.evict()
 	if a.stats != nil {
 		a.stats.Rasters++
 	}
-	return slot, ix, iy
+	return coverOf(cov, w, h, left, top)
+}
+
+// coverOf is the coverage a w by h rasterization at (kx, ky) holds, trimmed to
+// the pixels its ink reaches and copied: the buffer it came from holds the
+// glyph after this one.
+func coverOf(cov []uint8, w, h, kx, ky int) *glyphCover {
+	x0, y0, x1, y1, ok := trimCoverage(cov, w, h)
+	if !ok {
+		return &glyphCover{} // a blank, which is an answer worth keeping
+	}
+	cw, ch := x1-x0, y1-y0
+	pix := make([]uint8, cw*ch)
+	for row := 0; row < ch; row++ {
+		src := cov[(y0+row)*w+x0:]
+		copy(pix[row*cw:(row+1)*cw], src[:cw])
+	}
+	return &glyphCover{w: cw, h: ch, kx: kx + x0, ky: ky + y0, pix: pix}
 }
 
 // fakeBoldSpread is how far a synthetic bold grows a glyph, in device pixels.
@@ -492,12 +558,11 @@ func trimCoverage(cov []uint8, w, h int) (x0, y0, x1, y1 int, ok bool) {
 	return x0, y0, x1, y1, x1 > x0
 }
 
-// copyCoverage writes the w by h box of cov, covW bytes to a row, that starts
-// at (sx, sy) into layer at (x, y), as premultiplied white: the colour a run's
-// tint multiplies.
-func (a *glyphAtlas) copyCoverage(layer *glyphLayer, x, y int, cov []uint8, covW, sx, sy, w, h int) {
-	for row := 0; row < h; row++ {
-		src := cov[(sy+row)*covW+sx : (sy+row)*covW+sx+w]
+// copyCover writes a cover's pixels into a layer as premultiplied white: the
+// colour a run's tint multiplies.
+func (a *glyphAtlas) copyCover(layer *glyphLayer, x, y int, cv *glyphCover) {
+	for row := 0; row < cv.h; row++ {
+		src := cv.pix[row*cv.w : (row+1)*cv.w]
 		dst := layer.img.Pix[(y+row)*layer.img.Stride+x*4:]
 		for i, v := range src {
 			dst[4*i+0], dst[4*i+1], dst[4*i+2], dst[4*i+3] = v, v, v, v
@@ -563,7 +628,7 @@ func (a *glyphAtlas) touch(layer *glyphLayer) {
 // never evicts its neighbour, and a frame that needs more than the budget
 // keeps what it drew.
 func (a *glyphAtlas) evict() {
-	for a.bytes > glyphAtlasBudget && len(a.layers) > 1 {
+	for a.bytes > GlyphAtlasBudget() && len(a.layers) > 1 {
 		victim := 0
 		for i, l := range a.layers[:len(a.layers)-1] {
 			if l.last < a.layers[victim].last {

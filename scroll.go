@@ -887,19 +887,24 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			a.askTile(key, i, tile, p.Scale())
 		}
 	})
-	// The tile the column is heading for is rastered now, so the frame that
-	// first shows it is a composite too, rather than the frame that stalls.
-	if a.tiles.entry != nil && !a.tileGPU() {
-		next := last + 1
-		if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
-			next = first - 1
-		}
-		if tile := column.Tile(next); tile != nil {
+	// The tile the column is heading for is worked on now, so the frame that
+	// first shows it is a composite too, rather than the frame that stalls: the
+	// worker draws its pixels, or, on the renderer's path, rasterizes the glyphs
+	// it will need (see reader.WarmTile).
+	next := last + 1
+	if a.flingV < 0 || (a.scrollGoal < a.scrollY) {
+		next = first - 1
+	}
+	if tile := column.Tile(next); tile != nil {
+		switch {
+		case a.tileGPU():
+			a.askWarm(key, next, tile, p.Scale())
+		case a.tiles.entry != nil:
 			a.askTile(key, next, tile, p.Scale())
 		}
-		a.trimTiles(func(i int) bool { return i >= first && i <= last })
-		a.trimGPU(func(i int) bool { return i >= first && i <= last })
 	}
+	a.trimTiles(func(i int) bool { return i >= first && i <= last })
+	a.trimGPU(func(i int) bool { return i >= first && i <= last })
 	// The marks are placed from the same top edge as the tiles, so the veils lie
 	// on the glyphs they belong to in the frame they are drawn.
 	if a.marksOn == column {

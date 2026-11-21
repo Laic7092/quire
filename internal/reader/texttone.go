@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/laic7092/layx/raster"
 	"github.com/laic7092/layx/render/paint"
@@ -98,10 +99,12 @@ func stemDarkening(band uint8) float64 {
 	return 0
 }
 
-// toneCache is the corrections of one painter, keyed by toneKey. A painter is
-// drawn on one goroutine, so no lock: two paths (the screen's atlas and the
-// headless renderer) each keep their own.
+// toneCache is the corrections of one painter, keyed by toneKey. The screen's
+// painter shares its table with the worker's, which rasterizes the column's
+// glyphs on another thread (see ShareGlyphCaches), so every use takes the lock;
+// the headless renderer keeps a table of its own.
 type toneCache struct {
+	mu    sync.Mutex
 	tones map[toneKey]*raster.Tone
 }
 
@@ -114,6 +117,8 @@ func (tc *toneCache) toneFor(c paint.Color, size float32, grown bool) *raster.To
 	if textToneOff || c.A == 0 {
 		return nil
 	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
 	key := toneKey{r: c.R, g: c.G, b: c.B, band: sizeBand(size), grown: grown}
 	if tone, ok := tc.tones[key]; ok {
 		return tone
@@ -141,6 +146,7 @@ func (tc *toneCache) toneFor(c paint.Color, size float32, grown bool) *raster.To
 
 // nearestTone is the correction of the closest ink in the cache to c, by luma,
 // or nil when the cache holds nothing of that band and weight.
+// nearestTone is called with the lock held.
 func (tc *toneCache) nearestTone(c paint.Color, band uint8, grown bool) *raster.Tone {
 	want := inkLuma(c)
 	best, bestGap := (*raster.Tone)(nil), 2.0

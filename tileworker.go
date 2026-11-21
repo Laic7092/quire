@@ -53,10 +53,13 @@ type tileImg struct {
 	data []byte
 }
 
-// tileJob is one tile to draw.
+// tileJob is one tile to draw, or, when warm is set, to warm: the glyphs it
+// draws rasterized into the cache the window's painter shares, and no pixels
+// (see reader.WarmTile).
 type tileJob struct {
 	key   tileKey
 	index int
+	warm  bool
 	tile  *render.Tile
 	// w and h are the tile's own size in DIPs, strip what its bitmap holds
 	// above and below it, ratio the device pixels a DIP is drawn at.
@@ -75,8 +78,10 @@ type tileDone struct {
 }
 
 // newTileWorker starts the worker of one window. A window without faces to read
-// with gets none.
-func newTileWorker(fonts *reader.Fonts) *tileWorker {
+// with gets none. share is the window's own painter, whose faces, ink
+// corrections and rasterized glyphs this one draws from: a glyph the two of
+// them need is parsed, corrected and rasterized once.
+func newTileWorker(fonts *reader.Fonts, share *reader.UIPainter) *tileWorker {
 	if fonts == nil {
 		return nil
 	}
@@ -88,6 +93,7 @@ func newTileWorker(fonts *reader.Fonts) *tileWorker {
 		closed: make(chan struct{}),
 		imgs:   make(chan tileImg, 64),
 	}
+	w.up.ShareGlyphCaches(share)
 	go w.run()
 	return w
 }
@@ -182,6 +188,14 @@ func (w *tileWorker) run() {
 		}
 		w.drainImages()
 		start := time.Now()
+		if job.warm {
+			// The glyphs the tile draws, rasterized where the frame is not: the
+			// frame that bakes it finds them in the shared cache and copies them
+			// (see reader.WarmTile).
+			w.up.WarmTile(job.tile, job.strip, job.ratio)
+			perf.event("a tile was warmed in %s off the frame", perfSpan(time.Since(start)))
+			continue
+		}
 		pix := w.draw(job)
 		if pix == nil {
 			continue

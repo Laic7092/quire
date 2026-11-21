@@ -251,6 +251,9 @@ type app struct {
 	// gpu is the tiles drawn in canvases of the renderer's, used instead of the
 	// worker when the setting says so (see tiles.go).
 	gpu gpuTiles
+	// warmAsked is the frame each tile was last asked to be warmed for, so a
+	// frame does not ask again for one the worker has already walked.
+	warmAsked map[int]int64
 	// tileImgs are the book's images, kept for the worker's painter: it is made
 	// when the column first scrolls, after the book was opened.
 	tileImgs map[render.ImageID][]byte

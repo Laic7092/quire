@@ -112,6 +112,7 @@ type perfLog struct {
 	tilesN      int
 	glyphUp     int // atlas uploads the frame caused
 	glyphRaster int // glyphs it rasterized
+	glyphCover  int // glyphs a warmer had already rasterized
 
 	// One block's worth of frames, summed when it is written.
 	blockAt    time.Time
@@ -125,6 +126,7 @@ type perfLog struct {
 	rasters    int
 	lookups    int
 	hits       int
+	covers     int
 	recordsSum time.Duration
 	cpuSum     time.Duration
 	scenes     map[string]int
@@ -418,8 +420,10 @@ func (p *perfLog) paintEnd(gs reader.GlyphStats) {
 		assist = time.Duration((counters[perfAssist] - p.last[perfAssist]) * float64(time.Second))
 		p.glyphUp = gs.Uploads - p.glyphs.Uploads
 		p.glyphRaster = gs.Rasters - p.glyphs.Rasters
+		p.glyphCover = gs.CoverHits - p.glyphs.CoverHits
 		p.uploads += p.glyphUp
 		p.rasters += p.glyphRaster
+		p.covers += p.glyphCover
 		p.lookups += gs.Lookups - p.glyphs.Lookups
 		p.hits += gs.Hits - p.glyphs.Hits
 	}
@@ -618,8 +622,9 @@ func (p *perfLog) slowLine(now time.Time, gap, cost time.Duration, alloc int64, 
 		}
 		p.line("    tiles   %s ms%s", strings.Join(tiles, " / "), more)
 	}
-	if p.glyphRaster > 0 || p.glyphUp > 0 {
-		p.line("    glyphs  %d rasterized, %d uploads this frame", p.glyphRaster, p.glyphUp)
+	if p.glyphRaster > 0 || p.glyphUp > 0 || p.glyphCover > 0 {
+		p.line("    glyphs  %d rasterized, %d from a warmer, %d uploads this frame",
+			p.glyphRaster, p.glyphCover, p.glyphUp)
 	}
 	if alloc > 0 || assist > 0 {
 		p.line("    memory  %s allocated, %s, %s ms of GC assist",
@@ -660,8 +665,8 @@ func (p *perfLog) summary(now time.Time) {
 		p.line("    gaps    %s   (p50/p95/max)", perfSpread(p.gaps))
 	}
 	if p.lookups > 0 {
-		p.line("    glyphs  %.1f uploads a frame, %d rasterized, %.1f%% came from the atlas",
-			float64(p.uploads)/float64(p.n), p.rasters, 100*float64(p.hits)/float64(p.lookups))
+		p.line("    glyphs  %.1f uploads a frame, %d rasterized, %d from a warmer, %.1f%% came from the atlas",
+			float64(p.uploads)/float64(p.n), p.rasters, p.covers, 100*float64(p.hits)/float64(p.lookups))
 	}
 	p.line("    tiles   %.1f a frame", float64(p.tilesSum)/float64(p.n))
 	if p.cpuSum > 0 {
@@ -718,7 +723,7 @@ func (p *perfLog) restart(now time.Time) {
 	p.blockAt = now
 	p.n = 0
 	p.gaps, p.builds, p.paints, p.costs = p.gaps[:0], p.builds[:0], p.paints[:0], p.costs[:0]
-	p.tilesSum, p.uploads, p.rasters, p.lookups, p.hits = 0, 0, 0, 0, 0
+	p.tilesSum, p.uploads, p.rasters, p.lookups, p.hits, p.covers = 0, 0, 0, 0, 0, 0
 	p.recordsSum, p.allocs, p.cycles, p.assist, p.cpuSum = 0, 0, 0, 0, 0
 	p.scrolls, p.precise, p.scrollDy, p.glides = 0, 0, 0, 0
 	clear(p.scenes)

@@ -3,6 +3,7 @@ package reader
 import (
 	"math"
 	"os"
+	"sync"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/go-text/typesetting/font"
@@ -23,18 +24,29 @@ type UIPainter struct {
 	P *ui.Painter
 
 	// faces are the go-text faces of the fonts the runs name, parsed on first
-	// use: a page that mixes the serif and sans faces draws from both.
-	faces map[*paint.Font]*glyphFace
+	// use: a page that mixes the serif and sans faces draws from both. The
+	// worker's painter shares them (see ShareGlyphCaches), so a face and its
+	// outlines are parsed once for the two of them.
+	faces *faceCache
 	// bitmaps are the images the paginator placed, decoded once per id.
 	bitmaps map[paint.ImageID]*ui.Bitmap
 	// glyphs is the atlas of rasterized glyphs, made on first use: a page's
 	// outlines are turned into pixels once and blitted after that.
 	glyphs *glyphAtlas
 	// tones are the coverage corrections built so far, one per ink and band of
-	// sizes (see texttone.go).
-	tones  toneCache
-	stats  GlyphStats
-	dx, dy float32
+	// sizes (see texttone.go), shared with the worker's painter: a correction is
+	// part of a glyph's key, so two painters correcting one ink apart would
+	// rasterize the same glyph twice.
+	tones *toneCache
+	// covers is the rasterized glyphs this painter and the worker's share: a
+	// glyph one of them rasterized is a copy for the other (see glyphcover.go).
+	covers *GlyphCovers
+	// warming says this painter replays a display list for its glyphs alone,
+	// rasterizing them for the frame that will draw them (see WarmTile): it has
+	// no surface, and nothing it is handed reaches one.
+	warming bool
+	stats   GlyphStats
+	dx, dy  float32
 	// fade multiplies the alpha of everything drawn, so a host can dissolve one
 	// page over another. It is 1 unless SetFade says otherwise.
 	fade float32
@@ -58,9 +70,51 @@ type UIPainter struct {
 	noCull bool
 }
 
+// faceCache is the faces the painter draws from and the outlines it has taken
+// from them, keyed by the font the display list names. Two painters that draw
+// one window's text share one, on two threads.
+type faceCache struct {
+	mu sync.Mutex
+	m  map[*paint.Font]*glyphFace
+}
+
+// of returns the face of f, parsed on first use.
+func (c *faceCache) of(f *paint.Font) *glyphFace {
+	if f == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gf, ok := c.m[f]; ok {
+		return gf
+	}
+	face := faceOf(f.Data, f.Index)
+	if face == nil {
+		return nil
+	}
+	if c.m == nil {
+		c.m = make(map[*paint.Font]*glyphFace)
+	}
+	gf := &glyphFace{face: face, outlines: make(map[uint32]*glyphOutline)}
+	c.m[f] = gf
+	return gf
+}
+
+// all returns the faces parsed so far, for a test that walks them.
+func (c *faceCache) all() []*glyphFace {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*glyphFace, 0, len(c.m))
+	for _, gf := range c.m {
+		out = append(out, gf)
+	}
+	return out
+}
+
 // glyphFace is one parsed face and the outlines it has handed out so far.
 type glyphFace struct {
 	face     *font.Face
+	mu       sync.Mutex
 	outlines map[uint32]*glyphOutline
 }
 
@@ -102,7 +156,8 @@ func NewUIPainter(p *ui.Painter, fonts *Fonts) *UIPainter {
 func NewUIPainterWithPalette(p *ui.Painter, fonts *Fonts, palette Palette) *UIPainter {
 	return &UIPainter{
 		P:       p,
-		faces:   make(map[*paint.Font]*glyphFace),
+		faces:   &faceCache{},
+		tones:   &toneCache{},
 		bitmaps: make(map[paint.ImageID]*ui.Bitmap),
 		fade:    1,
 		palette: palette,
@@ -360,7 +415,7 @@ var textGrid = os.Getenv("LAYX_TEXT_GRID") != "0"
 // typesetter grid-fits away already, and neither is visible in a still page; the
 // seam is.
 func (u *UIPainter) baseline(y float32) float32 {
-	if u.P == nil || !textGrid {
+	if !textGrid || (u.P == nil && !u.warming) {
 		return y
 	}
 	return gridBaseline(u.dy, y, u.scale())
@@ -508,7 +563,7 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 	if !u.noCull && (base+run.Size < vis.Y || base-run.Size > vis.Y+vis.H) {
 		return
 	}
-	if glyphStatsOn {
+	if glyphStatsOn.Load() {
 		u.stats.Runs++
 		u.stats.Glyphs += len(run.Glyphs)
 	}
@@ -516,7 +571,7 @@ func (u *UIPainter) DrawGlyphs(run paint.GlyphRun) {
 		u.drawGlyphsAtlas(run, gf, upem)
 		return
 	}
-	if glyphStatsOn {
+	if glyphStatsOn.Load() {
 		u.stats.Flattens++
 	}
 	scale := run.Size / upem
@@ -616,19 +671,45 @@ func (u *UIPainter) ResetGlyphStats() {
 
 // glyphFace parses the face a run names, once per font.
 func (u *UIPainter) glyphFace(f *paint.Font) *glyphFace {
-	if gf, ok := u.faces[f]; ok {
-		return gf
-	}
-	face := faceOf(f.Data, f.Index)
-	if face == nil {
+	if u == nil {
 		return nil
 	}
-	gf := &glyphFace{face: face, outlines: make(map[uint32]*glyphOutline)}
-	u.faces[f] = gf
-	return gf
+	return u.facesOf().of(f)
+}
+
+// facesOf returns the face cache, made on first use.
+func (u *UIPainter) facesOf() *faceCache {
+	if u.faces == nil {
+		u.faces = &faceCache{}
+	}
+	return u.faces
+}
+
+// tonesOf returns the ink corrections, made on first use.
+func (u *UIPainter) tonesOf() *toneCache {
+	if u.tones == nil {
+		u.tones = &toneCache{}
+	}
+	return u.tones
+}
+
+// ShareGlyphCaches makes this painter draw from another's faces, ink
+// corrections and rasterized glyphs. The worker's painter shares the frame's,
+// so a glyph the frame is about to draw is already rasterized when the worker
+// walked that part of the column first, and a glyph the two of them need is
+// parsed and corrected once.
+func (u *UIPainter) ShareGlyphCaches(with *UIPainter) {
+	if u == nil || with == nil || u == with {
+		return
+	}
+	u.faces = with.facesOf()
+	u.tones = with.tonesOf()
+	u.covers = with.coversOf()
 }
 
 func (gf *glyphFace) outline(gid uint32) *glyphOutline {
+	gf.mu.Lock()
+	defer gf.mu.Unlock()
 	if out, ok := gf.outlines[gid]; ok {
 		return out
 	}
