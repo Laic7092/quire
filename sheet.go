@@ -357,7 +357,12 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 			a.stepColumn()
 		}
 		if a.gliding() {
-			p.AnimationFrame()
+			// A frame of a scroll costs what a 3x phone's window costs to paint —
+			// around 8 ms of the 8.33 a 120 Hz display gives one — so asking for
+			// the display's rate means slipping a refresh on nearly every frame,
+			// which is read as a stutter. At 60 Hz the same frame has twice the
+			// budget and none of them is late (see scrollFrameRate).
+			p.AnimationFrameRate(scrollFrameRate)
 			if p.Now().Sub(a.folioAt) >= folioEvery {
 				// The folio is part of the view, and the view of a frame that only
 				// paints is the one before it: a build now and then is what keeps the
