@@ -248,17 +248,6 @@ type app struct {
 	// tileImgs are the book's images, kept for the worker's painter: it is made
 	// when the column first scrolls, after the book was opened.
 	tileImgs map[render.ImageID][]byte
-	// tileTop and tileMoving are the column's snapped top edge on the last
-	// frame and whether this one moved it: a tile is rastered smaller while it
-	// moves and again at the screen's ratio once it stops (see tileCanvas).
-	tileTop    float32
-	tileTopSet bool
-	// tileStill is when the column last moved: a tile is rastered smaller
-	// until the column has been still for tileStillDelay, so the tail of a
-	// glide, which moves less than a pixel a frame, does not turn sharpening
-	// on and off between frames.
-	tileStill  time.Time
-	tileMoving bool
 	// hud is the performance monitor at the window's right edge, off unless the
 	// reader asked for it (see perfhud.go).
 	hud hud
