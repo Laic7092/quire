@@ -562,7 +562,7 @@ func TestFlingCarriesTheFingerSpeed(t *testing.T) {
 	at = at.Add(100 * time.Millisecond)
 	a.stepColumn()
 	tau := float32(flingTau.Seconds())
-	want := 1000 * tau * (1 - float32(math.Exp(-0.1/0.4)))
+	want := 1000 * tau * (1 - float32(math.Exp(-0.1/float64(tau))))
 	if got := a.scrollY - 500; math.Abs(float64(got-want)) > 0.5 {
 		t.Errorf("the first frame moved %.2f DIPs, want %.2f", got, want)
 	}

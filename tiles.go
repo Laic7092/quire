@@ -253,12 +253,12 @@ func (a *app) canvasOf(w, h int) *ui.Canvas {
 // frame: a canvas drawn in a frame is rendered before that frame, so what
 // Canvas.Draw submits is on screen now rather than next frame, and the pixels
 // never come back to the CPU. False when the GPU path is not the one in use.
-func (a *app) drawTileCanvas(p *ui.Painter, gpu bool, key tileKey, i int, tile *render.Tile, box, view ui.Rect, scale float32, strip float32) bool {
+func (a *app) drawTileCanvas(p *ui.Painter, gpu bool, snap bool, key tileKey, i int, tile *render.Tile, box, view ui.Rect, scale float32, strip float32) bool {
 	if !gpu || p == nil || tile == nil || !(scale > 0) || key != a.gpu.key {
 		return false
 	}
 	if e := a.gpu.entry[i]; e != nil {
-		return drawTilePixels(p, e.cv.Bitmap(), e.above, box, scale)
+		return drawTilePixels(p, e.cv.Bitmap(), e.above, box, scale, snap)
 	}
 	tw, th := tile.Size().Width, tile.Height()
 	w := int(math.Ceil(float64(tw) * float64(scale)))
@@ -277,7 +277,7 @@ func (a *app) drawTileCanvas(p *ui.Painter, gpu bool, key tileKey, i int, tile *
 		end()
 	}
 	a.gpu.entry[i] = &gpuTile{cv: cv, above: strip, at: a.gpu.tick}
-	return drawTilePixels(p, cv.Bitmap(), strip, box, scale)
+	return drawTilePixels(p, cv.Bitmap(), strip, box, scale, snap)
 }
 
 // trimGPU keeps the canvases of the tiles near the viewport: one the column has
@@ -308,15 +308,16 @@ func (a *app) trimGPU(first, last int) {
 // device pixels, wherever the column has carried it. The position is snapped to
 // the device grid for the same reason the column is: a bitmap drawn between two
 // pixels would be resampled, and every glyph in it blurred by the motion.
-func drawTileBitmap(p *ui.Painter, e *tileImage, box ui.Rect, scale float32) bool {
+func drawTileBitmap(p *ui.Painter, e *tileImage, box ui.Rect, scale float32, snap bool) bool {
 	if e == nil {
 		return false
 	}
-	return drawTilePixels(p, e.bmp, e.above, box, scale)
+	return drawTilePixels(p, e.bmp, e.above, box, scale, snap)
 }
 
-// drawTilePixels is a tile's bitmap on the screen, snapped to the device grid.
-func drawTilePixels(p *ui.Painter, bmp *ui.Bitmap, above float32, box ui.Rect, scale float32) bool {
+// drawTilePixels is a tile's bitmap on the screen: on the device grid while the
+// column stands, and at the place it has reached while it moves (see drawScroll).
+func drawTilePixels(p *ui.Painter, bmp *ui.Bitmap, above float32, box ui.Rect, scale float32, snap bool) bool {
 	if p == nil || bmp == nil || !(scale > 0) {
 		return false
 	}
@@ -324,9 +325,10 @@ func drawTilePixels(p *ui.Painter, bmp *ui.Bitmap, above float32, box ui.Rect, s
 	if w <= 0 || h <= 0 {
 		return false
 	}
+	x, y := tilePlace(box.X, box.Y-above, scale, snap)
 	dst := ui.Rect{
-		X: roundDevices(box.X, scale),
-		Y: roundDevices(box.Y-above, scale),
+		X: x,
+		Y: y,
 		W: float32(w) / scale,
 		H: float32(h) / scale,
 	}
@@ -361,4 +363,13 @@ func (a *app) trimTiles(first, last int) {
 func (a *app) dropTiles() {
 	a.tiles = tileCache{}
 	a.dropGPU()
+}
+
+// tilePlace is where a tile's bitmap goes on the screen: on the device grid
+// while the column stands, and at the place it has reached while it moves.
+func tilePlace(x, y, scale float32, snap bool) (float32, float32) {
+	if !snap {
+		return x, y
+	}
+	return roundDevices(x, scale), roundDevices(y, scale)
 }

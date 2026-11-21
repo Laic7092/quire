@@ -883,3 +883,21 @@ func absInt(v int) int {
 	}
 	return v
 }
+
+// The column stands on the grid when it has not moved since the frame before,
+// and moves between pixels when it has (see drawScroll).
+func TestTheColumnStandsOnlyBetweenMoves(t *testing.T) {
+	a := &app{}
+	if a.columnStands(10) {
+		t.Fatal("the first frame of a window stands on the grid: it has no frame before it")
+	}
+	if !a.columnStands(10) {
+		t.Fatal("a column at the place it was drawn at does not stand")
+	}
+	if a.columnStands(10.5) {
+		t.Fatal("a column that moved stands on the grid, so it does not move between pixels")
+	}
+	if !a.columnStands(10.5) {
+		t.Fatal("a column that stopped does not stand")
+	}
+}

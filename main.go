@@ -265,6 +265,12 @@ type app struct {
 	// the same picture as the place it stands at (see (*app).landed).
 	viewTop  float32
 	devScale float32
+	// drawnY is the place the column was drawn at on the last frame, and
+	// drawnSet whether there was one: a column that has not moved since stands
+	// on the device grid, one that is moving stands between its pixels (see
+	// drawScroll).
+	drawnY   float32
+	drawnSet bool
 	// scrollVel is how fast the column is moving, in DIPs a second: a glide comes
 	// up to the rate its debt implies over scrollRamp, and a frame moves what
 	// that speed covers (see (*app).step).

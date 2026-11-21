@@ -76,8 +76,13 @@ const scrollStarved = 100 * time.Millisecond
 // lift that is a flick at all, and flingMax a ceiling no hand reaches, which
 // only keeps a jumpy event's speed from sending the column to the end of the
 // book.
+//
+// flingTau is the one number here taken from the platform rather than felt out:
+// a scroll view on the system's own reader decays by UIScrollViewDecelerationRate
+// Normal, 0.998 of its speed a millisecond, which is an exponential that halves
+// in 346 ms and is exp(-1) at 499.5 — a tau of half a second.
 const (
-	flingTau   = 400 * time.Millisecond
+	flingTau   = 500 * time.Millisecond
 	flingStart = 120 // DIPs a second
 	flingMin   = 60  // DIPs a second
 	flingMax   = 6000
@@ -822,7 +827,17 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	// tops are whole pixels apart (layoutSheet), so they only share one phase if
 	// the edge they hang from does.
 	y = clampf(y, 0, max(column.ContentHeight()-view.H, 0))
-	top := snapDevices(view.Y-y, p.Scale())
+	// The grid is where the column rests, not where it travels. A tile drawn
+	// between two pixels is resampled, which is what a scrolling view on the
+	// system does while its text moves, and nobody reads a line in the middle of
+	// a drag; a column held to whole pixels instead steps two of them on one
+	// frame and one on the next, and at the speed of a slow drag that is the
+	// stutter a reader sees. So it stands on the grid and moves off it.
+	standing := a.columnStands(y)
+	top := view.Y - y
+	if standing {
+		top = snapDevices(top, p.Scale())
+	}
 	// Where the column is drawn, and at what ratio, is what says whether a glide
 	// has anything left to show (see landed). The viewport itself does not move,
 	// so this is a property of the window and of the screen.
@@ -870,10 +885,10 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 			box := ui.Rect{X: view.X, Y: top + tile.Top(), W: view.W, H: tile.Height()}
 			// The renderer draws the tile in a canvas of its own, and the frame
 			// shows it at once: the GPU path, when the setting asks for it.
-			if a.drawTileCanvas(p, gpu, key, i, tile, box, view, p.Scale(), strip) {
+			if a.drawTileCanvas(p, gpu, standing, key, i, tile, box, view, p.Scale(), strip) {
 				continue
 			}
-			if drawTileBitmap(p, a.tiles.entry[i], box, p.Scale()) {
+			if drawTileBitmap(p, a.tiles.entry[i], box, p.Scale(), standing) {
 				continue
 			}
 			// Not drawn yet: the frame replays this tile's display list, which
@@ -1051,4 +1066,14 @@ func resumeHow(how string) string {
 		return locales.HowProgress()
 	}
 	return how
+}
+
+// columnStands reports whether the column is drawn where it stands on the
+// device grid: the place it is at this frame is the one it was drawn at on the
+// frame before this one. It keeps that place for the next frame, so it is asked
+// once a frame.
+func (a *app) columnStands(y float32) bool {
+	stands := a.drawnSet && y == a.drawnY
+	a.drawnY, a.drawnSet = y, true
+	return stands
 }
