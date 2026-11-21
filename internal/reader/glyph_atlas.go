@@ -48,16 +48,69 @@ const (
 	// and the unit the engine uploads when it changes, so it also sets what a
 	// frame that adds glyphs costs to upload: 1024×512 pixels of RGBA is 2 MB.
 	glyphLayerW, glyphLayerH = 1024, 512
-	// glyphAtlasBudget is how much memory the layers may take before the least
-	// recently used one goes. A glyph costs four bytes a pixel here, where the
-	// engine's own mask atlas spends one, so this holds about three thousand
-	// glyphs of a 17px book face at DPR 2.
-	glyphAtlasBudget = 12 << 20
+	// glyphAtlasFloor is the least the layers may take before the least recently
+	// used one goes, whatever the window: a phone's screen is small, and a budget
+	// of a screen's worth of text is not worth the arithmetic of evicting below
+	// it. The budget itself follows the window (see GlyphBudgetFor).
+	glyphAtlasFloor = 12 << 20
+	// glyphAtlasCeiling keeps a large screen from asking for memory nothing uses:
+	// a 4K window at DPR 3 would take every layer it asked for.
+	glyphAtlasCeiling = 64 << 20
+	// glyphScreens is how many screens of a column's text the atlas keeps: the
+	// column draws its tiles in the order they are read, so what is behind the
+	// viewport comes back, and a glyph evicted is one rastered again.
+	glyphScreens = 4
 	// glyphPhases is how many places on the device grid a glyph's origin is
 	// rasterized at, per axis: quarters of a pixel, which is the precision the
 	// mask path snapped a glyph's outline to as well.
 	glyphPhases = 4
 )
+
+// glyphAtlasBudget is how much memory the layers may take before the least
+// recently used one goes. It is a screen's worth of the window in front (see
+// SetGlyphAtlasBudget).
+var glyphAtlasBudget = glyphAtlasFloor
+
+// GlyphBudgetFor is the atlas a window of this size reads in: the glyphs a
+// screen of its text can show, at the size and ratio they are drawn at, times a
+// few screens. Characters repeat — a book's page holds far fewer distinct ones
+// than it holds — so this errs large, which is what a budget wants.
+func GlyphBudgetFor(fontSize, lineHeight, width, height, scale float32) int {
+	if fontSize <= 0 || width <= 0 || height <= 0 || scale <= 0 {
+		return glyphAtlasFloor
+	}
+	if lineHeight < 1 {
+		lineHeight = 1.18
+	}
+	// A screen of the column: characters a line, lines a screen.
+	glyphs := float64(width/fontSize) * float64(height/(fontSize*lineHeight))
+	// A glyph's ink in the atlas: its em square less the side bearings it does
+	// not ink, and four bytes a pixel.
+	em := float64(fontSize * scale)
+	bytes := glyphs * em * em * 0.6 * 4 * glyphScreens
+	if bytes < float64(glyphAtlasFloor) {
+		return glyphAtlasFloor
+	}
+	if bytes > float64(glyphAtlasCeiling) {
+		return glyphAtlasCeiling
+	}
+	return int(bytes)
+}
+
+// SetGlyphAtlasBudget makes the layers hold a window's worth of its text.
+func SetGlyphAtlasBudget(n int) {
+	if n < glyphAtlasFloor {
+		n = glyphAtlasFloor
+	}
+	if n > glyphAtlasCeiling {
+		n = glyphAtlasCeiling
+	}
+	glyphAtlasBudget = n
+}
+
+// GlyphAtlasBudget is what the layers may hold now, for a reader that measures
+// the room a screen took.
+func GlyphAtlasBudget() int { return glyphAtlasBudget }
 
 // glyphAtlas is the glyphs the painter has rasterized, packed into layers.
 // It belongs to one UIPainter and is used on the UI thread only.

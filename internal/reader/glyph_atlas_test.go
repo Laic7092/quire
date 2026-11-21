@@ -473,3 +473,50 @@ func TestGlyphAtlasCountsBlankHits(t *testing.T) {
 		t.Errorf("hit rate %.3f, want %.3f", got, 2.0/3)
 	}
 }
+
+// The atlas a window needs follows its text: a screen of the type at the ratio
+// it is drawn, a few screens deep, and never below the floor nor above the
+// ceiling.
+func TestGlyphBudgetFollowsTheWindow(t *testing.T) {
+	desk := GlyphBudgetFor(17, 1.18, 620, 700, 3)
+	if desk < 24<<20 || desk > 40<<20 {
+		t.Errorf("a desktop column asks for %.1f MB", float64(desk)/(1<<20))
+	}
+	phone := GlyphBudgetFor(17, 1.18, 390, 800, 3)
+	if phone >= desk || phone < glyphAtlasFloor {
+		t.Errorf("a phone asks for %.1f MB, a desktop %.1f MB",
+			float64(phone)/(1<<20), float64(desk)/(1<<20))
+	}
+	if small := GlyphBudgetFor(17, 1.18, 390, 800, 2); small >= phone {
+		t.Errorf("DPR 2 asks for %.1f MB, DPR 3 for %.1f MB",
+			float64(small)/(1<<20), float64(phone)/(1<<20))
+	}
+	if big := GlyphBudgetFor(17, 1.18, 3840, 2000, 3); big != glyphAtlasCeiling {
+		t.Errorf("a 4K screen asks for %.1f MB, over the ceiling", float64(big)/(1<<20))
+	}
+	if tiny := GlyphBudgetFor(17, 1.18, 10, 10, 1); tiny != glyphAtlasFloor {
+		t.Errorf("a window of nothing asks for %d bytes", tiny)
+	}
+	// A window of no size is one the arithmetic cannot answer for.
+	if none := GlyphBudgetFor(0, 0, 0, 0, 0); none != glyphAtlasFloor {
+		t.Errorf("a window of no size asks for %d bytes", none)
+	}
+}
+
+// The budget the layers are given is clamped, and it is what the atlas holds.
+func TestSetGlyphAtlasBudgetClamps(t *testing.T) {
+	old := GlyphAtlasBudget()
+	t.Cleanup(func() { SetGlyphAtlasBudget(old) })
+	SetGlyphAtlasBudget(1)
+	if got := GlyphAtlasBudget(); got != glyphAtlasFloor {
+		t.Errorf("a budget of one byte became %d, not the floor", got)
+	}
+	SetGlyphAtlasBudget(1 << 40)
+	if got := GlyphAtlasBudget(); got != glyphAtlasCeiling {
+		t.Errorf("a budget of a terabyte became %d, not the ceiling", got)
+	}
+	SetGlyphAtlasBudget(20 << 20)
+	if got := GlyphAtlasBudget(); got != 20<<20 {
+		t.Errorf("a budget of 20 MB became %d", got)
+	}
+}

@@ -245,6 +245,9 @@ type app struct {
 	// tileWork draws the column's tiles off the frame's thread: the one thing a
 	// scrolling frame cannot afford (see tileworker.go).
 	tileWork *tileWorker
+	// atlasKey is the window size, type and ratio the glyph atlas' budget was
+	// last fitted to, so a frame only does the arithmetic when one moves.
+	atlasKey [5]float32
 	// gpu is the tiles drawn in canvases of the renderer's, used instead of the
 	// worker when the setting says so (see tiles.go).
 	gpu gpuTiles

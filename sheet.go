@@ -293,6 +293,21 @@ func easeOut(p float32) float32 {
 // a gesture cost its paint and nothing else.
 const folioEvery = 120 * time.Millisecond
 
+// fitGlyphBudget sizes the glyph atlas for what this window reads in: its type,
+// its ratio and the room a screen of its text takes. A window that never moved
+// nor changed size does the arithmetic once.
+func (a *app) fitGlyphBudget(p *ui.Painter, r ui.Rect) {
+	if p == nil || r.W <= 0 || r.H <= 0 {
+		return
+	}
+	key := [5]float32{a.opts.FontSize, a.opts.LineHeight, r.W, r.H, p.Scale()}
+	if key == a.atlasKey {
+		return
+	}
+	a.atlasKey = key
+	reader.SetGlyphAtlasBudget(reader.GlyphBudgetFor(key[0], key[1], key[2], key[3], key[4]))
+}
+
 func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	if p == nil || r.W <= 0 || r.H <= 0 {
 		return
@@ -303,6 +318,9 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	// neither steps twice nor counts twice.
 	built := a.frameBuilt
 	a.frameBuilt = false
+	// The glyph atlas holds a screen's worth of the window in front, so the
+	// screen does not scroll past its own characters and raster them again.
+	a.fitGlyphBudget(p, r)
 	if a.hud.on {
 		// The monitor measures the frame around this callback: what the reader
 		// painted and whether the frame built the view at all (see perfhud.go).
