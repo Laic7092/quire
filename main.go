@@ -1648,6 +1648,10 @@ func main() {
 			log.Println(err)
 		}
 	}
+	// What the process logs goes beside the state, so a phone's frames can be
+	// read at all: a phone has no console, and MyGo's own frame statistics
+	// (MYGO_FRAME_STATS) are written as log lines (see logfile.go).
+	defer logToFile(nextToState(statePath))()
 	var st *store.Store
 	recovered := ""
 	if statePath != "" {
