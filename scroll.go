@@ -716,7 +716,10 @@ func (a *app) scrollAhead() {
 	}
 	first := int(a.scrollY / a.tileH)
 	last := int((a.scrollY + a.scrollViewport()) / a.tileH)
-	a.layout.Tiles(first-1, last+2)
+	// Laying a tile out is a pass over a screenful of text, and the frames of a
+	// scroll are not where that belongs: the range goes to the CPU lane of the
+	// window and is shaped off the frame thread (see work.go).
+	a.warmTiles(a.layout, first-1, last+2)
 }
 
 // afterScroll publishes the new place to the panels and the store. The panels
