@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# 同一个分支上又一次 push 时，前一次还没跑完的就取消：省一台 macOS runner，
+# 也省得同时排两条队。
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ipa:
     name: Unsigned IPA
@@ -26,9 +32,13 @@ jobs:
         with:
           path: quire
 
+      # 缓存的是 Go 的模块和编译结果（GOCACHE）。go.sum 在 quire/ 里，
+      # 不写 cache-dependency-path 时 setup-go 在工作区根上找 go.mod，找不到，
+      # 于是每次都冷编译——那一步占整个构建的九成时间。
       - uses: actions/setup-go@v7
         with:
           go-version-file: quire/go.mod
+          cache-dependency-path: quire/go.sum
 
       - name: Report Xcode
         run: xcodebuild -version
