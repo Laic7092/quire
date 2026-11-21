@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,28 @@ func TestPerfHUDThreeTapsOnAPhone(t *testing.T) {
 	tt.ClickAt(195, 420)
 	if a.hud.on {
 		t.Error("three more taps did not close the monitor")
+	}
+}
+
+// The panel's text is built now and then, so the tiles of the frame it names
+// must survive until the next text: counting them for the frames in between
+// leaves the row reading zero.
+func TestPerfHUDSaysTheTilesOfTheFrame(t *testing.T) {
+	a, tt := newScrollWindow(t)
+	a.hud.on = true
+	a.instant = true
+	tt.Frame()
+	tt.Frame()
+	if a.hud.tiles == 0 {
+		t.Fatal("the frame composed no tiles")
+	}
+	var row string
+	for _, l := range a.hud.figures(nil) {
+		if strings.Contains(l.text, "tiles ") {
+			row = l.text
+		}
+	}
+	if row == "" || strings.HasPrefix(row, "tiles 0 ") {
+		t.Fatalf("the panel says %q of %d tiles composed", row, a.hud.tiles)
 	}
 }

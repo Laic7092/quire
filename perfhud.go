@@ -65,7 +65,7 @@ type hud struct {
 	// tileWay says where they were rastered: "cpu" by the window's worker, "gpu"
 	// by the renderer (see tiles.go).
 	tileWay string
-	built bool          // this frame built the view
+	built   bool // this frame built the view
 
 	buildAt  time.Time     // when the build pass under way began
 	buildSum time.Duration // what this frame's build passes cost together
@@ -207,7 +207,9 @@ func (a *app) drawHUD(p *ui.Painter, r ui.Rect) {
 	// What the sheet left is the frame this panel is painted for: the sheet
 	// painted before the panel did.
 	build, paint, built := h.buildSum, h.paint, h.built
-	h.buildSum, h.paint, h.tiles, h.built = 0, 0, 0, false
+	// tiles is not cleared here: the panel's text is built from it now and then,
+	// not every frame, and the next frame reports it again.
+	h.buildSum, h.paint, h.built = 0, 0, false
 	if built {
 		h.builds++
 		h.buildMs = blend(h.buildMs, msf(build))
