@@ -176,6 +176,10 @@ func (w *tileWorker) draw(job tileJob) *image.RGBA {
 	w.up.SetPalette(job.pal)
 	w.up.SetFade(job.fade)
 	tt := ui.NewTester(func(c *ui.Context) {
+		// The strips above and below the tile's own rows are transparent, and
+		// must come back transparent: an opaque sheet there would cover the
+		// neighbouring tile's first or last line, which hangs into them.
+		c.Root().Background(ui.Transparent)
 		ui.Box(c).Size(float32(cw), float32(ch)).Draw(func(p *ui.Painter, r ui.Rect) {
 			box := ui.Rect{X: 0, Y: job.strip, W: job.w, H: job.h}
 			view := ui.Rect{X: 0, Y: 0, W: job.w, H: job.h + 2*job.strip}
