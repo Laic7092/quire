@@ -1486,6 +1486,11 @@ func windowOptions(view func(*ui.Context), stateKey string) mygo.WindowOptions {
 		// white before the view paints (the system palette's two desks).
 		BackgroundColor: "light-dark(#f1f1f1, #4a4a4d)",
 		Content:         ui.View(view),
+		// The window's dev inspector: its Performance tab reads build, layout,
+		// paint and present off every frame, which is the only place a phone's
+		// frames can be read. A development build asks for it; a release one does
+		// not (see mygo's inspector.go and dev.go).
+		Page: mygo.PageOptions{DevTools: devToolsMode()},
 	}
 	if runtime.GOOS == "darwin" {
 		// Centre the traffic lights in the reader's 46 DIP bar rather than in
@@ -1493,6 +1498,18 @@ func windowOptions(view func(*ui.Context), stateKey string) mygo.WindowOptions {
 		o.TrafficLightPosition = &mygo.Point{X: 13, Y: 13}
 	}
 	return o
+}
+
+// devToolsMode is the inspector's setting for a window: on where MyGo sees a
+// development build, and untouched otherwise.
+func devToolsMode() mygo.DevTools {
+	// A build that says it is a release has no inspector unless the reader asks
+	// for one: QUIRE_DEVTOOLS=1 opens it in any build, which is how a release
+	// binary is measured when that is the one that stutters.
+	if mygo.IsDev() || os.Getenv("QUIRE_DEVTOOLS") == "1" {
+		return mygo.DevToolsEnabled
+	}
+	return mygo.DevToolsAuto
 }
 
 // menuAction runs a menu command against the window the reader is looking at
