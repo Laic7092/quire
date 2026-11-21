@@ -159,3 +159,28 @@ func BenchmarkScrollGlideFrame(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkPerfHUDFrame measures what the performance monitor costs a frame:
+// composited every frame from its canvas, its figures painted nine times a
+// second. It must not allocate a frame's worth of garbage — a monitor that
+// triggers the collections it is meant to watch is worse than none.
+func BenchmarkPerfHUDFrame(b *testing.B) {
+	for _, on := range []bool{false, true} {
+		name := "off"
+		if on {
+			name = "on"
+		}
+		b.Run(name, func(b *testing.B) {
+			a := benchScrollApp(b)
+			a.hud.on = on
+			tt := ui.NewTester(a.view, 1180, 800)
+			tt.Frame()
+			tt.Frame()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				tt.Advance(16 * time.Millisecond)
+			}
+		})
+	}
+}

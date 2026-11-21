@@ -193,6 +193,7 @@ func (d *desk) newApp() *app {
 		sources:     d.sources,
 		acq:         d.acq,
 		find:        &sourceSheet{},
+		hud:         hud{on: perfHUDOn},
 	}
 	a.menuCopyOn = d.menuCopyOn
 	// The scope belongs to this window even before it has been made: the first

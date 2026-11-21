@@ -303,6 +303,14 @@ func (a *app) drawSheet(p *ui.Painter, r ui.Rect) {
 	// neither steps twice nor counts twice.
 	built := a.frameBuilt
 	a.frameBuilt = false
+	if a.hud.on {
+		// The monitor measures the frame around this callback: what the reader
+		// painted and whether the frame built the view at all (see perfhud.go).
+		hud := &a.hud
+		hud.tiles = 0
+		start := time.Now()
+		defer func() { hud.frameDone(built, time.Since(start), hud.tiles) }()
+	}
 	if perf != nil {
 		// The frame is measured around this callback, and the log learns how the
 		// frame is drawn once: on a GPU or on MyGo's own rasterizer.

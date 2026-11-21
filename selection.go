@@ -201,6 +201,13 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 			}
 			if a.phone {
 				zone := a.tapZone(a.pressX)
+				if zone == 0 && a.countMidTap() {
+					// Three taps in the middle in quick succession open the
+					// performance monitor: a phone has no key to press, and no
+					// environment variable to set (see perfhud.go).
+					a.togglePerfHUD()
+					return true
+				}
 				switch {
 				case zone == 0:
 					a.toggleChrome()
@@ -232,6 +239,29 @@ func (a *app) handlePageInput(ev ui.InputEvent) bool {
 // reader who lands a thumb and thinks for a moment before dragging gets a
 // selection where they meant to scroll.
 const touchHold = 500 * time.Millisecond
+
+// midTapGap is how soon a tap in the middle of a phone's page has to follow the
+// one before it to be part of the run that opens the performance monitor: slow
+// enough that a reader tapping the page twice to bring its bars back is not
+// counted, quick enough to be one gesture of three.
+const midTapGap = 450 * time.Millisecond
+
+// countMidTap counts a tap in the middle of a phone's page, and reports whether
+// it completes a run of three, which opens the performance monitor. The taps of
+// the run still toggle the bars: three of them leave the bars as they were.
+func (a *app) countMidTap() bool {
+	now := a.clock()
+	if now.Sub(a.midTapAt) > midTapGap {
+		a.midTapRun = 0
+	}
+	a.midTapAt = now
+	a.midTapRun++
+	if a.midTapRun < 3 {
+		return false
+	}
+	a.midTapRun = 0
+	return true
+}
 
 // swipePageMin is how far a finger must go sideways before a paged book reads
 // it as a swipe rather than as a tap.

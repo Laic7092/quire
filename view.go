@@ -129,6 +129,10 @@ func (a *app) view(c *ui.Context) {
 	// callback after that.
 	perf.frameBegin()
 	defer perf.buildDone()
+	// The monitor measures this pass, and answers for the frame afterwards
+	// (see perfhud.go).
+	a.hud.beginBuild()
+	defer a.hud.endBuild()
 	// Menu commands run outside the build and still need the clipboard and a
 	// way to ask for a frame.
 	a.services = c.Services()
@@ -200,6 +204,9 @@ func (a *app) view(c *ui.Context) {
 	// The book-source search sheet and its settings panel float above the page.
 	a.sourceDialog(c, t)
 	a.sourceSheetSettings(c, t, reader.UIColor(a.chrome.Text), reader.UIColor(a.chrome.Muted))
+	// The performance monitor lies over everything, at the right edge of the
+	// window: off until it is asked for (see perfhud.go).
+	a.perfHUD(c)
 }
 
 // openingView is a book window before its book has arrived: the paper it will
@@ -238,6 +245,11 @@ func (a *app) openingView(c *ui.Context, t *ui.Theme) {
 // that could take the same keys, so a focused text field still wins where the
 // framework routes keys to it first.
 func (a *app) keys(c *ui.Context) {
+	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyP) {
+		// The performance monitor: the one switch a phone needs, where no
+		// environment variable reaches (see perfhud.go).
+		a.togglePerfHUD()
+	}
 	if c.Shortcut(ui.Cmd, ui.KeyB) {
 		a.toggleSidebar()
 	}

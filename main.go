@@ -242,6 +242,9 @@ type app struct {
 	// tiles holds the scrolling column's tiles as canvases, drawn once for the
 	// layout, paper and screen scale and composited after that (see tileCache).
 	tiles tileCache
+	// hud is the performance monitor at the window's right edge, off unless the
+	// reader asked for it (see perfhud.go).
+	hud hud
 	// viewTop and devScale are where the column's viewport was drawn and at what
 	// ratio, as of the last frame: a glide is over when the place it owes draws
 	// the same picture as the place it stands at (see (*app).landed).
@@ -329,6 +332,11 @@ type app struct {
 	dragAt     time.Time
 	dragY      float32
 	dragV      float32
+	// midTapAt and midTapRun count taps in the middle of a phone's page: three
+	// of them in quick succession open the performance monitor, which no key
+	// can on a phone (see perfhud.go).
+	midTapAt  time.Time
+	midTapRun int
 	// hapticPlayed is whether this press already played the long-press tick, so
 	// one press plays at most one.
 	hapticPlayed bool

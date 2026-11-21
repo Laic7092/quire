@@ -832,6 +832,10 @@ func (a *app) drawScroll(p *ui.Painter, r ui.Rect) {
 	if n := column.TileCount(); last >= n {
 		last = n - 1
 	}
+	if a.hud.on {
+		// How many tiles this frame had to compose, which the monitor shows.
+		a.hud.tiles = max(last-first+1, 0)
+	}
 	// Paint from the bottom up. Every tile starts with its own opaque sheet, and
 	// a line belongs to the tile that holds its top edge, so a line near a tile
 	// boundary overhangs into the next tile's area: drawing the lower tile
